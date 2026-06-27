@@ -1,0 +1,9 @@
+{
+  "schema": "hasna.resource_ref.v1",
+  "id": "task_868c77df",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "kind": "task",
+  "externalId": "868c77df-df31-4de5-8027-5d9e7474cdd3",
+  "sourcePackage": "@hasna/todos",
+  "tags": ["open-todos", "contracts"]
+}

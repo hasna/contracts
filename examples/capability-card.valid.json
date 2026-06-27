@@ -1,0 +1,12 @@
+{
+  "schema": "hasna.capability_card.v1",
+  "id": "capability_terminal_lane",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "kind": "lane",
+  "name": "terminal",
+  "version": "1",
+  "status": "available",
+  "capabilities": ["command", "background-process", "structured-output"],
+  "limitations": ["requires-shell-access"],
+  "riskLevel": "medium"
+}

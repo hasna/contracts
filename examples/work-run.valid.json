@@ -1,0 +1,31 @@
+{
+  "schema": "hasna.work_run.v1",
+  "id": "work_run_123",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "objective": "Implement @hasna/contracts schemas.",
+  "status": "succeeded",
+  "actor": {
+    "kind": "agent",
+    "id": "actor_codewith_account004",
+    "provider": "codewith",
+    "accountId": "account004"
+  },
+  "traceId": "trace_123",
+  "startedAt": "2026-06-27T10:00:00.000Z",
+  "finishedAt": "2026-06-27T10:05:00.000Z",
+  "resourceRefs": [
+    {
+      "kind": "task",
+      "id": "task_efd590d0",
+      "externalId": "efd590d0-b38d-48f8-a087-162d52f8c39d",
+      "sourcePackage": "@hasna/todos"
+    }
+  ],
+  "evidenceRefs": [
+    {
+      "id": "ev_tests",
+      "kind": "command_output",
+      "uri": "artifact://runs/run_123/tests.txt"
+    }
+  ]
+}

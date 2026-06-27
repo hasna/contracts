@@ -1,0 +1,12 @@
+{
+  "schema": "hasna.validation_plan.v1",
+  "id": "validation_invalid",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "objective": "Invalid actionable check without command or expected.",
+  "checks": [
+    {
+      "id": "typecheck",
+      "kind": "typecheck"
+    }
+  ]
+}

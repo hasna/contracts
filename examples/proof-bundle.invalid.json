@@ -1,0 +1,13 @@
+{
+  "schema": "hasna.proof_bundle.v1",
+  "id": "proof_empty_invalid",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "subject": {
+    "kind": "repo",
+    "id": "open-contracts",
+    "uri": "git+https://github.com/hasna/contracts.git"
+  },
+  "status": "succeeded",
+  "verdict": "passed",
+  "checks": []
+}

@@ -1,0 +1,32 @@
+{
+  "schema": "hasna.context_pack.v1",
+  "id": "ctx_open_contracts_123",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "objective": "Explain how @hasna/contracts schemas are enforced.",
+  "budget": {
+    "maxTokens": 2000
+  },
+  "items": [
+    {
+      "id": "item_readme",
+      "title": "README contract boundary",
+      "summary": "@hasna/contracts owns schemas, not storage.",
+      "source": {
+        "id": "ev_readme",
+        "kind": "file",
+        "uri": "artifact://repo/open-contracts/README.md"
+      }
+    }
+  ],
+  "citations": [
+    {
+      "id": "ev_readme",
+      "kind": "file",
+      "uri": "artifact://repo/open-contracts/README.md"
+    }
+  ],
+  "freshness": "fresh",
+  "permissions": ["read-public"],
+  "redactions": [],
+  "conflicts": []
+}

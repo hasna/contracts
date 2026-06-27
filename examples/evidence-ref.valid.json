@@ -1,0 +1,9 @@
+{
+  "schema": "hasna.evidence_ref.v1",
+  "id": "ev_test_output_456",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "kind": "command_output",
+  "uri": "artifact://runs/run_123/test-output.txt",
+  "summary": "bun test passed",
+  "redaction": "none"
+}

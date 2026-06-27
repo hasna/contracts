@@ -1,0 +1,37 @@
+{
+  "schema": "hasna.proof_bundle.v1",
+  "id": "proof_contracts_release",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "subject": {
+    "kind": "repo",
+    "id": "open-contracts",
+    "uri": "git+https://github.com/hasna/contracts.git"
+  },
+  "validationPlanRef": {
+    "kind": "verification",
+    "id": "validation_contracts_release",
+    "externalId": "validation_contracts_release",
+    "sourcePackage": "@hasna/contracts"
+  },
+  "status": "succeeded",
+  "verdict": "passed",
+  "checks": [
+    {
+      "checkId": "typecheck",
+      "status": "succeeded",
+      "evidenceRefs": [
+        {
+          "id": "ev_typecheck",
+          "kind": "command_output",
+          "uri": "artifact://runs/run_123/typecheck.txt"
+        }
+      ]
+    }
+  ],
+  "verifier": {
+    "kind": "agent",
+    "id": "actor_verifier",
+    "provider": "codewith"
+  },
+  "freshness": "fresh"
+}

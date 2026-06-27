@@ -1,0 +1,32 @@
+{
+  "schema": "hasna.decision_envelope.v1",
+  "id": "decision_model_route_123",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "decisionType": "model_route",
+  "status": "selected",
+  "actor": {
+    "kind": "agent",
+    "id": "actor_codewith_account004",
+    "provider": "codewith",
+    "accountId": "account004"
+  },
+  "traceId": "trace_123",
+  "selected": [
+    {
+      "kind": "model",
+      "id": "model_gpt_5_4",
+      "sourcePackage": "@hasna/models",
+      "externalId": "gpt-5.4"
+    }
+  ],
+  "reason": "Selected high-capability coding model within budget.",
+  "obligations": ["record-cost"],
+  "costEstimate": {
+    "schema": "hasna.cost_estimate.v1",
+    "id": "cost_run_123",
+    "createdAt": "2026-06-27T10:00:00.000Z",
+    "currency": "USD",
+    "amountMicros": 125000,
+    "basis": "estimated"
+  }
+}

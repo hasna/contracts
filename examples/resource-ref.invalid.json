@@ -1,0 +1,6 @@
+{
+  "schema": "hasna.resource_ref.v1",
+  "id": "task_without_locator",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "kind": "task"
+}

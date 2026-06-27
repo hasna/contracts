@@ -1,0 +1,26 @@
+{
+  "schema": "hasna.validation_plan.v1",
+  "id": "validation_contracts_release",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "objective": "Verify @hasna/contracts release readiness.",
+  "subject": {
+    "kind": "repo",
+    "id": "open-contracts",
+    "uri": "git+https://github.com/hasna/contracts.git"
+  },
+  "checks": [
+    {
+      "id": "typecheck",
+      "kind": "typecheck",
+      "command": "bun run typecheck",
+      "required": true
+    },
+    {
+      "id": "tests",
+      "kind": "test",
+      "command": "bun test",
+      "required": true
+    }
+  ],
+  "requiredEvidenceKinds": ["command_output"]
+}

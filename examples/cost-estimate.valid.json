@@ -1,0 +1,22 @@
+{
+  "schema": "hasna.cost_estimate.v1",
+  "id": "cost_run_123",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "currency": "USD",
+  "amountMicros": 125000,
+  "provider": "openai",
+  "model": "gpt-5.4",
+  "accountId": "account004",
+  "promptTokens": 1200,
+  "completionTokens": 800,
+  "totalTokens": 2000,
+  "basis": "estimated",
+  "resourceRefs": [
+    {
+      "kind": "task",
+      "id": "task_868c77df",
+      "externalId": "868c77df-df31-4de5-8027-5d9e7474cdd3",
+      "sourcePackage": "@hasna/todos"
+    }
+  ]
+}

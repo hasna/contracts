@@ -1,0 +1,74 @@
+{
+  "name": "@hasna/contracts",
+  "version": "0.1.0",
+  "description": "Shared schemas and validators for Hasna open-source agent infrastructure contracts.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hasna/contracts.git"
+  },
+  "homepage": "https://github.com/hasna/contracts",
+  "bugs": {
+    "url": "https://github.com/hasna/contracts/issues"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "bin": {
+    "contracts": "dist/cli/index.js",
+    "contracts-cli": "dist/cli/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schemas": {
+      "types": "./dist/schemas.d.ts",
+      "import": "./dist/schemas.js"
+    },
+    "./validators": {
+      "types": "./dist/validators.d.ts",
+      "import": "./dist/validators.js"
+    }
+  },
+  "files": [
+    "dist",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && bun build src/index.ts src/schemas.ts src/validators.ts --outdir dist --target bun && bun build src/cli/index.ts --outdir dist/cli --target bun && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "lint": "tsc --noEmit",
+    "verify:release": "bun run typecheck && bun test && bun run build && bun run smoke:dist && bun run pack:check",
+    "smoke:dist": "bun scripts/smoke-dist.ts",
+    "pack:check": "npm pack --dry-run --json --ignore-scripts",
+    "dev:cli": "bun run src/cli/index.ts",
+    "prepack": "bun run verify:release",
+    "prepublishOnly": "bun run typecheck && bun test"
+  },
+  "keywords": [
+    "contracts",
+    "schemas",
+    "agents",
+    "zod",
+    "json-schema",
+    "hasna"
+  ],
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "dependencies": {
+    "commander": "^13.1.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.4",
+    "typescript": "^5.7.3"
+  }
+}

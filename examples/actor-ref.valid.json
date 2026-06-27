@@ -1,0 +1,11 @@
+{
+  "schema": "hasna.actor_ref.v1",
+  "id": "actor_codewith_account004",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "kind": "agent",
+  "name": "Codewith account004",
+  "provider": "codewith",
+  "accountId": "account004",
+  "machineId": "spark01",
+  "capabilities": ["coding", "review"]
+}

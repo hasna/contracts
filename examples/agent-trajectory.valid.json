@@ -1,0 +1,32 @@
+{
+  "schema": "hasna.agent_trajectory.v1",
+  "id": "trajectory_123",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "actor": {
+    "kind": "agent",
+    "id": "actor_codewith_account004",
+    "provider": "codewith"
+  },
+  "workRunRef": {
+    "kind": "run",
+    "id": "work_run_123",
+    "externalId": "work_run_123",
+    "sourcePackage": "@hasna/contracts"
+  },
+  "events": [
+    {
+      "id": "event_test",
+      "at": "2026-06-27T10:04:00.000Z",
+      "kind": "test",
+      "summary": "bun test passed",
+      "evidenceRefs": [
+        {
+          "id": "ev_tests",
+          "kind": "command_output",
+          "uri": "artifact://runs/run_123/tests.txt"
+        }
+      ]
+    }
+  ],
+  "outcome": "succeeded"
+}
