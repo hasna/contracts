@@ -1,0 +1,12 @@
+{
+  "schema": "hasna.scaffold_install_record.v1",
+  "id": "install_scaffold_open_source_invalid",
+  "createdAt": "2026-06-28T16:56:00.000Z",
+  "scaffoldId": "scaffold-open-source",
+  "target": {
+    "kind": "repo",
+    "id": "open-example",
+    "uri": "git+https://github.com/hasna/open-example.git"
+  },
+  "status": "installed"
+}

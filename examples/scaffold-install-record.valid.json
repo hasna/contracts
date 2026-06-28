@@ -1,0 +1,43 @@
+{
+  "schema": "hasna.scaffold_install_record.v1",
+  "id": "install_scaffold_open_source_001",
+  "createdAt": "2026-06-28T16:56:00.000Z",
+  "scaffoldId": "scaffold-open-source",
+  "scaffoldVersion": "1.0.0",
+  "manifestRef": {
+    "kind": "artifact",
+    "id": "scaffold-open-source-manifest",
+    "uri": "artifact://scaffolds/scaffold-open-source/scaffold.manifest.json"
+  },
+  "target": {
+    "kind": "repo",
+    "id": "open-example",
+    "uri": "git+https://github.com/hasna/open-example.git"
+  },
+  "status": "installed",
+  "installedAt": "2026-06-28T16:56:30.000Z",
+  "installer": {
+    "kind": "agent",
+    "id": "agent_codewith",
+    "name": "Codewith"
+  },
+  "packageManager": "bun",
+  "options": {
+    "includeDashboard": false,
+    "includeMcp": true
+  },
+  "generatedFiles": [
+    {
+      "kind": "file",
+      "id": "package_json",
+      "uri": "repo://open-example/package.json"
+    }
+  ],
+  "evidenceRefs": [
+    {
+      "id": "ev_scaffold_validate",
+      "kind": "command_output",
+      "uri": "artifact://runs/install_scaffold_open_source_001/scaffolds-validate.txt"
+    }
+  ]
+}

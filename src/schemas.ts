@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const CONTRACTS_PACKAGE_NAME = "@hasna/contracts";
-export const CONTRACTS_PACKAGE_VERSION = "0.1.1";
+export const CONTRACTS_PACKAGE_VERSION = "0.2.0";
 
 export const SCHEMA_IDS = {
   actorRef: "hasna.actor_ref.v1",
@@ -14,7 +14,9 @@ export const SCHEMA_IDS = {
   contextPack: "hasna.context_pack.v1",
   agentTrajectory: "hasna.agent_trajectory.v1",
   validationPlan: "hasna.validation_plan.v1",
-  proofBundle: "hasna.proof_bundle.v1"
+  proofBundle: "hasna.proof_bundle.v1",
+  scaffoldManifest: "hasna.scaffold_manifest.v1",
+  scaffoldInstallRecord: "hasna.scaffold_install_record.v1"
 } as const;
 
 export const SchemaIdSchema = z
@@ -418,6 +420,175 @@ export const ValidationPlanSchema = contractBaseSchema(SCHEMA_IDS.validationPlan
   .strict();
 export type ValidationPlan = z.infer<typeof ValidationPlanSchema>;
 
+export const ScaffoldTypeSchema = z.enum([
+  "open_source",
+  "internal_app",
+  "platform",
+  "app",
+  "agent",
+  "content",
+  "overlay",
+  "other"
+]);
+export type ScaffoldType = z.infer<typeof ScaffoldTypeSchema>;
+
+export const ScaffoldStatusSchema = z.enum(["draft", "active", "deprecated", "archived"]);
+export type ScaffoldStatus = z.infer<typeof ScaffoldStatusSchema>;
+
+export const ScaffoldCapabilitySchema = z.enum([
+  "cli",
+  "mcp",
+  "library",
+  "sdk",
+  "rest_api",
+  "dashboard",
+  "database",
+  "auth",
+  "billing",
+  "worker",
+  "daemon",
+  "native",
+  "browser_extension",
+  "ai_provider",
+  "media_pipeline",
+  "data_pipeline",
+  "tests",
+  "ci",
+  "deployment",
+  "docs",
+  "other"
+]);
+export type ScaffoldCapability = z.infer<typeof ScaffoldCapabilitySchema>;
+
+export const ScaffoldEnvVarSchema = z
+  .object({
+    key: z.string().regex(/^[A-Z][A-Z0-9_]*$/),
+    description: z.string().min(1),
+    required: z.boolean().default(false),
+    secret: z.boolean().default(false),
+    group: z.string().min(1).optional(),
+    default: z.string().optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.secret && value.default !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Secret scaffold env vars cannot include defaults",
+        path: ["default"]
+      });
+    }
+  });
+export type ScaffoldEnvVar = z.infer<typeof ScaffoldEnvVarSchema>;
+
+export const ScaffoldScriptSchema = z
+  .object({
+    name: z.string().min(1),
+    command: z.string().min(1),
+    description: z.string().min(1).optional(),
+    required: z.boolean().default(false)
+  })
+  .strict();
+export type ScaffoldScript = z.infer<typeof ScaffoldScriptSchema>;
+
+export const ScaffoldOutputShapeSchema = z
+  .object({
+    packageManager: z.enum(["bun", "npm", "pnpm", "yarn", "cargo", "pip", "other"]).optional(),
+    languages: z.array(z.string().min(1)).default([]),
+    requiredFiles: z.array(z.string().min(1)).default([]),
+    requiredDirectories: z.array(z.string().min(1)).default([]),
+    optionalDirectories: z.array(z.string().min(1)).default([])
+  })
+  .strict();
+export type ScaffoldOutputShape = z.infer<typeof ScaffoldOutputShapeSchema>;
+
+export const ScaffoldManifestSchema = contractBaseSchema(SCHEMA_IDS.scaffoldManifest)
+  .extend({
+    name: z.string().min(1),
+    version: z.string().min(1),
+    summary: z.string().min(1),
+    type: ScaffoldTypeSchema,
+    status: ScaffoldStatusSchema.default("draft"),
+    capabilities: z.array(ScaffoldCapabilitySchema).default([]),
+    techStack: z.array(z.string().min(1)).default([]),
+    tags: TagsSchema,
+    source: ResourcePointerSchema.optional(),
+    output: ScaffoldOutputShapeSchema,
+    env: z.array(ScaffoldEnvVarSchema).default([]),
+    scripts: z.array(ScaffoldScriptSchema).default([]),
+    validationChecks: z.array(ValidationCheckSchema).default([]),
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.source?.uri?.startsWith("file://")) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Public scaffold manifest source refs cannot use local file:// URIs",
+        path: ["source", "uri"]
+      });
+    }
+    if (value.status === "active" && value.validationChecks.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Active scaffold manifests require validation checks",
+        path: ["validationChecks"]
+      });
+    }
+    if (value.status === "active" && value.output.requiredFiles.length === 0 && value.output.requiredDirectories.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Active scaffold manifests require at least one required file or directory",
+        path: ["output"]
+      });
+    }
+  });
+export type ScaffoldManifest = z.infer<typeof ScaffoldManifestSchema>;
+
+export const ScaffoldInstallStatusSchema = z.enum(["installed", "failed", "cancelled", "partial", "unknown"]);
+export type ScaffoldInstallStatus = z.infer<typeof ScaffoldInstallStatusSchema>;
+
+export const ScaffoldInstallRecordSchema = contractBaseSchema(SCHEMA_IDS.scaffoldInstallRecord)
+  .extend({
+    scaffoldId: z.string().min(1),
+    scaffoldVersion: z.string().min(1).optional(),
+    manifestRef: ResourcePointerSchema.optional(),
+    target: ResourcePointerSchema,
+    status: ScaffoldInstallStatusSchema,
+    installedAt: TimestampSchema.optional(),
+    installer: ActorPointerSchema.optional(),
+    packageManager: z.enum(["bun", "npm", "pnpm", "yarn", "cargo", "pip", "other"]).optional(),
+    options: MetadataSchema.optional(),
+    generatedFiles: z.array(ResourcePointerSchema).default([]),
+    evidenceRefs: z.array(EvidencePointerSchema).default([]),
+    proofBundleRefs: z.array(ResourcePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.status === "installed" && !value.installedAt) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Installed scaffold records require installedAt",
+        path: ["installedAt"]
+      });
+    }
+    if (value.status === "installed" && value.generatedFiles.length === 0 && value.evidenceRefs.length === 0 && value.proofBundleRefs.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Installed scaffold records require generated files, evidence, or proof bundle refs",
+        path: ["generatedFiles"]
+      });
+    }
+    if ((value.status === "failed" || value.status === "partial") && value.evidenceRefs.length === 0 && value.proofBundleRefs.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Failed or partial scaffold records require evidence or proof bundle refs",
+        path: ["evidenceRefs"]
+      });
+    }
+  });
+export type ScaffoldInstallRecord = z.infer<typeof ScaffoldInstallRecordSchema>;
+
 export const ProofCheckResultSchema = z
   .object({
     checkId: z.string().min(1),
@@ -586,7 +757,9 @@ export const ContractSchemaRegistry = {
   [SCHEMA_IDS.contextPack]: ContextPackSchema,
   [SCHEMA_IDS.agentTrajectory]: AgentTrajectorySchema,
   [SCHEMA_IDS.validationPlan]: ValidationPlanSchema,
-  [SCHEMA_IDS.proofBundle]: ProofBundleSchema
+  [SCHEMA_IDS.proofBundle]: ProofBundleSchema,
+  [SCHEMA_IDS.scaffoldManifest]: ScaffoldManifestSchema,
+  [SCHEMA_IDS.scaffoldInstallRecord]: ScaffoldInstallRecordSchema
 } as const;
 
 export type KnownSchemaId = keyof typeof ContractSchemaRegistry;
@@ -603,6 +776,8 @@ export type ContractBySchemaId = {
   [SCHEMA_IDS.agentTrajectory]: AgentTrajectory;
   [SCHEMA_IDS.validationPlan]: ValidationPlan;
   [SCHEMA_IDS.proofBundle]: ProofBundle;
+  [SCHEMA_IDS.scaffoldManifest]: ScaffoldManifest;
+  [SCHEMA_IDS.scaffoldInstallRecord]: ScaffoldInstallRecord;
 };
 
 export type ActorRefInput = z.input<typeof ActorRefSchema>;
@@ -616,6 +791,8 @@ export type ContextPackInput = z.input<typeof ContextPackSchema>;
 export type AgentTrajectoryInput = z.input<typeof AgentTrajectorySchema>;
 export type ValidationPlanInput = z.input<typeof ValidationPlanSchema>;
 export type ProofBundleInput = z.input<typeof ProofBundleSchema>;
+export type ScaffoldManifestInput = z.input<typeof ScaffoldManifestSchema>;
+export type ScaffoldInstallRecordInput = z.input<typeof ScaffoldInstallRecordSchema>;
 export type ActorPointerInput = z.input<typeof ActorPointerSchema>;
 export type ResourcePointerInput = z.input<typeof ResourcePointerSchema>;
 export type EvidencePointerInput = z.input<typeof EvidencePointerSchema>;
@@ -632,4 +809,6 @@ export type ContractInputBySchemaId = {
   [SCHEMA_IDS.agentTrajectory]: AgentTrajectoryInput;
   [SCHEMA_IDS.validationPlan]: ValidationPlanInput;
   [SCHEMA_IDS.proofBundle]: ProofBundleInput;
+  [SCHEMA_IDS.scaffoldManifest]: ScaffoldManifestInput;
+  [SCHEMA_IDS.scaffoldInstallRecord]: ScaffoldInstallRecordInput;
 };

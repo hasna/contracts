@@ -7,6 +7,8 @@ const examplesDir = join(import.meta.dir, "..", "examples");
 const expectedInvalidIssuePaths: Record<string, string[]> = {
   "proof-bundle.invalid.json": ["checks", "evidenceRefs", "verifier"],
   "resource-ref.invalid.json": ["uri"],
+  "scaffold-install-record.invalid.json": ["generatedFiles", "installedAt"],
+  "scaffold-manifest.invalid.json": ["output", "validationChecks"],
   "validation-plan.invalid.json": ["checks.0.command"]
 };
 

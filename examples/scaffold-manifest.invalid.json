@@ -1,0 +1,13 @@
+{
+  "schema": "hasna.scaffold_manifest.v1",
+  "id": "scaffold-empty",
+  "createdAt": "2026-06-28T16:55:00.000Z",
+  "name": "scaffold-empty",
+  "version": "1.0.0",
+  "summary": "Invalid active scaffold without output requirements or validation.",
+  "type": "open_source",
+  "status": "active",
+  "output": {
+    "packageManager": "bun"
+  }
+}

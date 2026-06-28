@@ -124,6 +124,12 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
 - `hasna.validation_plan.v1`: deterministic checks a package or agent should run.
 - `hasna.proof_bundle.v1`: reviewable validation result that ties a subject to
   checks, evidence, verifier, and verdict.
+- `hasna.scaffold_manifest.v1`: public, portable description of a scaffold's
+  type, status, capabilities, output shape, env vars, scripts, and validation
+  checks.
+- `hasna.scaffold_install_record.v1`: portable receipt for a scaffold install
+  against a target repo or project, including installer, status, generated
+  resource refs, evidence, and proof refs.
 
 Every top-level contract includes a literal `schema` field. Consumers should
 reject objects whose embedded schema does not match the validator being used.
@@ -176,6 +182,11 @@ helpers. Owning packages still own storage and behavior.
 - `open-evals` owns evaluation execution and scored validation results.
 - `open-economy` owns budget, cost, and usage policy decisions.
 - `open-monitor` owns fleet health classification and alerting.
+- `iapp-scaffolds` owns scaffold templates, registry behavior, install/setup
+  behavior, MCP tools, CLI UX, and private/internal scaffold metadata. It should
+  validate public scaffold manifests and install records with
+  `@hasna/contracts`, but `@hasna/contracts` must not import or execute
+  `iapp-scaffolds`.
 
 ## Downstream Integration Recipes
 
@@ -216,6 +227,10 @@ native domain objects immediately.
 - `open-actions`: keep domain action manifests, but expose shared `ActorRef`,
   `EvidenceRef`, `CapabilityCard`, `DecisionEnvelope`, and `WorkRun` adapter
   views.
+- `iapp-scaffolds`: emit `ScaffoldManifest` documents for bundled templates,
+  write schema-tagged `ScaffoldInstallRecord` receipts for installs, and keep
+  template copying, setup wizards, source paths, and private metadata inside the
+  scaffold package.
 - `open-automations`: keep deterministic app/product automation recipes and
   connector/action recipes. Any agentic task, PR, review, or evaluation flow
   must hand off to OpenLoops rather than creating a second workflow queue.

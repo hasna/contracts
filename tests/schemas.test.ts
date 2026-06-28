@@ -7,6 +7,8 @@ import {
   parseEmbeddedContract,
   parseContract,
   ProofBundleSchema,
+  ScaffoldInstallRecordSchema,
+  ScaffoldManifestSchema,
   SCHEMA_IDS,
   validateEmbeddedContract,
   validateContract,
@@ -294,5 +296,174 @@ describe("core schemas", () => {
     if (!result.success) {
       expect(result.error.issues.some((issue) => issue.path.join(".") === "checks.0.status")).toBe(true);
     }
+  });
+
+  test("validates active scaffold manifests with portable output and checks", () => {
+    const manifest = ScaffoldManifestSchema.parse({
+      schema: SCHEMA_IDS.scaffoldManifest,
+      id: "scaffold-open-source",
+      createdAt,
+      name: "scaffold-open-source",
+      version: "1.0.0",
+      summary: "Open-source CLI/MCP package scaffold.",
+      type: "open_source",
+      status: "active",
+      capabilities: ["cli", "mcp", "library", "tests"],
+      output: {
+        packageManager: "bun",
+        languages: ["TypeScript"],
+        requiredFiles: ["package.json"],
+        requiredDirectories: ["src"]
+      },
+      env: [
+        {
+          key: "HASNA_HOME",
+          description: "Optional Hasna state directory override."
+        }
+      ],
+      scripts: [
+        {
+          name: "test",
+          command: "bun test",
+          required: true
+        }
+      ],
+      validationChecks: [
+        {
+          id: "tests",
+          kind: "test",
+          command: "bun test"
+        }
+      ]
+    });
+
+    expect(manifest.capabilities).toContain("mcp");
+    expect(manifest.env[0]?.secret).toBe(false);
+  });
+
+  test("rejects active scaffold manifests without output requirements or checks", () => {
+    const result = validateContract(SCHEMA_IDS.scaffoldManifest, {
+      schema: SCHEMA_IDS.scaffoldManifest,
+      id: "scaffold-empty",
+      createdAt,
+      name: "scaffold-empty",
+      version: "1.0.0",
+      summary: "Invalid active scaffold.",
+      type: "open_source",
+      status: "active",
+      output: {}
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const paths = result.error.issues.map((issue) => issue.path.join("."));
+      expect(paths).toContain("validationChecks");
+      expect(paths).toContain("output");
+    }
+  });
+
+  test("rejects scaffold manifests that expose secret defaults or local source paths", () => {
+    const secretDefault = validateContract(SCHEMA_IDS.scaffoldManifest, {
+      schema: SCHEMA_IDS.scaffoldManifest,
+      id: "scaffold-secret-default",
+      createdAt,
+      name: "scaffold-secret-default",
+      version: "1.0.0",
+      summary: "Invalid scaffold with secret default.",
+      type: "open_source",
+      status: "active",
+      output: {
+        requiredFiles: ["package.json"]
+      },
+      env: [
+        {
+          key: "API_KEY",
+          description: "Provider key.",
+          secret: true,
+          default: "not-public"
+        }
+      ],
+      validationChecks: [
+        {
+          id: "tests",
+          kind: "test",
+          command: "bun test"
+        }
+      ]
+    });
+    expect(secretDefault.success).toBe(false);
+    if (!secretDefault.success) {
+      expect(secretDefault.error.issues.map((issue) => issue.path.join("."))).toContain("env.0.default");
+    }
+
+    const localSource = validateContract(SCHEMA_IDS.scaffoldManifest, {
+      schema: SCHEMA_IDS.scaffoldManifest,
+      id: "scaffold-local-source",
+      createdAt,
+      name: "scaffold-local-source",
+      version: "1.0.0",
+      summary: "Invalid scaffold with local source URI.",
+      type: "open_source",
+      status: "active",
+      source: {
+        kind: "repo",
+        id: "local-template",
+        uri: "file:///home/hasna/private/template"
+      },
+      output: {
+        requiredFiles: ["package.json"]
+      },
+      validationChecks: [
+        {
+          id: "tests",
+          kind: "test",
+          command: "bun test"
+        }
+      ]
+    });
+    expect(localSource.success).toBe(false);
+    if (!localSource.success) {
+      expect(localSource.error.issues.map((issue) => issue.path.join("."))).toContain("source.uri");
+    }
+  });
+
+  test("validates scaffold install records and requires evidence for installed records", () => {
+    const installRecord = ScaffoldInstallRecordSchema.parse({
+      schema: SCHEMA_IDS.scaffoldInstallRecord,
+      id: "install_scaffold_open_source_001",
+      createdAt,
+      scaffoldId: "scaffold-open-source",
+      scaffoldVersion: "1.0.0",
+      target: {
+        kind: "repo",
+        id: "open-example",
+        uri: "git+https://github.com/hasna/open-example.git"
+      },
+      status: "installed",
+      installedAt: createdAt,
+      generatedFiles: [
+        {
+          kind: "file",
+          id: "package_json",
+          uri: "repo://open-example/package.json"
+        }
+      ]
+    });
+    expect(installRecord.scaffoldId).toBe("scaffold-open-source");
+
+    const missingEvidence = validateContract(SCHEMA_IDS.scaffoldInstallRecord, {
+      schema: SCHEMA_IDS.scaffoldInstallRecord,
+      id: "install_missing_evidence",
+      createdAt,
+      scaffoldId: "scaffold-open-source",
+      target: {
+        kind: "repo",
+        id: "open-example",
+        uri: "git+https://github.com/hasna/open-example.git"
+      },
+      status: "installed",
+      installedAt: createdAt
+    });
+    expect(missingEvidence.success).toBe(false);
   });
 });

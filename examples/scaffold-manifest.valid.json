@@ -1,0 +1,62 @@
+{
+  "schema": "hasna.scaffold_manifest.v1",
+  "id": "scaffold-open-source",
+  "createdAt": "2026-06-28T16:55:00.000Z",
+  "name": "scaffold-open-source",
+  "version": "1.0.0",
+  "summary": "Bun and TypeScript CLI/MCP/library package scaffold for public Hasna open-source repos.",
+  "type": "open_source",
+  "status": "active",
+  "capabilities": ["cli", "mcp", "library", "tests", "ci", "docs"],
+  "techStack": ["Bun", "TypeScript", "Commander", "Zod"],
+  "tags": ["open-source", "cli", "mcp", "package"],
+  "source": {
+    "kind": "repo",
+    "id": "hasna_contracts",
+    "uri": "git+https://github.com/hasna/contracts.git"
+  },
+  "output": {
+    "packageManager": "bun",
+    "languages": ["TypeScript"],
+    "requiredFiles": ["package.json", "README.md", "src/index.ts"],
+    "requiredDirectories": ["src", "tests"],
+    "optionalDirectories": ["examples", "docs"]
+  },
+  "env": [
+    {
+      "key": "HASNA_HOME",
+      "description": "Optional Hasna state directory override.",
+      "required": false,
+      "secret": false,
+      "group": "runtime"
+    }
+  ],
+  "scripts": [
+    {
+      "name": "test",
+      "command": "bun test",
+      "description": "Run unit tests.",
+      "required": true
+    },
+    {
+      "name": "typecheck",
+      "command": "tsc --noEmit",
+      "description": "Run TypeScript type checking.",
+      "required": true
+    }
+  ],
+  "validationChecks": [
+    {
+      "id": "typecheck",
+      "kind": "typecheck",
+      "command": "bun run typecheck",
+      "required": true
+    },
+    {
+      "id": "tests",
+      "kind": "test",
+      "command": "bun test",
+      "required": true
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 {
   "name": "@hasna/contracts",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Shared schemas and validators for Hasna open-source agent infrastructure contracts.",
   "type": "module",
   "license": "Apache-2.0",
@@ -45,12 +45,13 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "lint": "tsc --noEmit",
-    "verify:release": "bun run typecheck && bun test && bun run build && bun run smoke:dist && bun run pack:check",
+    "conformance": "bun run src/cli/index.ts conformance examples",
+    "verify:release": "bun run typecheck && bun test && bun run conformance && bun run build && bun run smoke:dist && bun run pack:check",
     "smoke:dist": "bun scripts/smoke-dist.ts",
     "pack:check": "bun pm pack --dry-run --ignore-scripts",
     "dev:cli": "bun run src/cli/index.ts",
     "prepack": "bun run verify:release",
-    "prepublishOnly": "bun run typecheck && bun test"
+    "prepublishOnly": "bun run verify:release"
   },
   "keywords": [
     "contracts",
