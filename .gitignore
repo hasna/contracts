@@ -1,4 +1,5 @@
 node_modules/
 dist/
+.hasna/
 *.log
 .DS_Store

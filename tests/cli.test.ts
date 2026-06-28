@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -112,6 +113,286 @@ describe("contracts CLI", () => {
       expect(payload.failed).toBe(1);
       expect(payload.results[0].schema).toBe(null);
       expect(payload.results[0].error).toContain("missing or unknown embedded schema");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("runs no-cloud scan and emits evidence pack JSON", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    try {
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/example", version: "0.1.0", dependencies: { zod: "^3.25.0" } }));
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(0);
+      const payload = parseStdoutJson(result);
+      expect(payload.schema).toBe("hasna.no_cloud_evidence_pack.v1");
+      expect(payload.verdict).toBe("passed");
+      expect(payload.packageName).toBe("@hasna/example");
+      expect(payload.subject.uri).toBe("repo://@hasna/example");
+      expect(payload.checks.every((check: { target: string }) => check.target.startsWith("repo://@hasna/example#"))).toBe(true);
+      expect(JSON.stringify(payload)).not.toContain(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("validates app cloud manifest during no-cloud scan", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    try {
+      const manifestPath = join(dir, "app-cloud-manifest.json");
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/example", version: "0.1.0", dependencies: { zod: "^3.25.0" } }));
+      writeFileSync(
+        manifestPath,
+        JSON.stringify({
+          schema: "hasna.app_cloud_manifest.v1",
+          id: "cloud_manifest_example",
+          createdAt: "2026-06-28T20:10:00.000Z",
+          packageName: "@hasna/example",
+          appId: "example",
+          storageMode: "app_owned_cloud",
+          cloudBoundary: "app_owned",
+          cloudResources: [
+            {
+              id: "example-db",
+              provider: "aws",
+              kind: "database",
+              ownerPackage: "@hasna/example"
+            }
+          ],
+          forbiddenSharedRuntimes: ["@hasna/cloud", "open-cloud"],
+          dependencies: ["zod"]
+        })
+      );
+      const result = runContracts(["no-cloud-scan", "--json", "--manifest", manifestPath, dir]);
+      expect(result.exitCode).toBe(0);
+      const payload = parseStdoutJson(result);
+      expect(payload.appCloudManifest.packageName).toBe("@hasna/example");
+      expect(payload.checks.some((check: { kind: string; status: string }) => check.kind === "app_cloud_manifest" && check.status === "succeeded")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("reports empty manifest arguments in no-cloud scan", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    try {
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/example", version: "0.1.0" }));
+      const result = runContracts(["no-cloud-scan", "--manifest=", dir]);
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr.toString()).toContain("option '--manifest <file>' argument missing");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("fails no-cloud scan on forbidden shared cloud runtime dependencies", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    try {
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/example", dependencies: { "@hasna/cloud": "0.1.41" } }));
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(1);
+      const payload = parseStdoutJson(result);
+      expect(payload.verdict).toBe("failed");
+      expect(payload.findings.some((finding: { pattern: string }) => finding.pattern === "@hasna/cloud")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("fails no-cloud scan on forbidden package identity, dev dependency, and source references", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    try {
+      mkdirSync(join(dir, "src"));
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "open-cloud", devDependencies: { "@hasna/cloud": "0.1.41" } }));
+      writeFileSync(join(dir, "src", "index.ts"), "export const sharedRuntime = 'open-cloud';\n");
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(1);
+      const payload = parseStdoutJson(result);
+      expect(payload.verdict).toBe("failed");
+      expect(payload.findings.some((finding: { message: string }) => finding.message.includes("Package identity"))).toBe(true);
+      expect(payload.findings.some((finding: { pattern: string; severity: string }) => finding.pattern === "@hasna/cloud" && finding.severity === "high")).toBe(true);
+      expect(payload.findings.some((finding: { pattern: string; kind: string }) => finding.pattern === "open-cloud" && finding.kind === "source_import")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("fails no-cloud scan on root entrypoints and runtime config paths", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    try {
+      mkdirSync(join(dir, ".hasna", "cloud"), { recursive: true });
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/example", version: "0.1.0" }));
+      writeFileSync(join(dir, "index.js"), "registerCloudTools();\n");
+      writeFileSync(join(dir, "wrangler.toml"), "name = 'open-cloud'\n");
+      writeFileSync(join(dir, ".env.local"), "HASNA_CLOUD_URL=https://example.invalid\n");
+      writeFileSync(join(dir, ".hasna", "cloud", "config"), "{}\n");
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(1);
+      const payload = parseStdoutJson(result);
+      expect(payload.findings.some((finding: { path: string; pattern: string }) => finding.path === "index.js" && finding.pattern === "registerCloudTools")).toBe(true);
+      expect(payload.findings.some((finding: { path: string; pattern: string }) => finding.path === "wrangler.toml" && finding.pattern === "open-cloud")).toBe(true);
+      expect(payload.findings.some((finding: { path: string; pattern: string }) => finding.path === ".env.local" && finding.pattern === "HASNA_CLOUD_")).toBe(true);
+      expect(payload.findings.some((finding: { path: string; pattern: string }) => finding.path === ".hasna/cloud/config" && finding.pattern === ".hasna/cloud")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("fails no-cloud scan on packed root artifacts", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    const packDir = mkdtempSync(join(tmpdir(), "contracts-pack-"));
+    const tarball = join(packDir, "bad.tgz");
+    try {
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/example", version: "0.1.0" }));
+      writeFileSync(join(dir, "index.js"), "registerCloudCommands();\n");
+      execFileSync("tar", ["-czf", tarball, "-C", dir, "."]);
+      const result = runContracts(["no-cloud-scan", "--json", tarball]);
+      expect(result.exitCode).toBe(1);
+      const payload = parseStdoutJson(result);
+      expect(payload.scanMode).toBe("packed_artifact");
+      expect(payload.subject.uri).toBe("artifact://bad.tgz");
+      expect(payload.findings.some((finding: { path: string; kind: string; pattern: string }) => finding.path === "index.js" && finding.kind === "packed_artifact" && finding.pattern === "registerCloudCommands")).toBe(true);
+      expect(JSON.stringify(payload)).not.toContain(dir);
+      expect(JSON.stringify(payload)).not.toContain(packDir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(packDir, { recursive: true, force: true });
+    }
+  });
+
+  test("fails no-cloud scan on packed artifacts with a single archive root directory", () => {
+    const parent = mkdtempSync(join(tmpdir(), "contracts-pack-parent-"));
+    const packDir = join(parent, "hasna-example-0.1.0");
+    const outDir = mkdtempSync(join(tmpdir(), "contracts-pack-out-"));
+    const tarball = join(outDir, "bad-root.tgz");
+    try {
+      mkdirSync(packDir);
+      writeFileSync(join(packDir, "package.json"), JSON.stringify({ name: "@hasna/example", version: "0.1.0" }));
+      writeFileSync(join(packDir, "index.js"), "registerCloudTools();\n");
+      execFileSync("tar", ["-czf", tarball, "-C", parent, "hasna-example-0.1.0"]);
+      const result = runContracts(["no-cloud-scan", "--json", tarball]);
+      expect(result.exitCode).toBe(1);
+      const payload = parseStdoutJson(result);
+      expect(payload.findings.some((finding: { path: string; pattern: string }) => finding.path === "index.js" && finding.pattern === "registerCloudTools")).toBe(true);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
+  test("fails no-cloud scan on malformed package manifests", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    try {
+      writeFileSync(join(dir, "package.json"), "{");
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(1);
+      const payload = parseStdoutJson(result);
+      expect(payload.findings.some((finding: { pattern: string; message: string }) => finding.pattern === "package.json" && finding.message.includes("valid JSON object"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("fails no-cloud scan when package manifest is missing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    const packDir = mkdtempSync(join(tmpdir(), "contracts-pack-"));
+    const tarball = join(packDir, "missing-package.tgz");
+    try {
+      writeFileSync(join(dir, "index.js"), "export const ok = true;\n");
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(1);
+      const payload = parseStdoutJson(result);
+      expect(payload.findings.some((finding: { id: string }) => finding.id === "finding_package_manifest_missing")).toBe(true);
+
+      execFileSync("tar", ["-czf", tarball, "-C", dir, "."]);
+      const tarResult = runContracts(["no-cloud-scan", "--json", tarball]);
+      expect(tarResult.exitCode).toBe(1);
+      expect(parseStdoutJson(tarResult).findings.some((finding: { id: string }) => finding.id === "finding_package_manifest_missing")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(packDir, { recursive: true, force: true });
+    }
+  });
+
+  test("fails no-cloud scan on invalid or mismatched app cloud manifests", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    try {
+      const nullManifestPath = join(dir, "null-manifest.json");
+      const mismatchManifestPath = join(dir, "mismatch-manifest.json");
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/example", version: "0.1.0" }));
+      writeFileSync(nullManifestPath, "null");
+      writeFileSync(
+        mismatchManifestPath,
+        JSON.stringify({
+          schema: "hasna.app_cloud_manifest.v1",
+          id: "cloud_manifest_mismatch",
+          createdAt: "2026-06-28T20:10:00.000Z",
+          packageName: "@hasna/other",
+          appId: "other",
+          storageMode: "app_owned_cloud",
+          cloudBoundary: "app_owned",
+          cloudResources: [
+            {
+              id: "other-db",
+              provider: "aws",
+              kind: "database",
+              ownerPackage: "@hasna/other"
+            }
+          ],
+          forbiddenSharedRuntimes: ["@hasna/cloud", "open-cloud"],
+          dependencies: ["zod"]
+        })
+      );
+
+      const nullResult = runContracts(["no-cloud-scan", "--json", "--manifest", nullManifestPath, dir]);
+      expect(nullResult.exitCode).toBe(1);
+      expect(parseStdoutJson(nullResult).findings.some((finding: { id: string }) => finding.id === "finding_app_cloud_manifest_invalid")).toBe(true);
+
+      const mismatchResult = runContracts(["no-cloud-scan", "--json", "--manifest", mismatchManifestPath, dir]);
+      expect(mismatchResult.exitCode).toBe(1);
+      expect(parseStdoutJson(mismatchResult).findings.some((finding: { id: string }) => finding.id === "finding_app_cloud_manifest_package_mismatch")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("prefers root package metadata when nested package manifests exist", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    try {
+      mkdirSync(join(dir, "src"));
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/root", version: "1.0.0" }));
+      writeFileSync(join(dir, "src", "package.json"), JSON.stringify({ name: "@hasna/nested", version: "1.0.0" }));
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(0);
+      const payload = parseStdoutJson(result);
+      expect(payload.packageName).toBe("@hasna/root");
+      expect(payload.subject.uri).toBe("repo://@hasna/root");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("scans this package without treating scanner declarations as runtime edges", () => {
+    const result = runContracts(["no-cloud-scan", "--json", "."]);
+    expect(result.exitCode).toBe(0);
+    const payload = parseStdoutJson(result);
+    expect(payload.verdict).toBe("passed");
+    expect(JSON.stringify(payload)).not.toContain(import.meta.dir);
+  });
+
+  test("does not allow downstream files to bypass scanning with declaration markers", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    try {
+      mkdirSync(join(dir, "src"));
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/downstream", version: "0.1.0" }));
+      writeFileSync(
+        join(dir, "src", "schemas.ts"),
+        "const markerA = 'FORBIDDEN_SHARED_CLOUD_RUNTIMES';\nconst markerB = 'hasna.no_cloud_evidence_pack.v1';\nregisterCloudTools();\n"
+      );
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(1);
+      const payload = parseStdoutJson(result);
+      expect(payload.findings.some((finding: { path: string; pattern: string }) => finding.path === "src/schemas.ts" && finding.pattern === "registerCloudTools")).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

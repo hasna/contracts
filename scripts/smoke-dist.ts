@@ -1,9 +1,15 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { version: string };
 const { CONTRACTS_PACKAGE_VERSION } = await import("../dist/schemas.js");
+const { scanNoCloudTarget } = await import("../dist/no-cloud.js");
+
+if (typeof scanNoCloudTarget !== "function") {
+  throw new Error("dist/no-cloud.js did not export scanNoCloudTarget");
+}
 
 type CommandResult = ReturnType<typeof Bun.spawnSync>;
 
@@ -68,6 +74,19 @@ requireExit(conformance, 0, "conformance");
 const conformancePayload = parseJson(conformance, "conformance");
 if (conformancePayload.ok !== true || conformancePayload.failed !== 0 || Number(conformancePayload.checked) <= 0) {
   throw new Error("conformance did not report a non-empty passing fixture set");
+}
+
+const noCloudDir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-dist-"));
+try {
+  writeFileSync(join(noCloudDir, "package.json"), JSON.stringify({ name: "@hasna/dist-smoke", version: packageJson.version }));
+  const noCloud = run(["no-cloud-scan", "--json", noCloudDir]);
+  requireExit(noCloud, 0, "no-cloud-scan");
+  const noCloudPayload = parseJson(noCloud, "no-cloud-scan");
+  if (noCloudPayload.schema !== "hasna.no_cloud_evidence_pack.v1" || noCloudPayload.verdict !== "passed") {
+    throw new Error("no-cloud-scan did not emit a passing evidence pack");
+  }
+} finally {
+  rmSync(noCloudDir, { recursive: true, force: true });
 }
 
 console.log("dist smoke passed");

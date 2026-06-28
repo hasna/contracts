@@ -1,0 +1,49 @@
+{
+  "schema": "hasna.no_cloud_evidence_pack.v1",
+  "id": "no_cloud_open_todos_publish",
+  "createdAt": "2026-06-28T20:10:00.000Z",
+  "subject": {
+    "kind": "repo",
+    "id": "open-todos",
+    "uri": "git+https://github.com/hasna/todos.git"
+  },
+  "packageName": "@hasna/todos",
+  "packageVersion": "0.11.62",
+  "scanMode": "ci",
+  "status": "succeeded",
+  "verdict": "passed",
+  "appCloudManifest": {
+    "schema": "hasna.app_cloud_manifest.v1",
+    "id": "cloud_manifest_open_todos",
+    "createdAt": "2026-06-28T20:10:00.000Z",
+    "packageName": "@hasna/todos",
+    "packageVersion": "0.11.62",
+    "appId": "open-todos",
+    "storageMode": "app_owned_cloud",
+    "cloudBoundary": "app_owned",
+    "cloudResources": [
+      {
+        "id": "todos-postgres-primary",
+        "provider": "aws",
+        "kind": "database",
+        "ownerPackage": "@hasna/todos"
+      }
+    ],
+    "forbiddenSharedRuntimes": ["@hasna/cloud", "open-cloud"],
+    "dependencies": ["@hasna/events", "zod"]
+  },
+  "checks": [
+    {
+      "id": "package_manifest",
+      "kind": "package_manifest",
+      "status": "succeeded",
+      "target": "package.json"
+    },
+    {
+      "id": "packed_artifact",
+      "kind": "packed_artifact",
+      "status": "succeeded",
+      "target": "hasna-todos-0.11.62.tgz"
+    }
+  ]
+}

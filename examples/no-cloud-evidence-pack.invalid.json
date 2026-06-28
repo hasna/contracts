@@ -1,0 +1,32 @@
+{
+  "schema": "hasna.no_cloud_evidence_pack.v1",
+  "id": "no_cloud_shared_runtime_invalid",
+  "createdAt": "2026-06-28T20:10:00.000Z",
+  "subject": {
+    "kind": "repo",
+    "id": "open-cloud",
+    "uri": "git+https://github.com/hasna/cloud.git"
+  },
+  "packageName": "@hasna/cloud",
+  "scanMode": "ci",
+  "status": "succeeded",
+  "verdict": "passed",
+  "checks": [
+    {
+      "id": "package_manifest",
+      "kind": "package_manifest",
+      "status": "failed",
+      "target": "package.json"
+    }
+  ],
+  "findings": [
+    {
+      "id": "finding_shared_cloud_runtime",
+      "kind": "package_manifest",
+      "severity": "critical",
+      "path": "package.json",
+      "pattern": "@hasna/cloud",
+      "message": "Forbidden shared cloud runtime dependency in dependencies"
+    }
+  ]
+}

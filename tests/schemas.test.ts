@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   ActorRefSchema,
+  AppCloudManifestSchema,
   ContractSchemaRegistry,
   type EvidenceRef,
   EvidenceRefSchema,
+  NoCloudEvidencePackSchema,
   parseEmbeddedContract,
   parseContract,
   ProofBundleSchema,
@@ -265,6 +267,180 @@ describe("core schemas", () => {
     expect(proof.checks[0]?.status).toBe("succeeded");
   });
 
+  test("validates app-owned cloud manifests without allowing shared cloud runtimes", () => {
+    const manifest = AppCloudManifestSchema.parse({
+      schema: SCHEMA_IDS.appCloudManifest,
+      id: "cloud_manifest_open_todos",
+      createdAt,
+      packageName: "@hasna/todos",
+      appId: "open-todos",
+      storageMode: "app_owned_cloud",
+      cloudBoundary: "app_owned",
+      cloudResources: [
+        {
+          id: "todos-postgres-primary",
+          provider: "aws",
+          kind: "database",
+          ownerPackage: "@hasna/todos"
+        }
+      ],
+      dependencies: ["@hasna/events"]
+    });
+    expect(manifest.forbiddenSharedRuntimes).toEqual(["@hasna/cloud", "open-cloud"]);
+
+    const extendedForbiddenRuntimes = AppCloudManifestSchema.safeParse({
+      ...manifest,
+      id: "cloud_manifest_extended_forbidden",
+      forbiddenSharedRuntimes: ["@hasna/cloud", "open-cloud", "cloud-mcp", "legacy-cloud"]
+    });
+    expect(extendedForbiddenRuntimes.success).toBe(true);
+
+    const forbiddenByManifest = validateContract(SCHEMA_IDS.appCloudManifest, {
+      ...manifest,
+      id: "cloud_manifest_forbidden_by_manifest",
+      forbiddenSharedRuntimes: ["@hasna/cloud", "open-cloud", "cloud-mcp"],
+      dependencies: ["cloud-mcp"]
+    });
+    expect(forbiddenByManifest.success).toBe(false);
+    if (!forbiddenByManifest.success) {
+      expect(forbiddenByManifest.error.issues.map((issue) => issue.path.join("."))).toContain("dependencies");
+    }
+
+    const invalid = validateContract(SCHEMA_IDS.appCloudManifest, {
+      ...manifest,
+      id: "cloud_manifest_invalid",
+      packageName: "@hasna/cloud",
+      dependencies: ["@hasna/cloud"]
+    });
+    expect(invalid.success).toBe(false);
+    if (!invalid.success) {
+      const paths = invalid.error.issues.map((issue) => issue.path.join("."));
+      expect(paths).toContain("packageName");
+      expect(paths).toContain("dependencies");
+      expect(paths).toContain("cloudResources.0.ownerPackage");
+    }
+
+    const invalidModes = [
+      { ...manifest, id: "cloud_manifest_local_bad", storageMode: "local_only", cloudBoundary: "app_owned" },
+      { ...manifest, id: "cloud_manifest_external_bad", storageMode: "external_service", cloudBoundary: "external_service" },
+      { ...manifest, id: "cloud_manifest_hybrid_bad", storageMode: "hybrid_local_cache", cloudBoundary: "local_cache" }
+    ];
+    for (const invalidMode of invalidModes) {
+      expect(validateContract(SCHEMA_IDS.appCloudManifest, invalidMode).success).toBe(false);
+    }
+  });
+
+  test("no-cloud evidence packs cannot pass with blocking findings", () => {
+    const invalid = NoCloudEvidencePackSchema.safeParse({
+      schema: SCHEMA_IDS.noCloudEvidencePack,
+      id: "no_cloud_invalid",
+      createdAt,
+      subject: {
+        kind: "repo",
+        id: "open-cloud",
+        uri: "git+https://github.com/hasna/cloud.git"
+      },
+      scanMode: "ci",
+      status: "succeeded",
+      verdict: "passed",
+      checks: [
+        {
+          id: "package_manifest",
+          kind: "package_manifest",
+          status: "failed",
+          target: "package.json"
+        }
+      ],
+      findings: [
+        {
+          id: "finding_cloud",
+          kind: "package_manifest",
+          severity: "critical",
+          path: "package.json",
+          pattern: "@hasna/cloud",
+          message: "Forbidden shared cloud runtime dependency in dependencies"
+        }
+      ]
+    });
+
+    expect(invalid.success).toBe(false);
+    if (!invalid.success) {
+      const paths = invalid.error.issues.map((issue) => issue.path.join("."));
+      expect(paths).toContain("findings");
+      expect(paths).toContain("checks");
+    }
+  });
+
+  test("no-cloud evidence packs aggregate nested check findings", () => {
+    const invalid = NoCloudEvidencePackSchema.safeParse({
+      schema: SCHEMA_IDS.noCloudEvidencePack,
+      id: "no_cloud_nested_invalid",
+      createdAt,
+      subject: {
+        kind: "repo",
+        id: "open-todos",
+        uri: "repo://open-todos"
+      },
+      scanMode: "ci",
+      status: "succeeded",
+      verdict: "passed",
+      checks: [
+        {
+          id: "source_runtime",
+          kind: "source_import",
+          status: "succeeded",
+          target: "repo://open-todos#source_runtime",
+          findings: [
+            {
+              id: "finding_nested_cloud",
+              kind: "source_import",
+              severity: "critical",
+              path: "index.js",
+              pattern: "open-cloud",
+              message: "Forbidden runtime reference"
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(invalid.success).toBe(false);
+    if (!invalid.success) {
+      const paths = invalid.error.issues.map((issue) => issue.path.join("."));
+      expect(paths).toContain("findings");
+      expect(paths).toContain("checks.0.findings");
+    }
+  });
+
+  test("no-cloud evidence packs cannot pass with incomplete checks", () => {
+    const invalid = NoCloudEvidencePackSchema.safeParse({
+      schema: SCHEMA_IDS.noCloudEvidencePack,
+      id: "no_cloud_incomplete_invalid",
+      createdAt,
+      subject: {
+        kind: "repo",
+        id: "open-todos",
+        uri: "repo://open-todos"
+      },
+      scanMode: "ci",
+      status: "succeeded",
+      verdict: "passed",
+      checks: [
+        {
+          id: "source_runtime",
+          kind: "source_import",
+          status: "skipped",
+          target: "repo://open-todos#source_runtime"
+        }
+      ]
+    });
+
+    expect(invalid.success).toBe(false);
+    if (!invalid.success) {
+      expect(invalid.error.issues.map((issue) => issue.path.join("."))).toContain("checks");
+    }
+  });
+
   test("rejects passed proof bundles without evidence", () => {
     expect(() =>
       ProofBundleSchema.parse({
@@ -408,7 +584,7 @@ describe("core schemas", () => {
       source: {
         kind: "repo",
         id: "local-template",
-        uri: "file:///home/hasna/private/template"
+        uri: "file:///local/private/template"
       },
       output: {
         requiredFiles: ["package.json"]

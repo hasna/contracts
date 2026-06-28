@@ -1,6 +1,6 @@
 {
   "name": "@hasna/contracts",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Shared schemas and validators for Hasna open-source agent infrastructure contracts.",
   "type": "module",
   "license": "Apache-2.0",
@@ -32,6 +32,10 @@
     "./validators": {
       "types": "./dist/validators.d.ts",
       "import": "./dist/validators.js"
+    },
+    "./no-cloud": {
+      "types": "./dist/no-cloud.d.ts",
+      "import": "./dist/no-cloud.js"
     }
   },
   "files": [
@@ -41,7 +45,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "rm -rf dist && bun build src/index.ts src/schemas.ts src/validators.ts --outdir dist --target bun && bun build src/cli/index.ts --outdir dist/cli --target bun && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
+    "build": "rm -rf dist && bun build src/index.ts src/schemas.ts src/validators.ts src/no-cloud.ts --outdir dist --target bun && bun build src/cli/index.ts --outdir dist/cli --target bun && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "lint": "tsc --noEmit",

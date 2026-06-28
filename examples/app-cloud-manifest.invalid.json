@@ -1,0 +1,19 @@
+{
+  "schema": "hasna.app_cloud_manifest.v1",
+  "id": "cloud_manifest_shared_runtime_invalid",
+  "createdAt": "2026-06-28T20:10:00.000Z",
+  "packageName": "@hasna/cloud",
+  "appId": "open-cloud",
+  "storageMode": "app_owned_cloud",
+  "cloudBoundary": "app_owned",
+  "cloudResources": [
+    {
+      "id": "shared-rds",
+      "provider": "aws",
+      "kind": "database",
+      "ownerPackage": "@hasna/todos"
+    }
+  ],
+  "forbiddenSharedRuntimes": ["open-cloud"],
+  "dependencies": ["@hasna/cloud"]
+}

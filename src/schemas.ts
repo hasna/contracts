@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const CONTRACTS_PACKAGE_NAME = "@hasna/contracts";
-export const CONTRACTS_PACKAGE_VERSION = "0.2.0";
+export const CONTRACTS_PACKAGE_VERSION = "0.2.1";
 
 export const SCHEMA_IDS = {
   actorRef: "hasna.actor_ref.v1",
@@ -16,7 +16,9 @@ export const SCHEMA_IDS = {
   validationPlan: "hasna.validation_plan.v1",
   proofBundle: "hasna.proof_bundle.v1",
   scaffoldManifest: "hasna.scaffold_manifest.v1",
-  scaffoldInstallRecord: "hasna.scaffold_install_record.v1"
+  scaffoldInstallRecord: "hasna.scaffold_install_record.v1",
+  appCloudManifest: "hasna.app_cloud_manifest.v1",
+  noCloudEvidencePack: "hasna.no_cloud_evidence_pack.v1"
 } as const;
 
 export const SchemaIdSchema = z
@@ -589,6 +591,262 @@ export const ScaffoldInstallRecordSchema = contractBaseSchema(SCHEMA_IDS.scaffol
   });
 export type ScaffoldInstallRecord = z.infer<typeof ScaffoldInstallRecordSchema>;
 
+export const FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud", "open-cloud"] as const;
+
+export const AppCloudProviderSchema = z.enum([
+  "aws",
+  "gcp",
+  "azure",
+  "cloudflare",
+  "vercel",
+  "neon",
+  "supabase",
+  "postgres",
+  "s3",
+  "rds",
+  "other"
+]);
+export type AppCloudProvider = z.infer<typeof AppCloudProviderSchema>;
+
+export const AppCloudResourceSchema = z
+  .object({
+    id: z.string().min(1),
+    provider: AppCloudProviderSchema,
+    kind: z.enum([
+      "database",
+      "bucket",
+      "queue",
+      "secret",
+      "function",
+      "worker",
+      "cache",
+      "topic",
+      "scheduler",
+      "object_store",
+      "other"
+    ]),
+    ownerPackage: z.string().min(1),
+    region: z.string().min(1).optional(),
+    accountId: z.string().min(1).optional(),
+    uri: UriSchema.optional(),
+    machineScoped: z.boolean().default(false)
+  })
+  .strict();
+export type AppCloudResource = z.infer<typeof AppCloudResourceSchema>;
+
+export const AppCloudManifestSchema = contractBaseSchema(SCHEMA_IDS.appCloudManifest)
+  .extend({
+    packageName: z.string().min(1),
+    packageVersion: z.string().min(1).optional(),
+    appId: z.string().min(1),
+    repository: ResourcePointerSchema.optional(),
+    storageMode: z.enum(["local_only", "app_owned_cloud", "hybrid_local_cache", "external_service"]),
+    cloudBoundary: z.enum(["none", "app_owned", "external_service", "local_cache"]),
+    cloudResources: z.array(AppCloudResourceSchema).default([]),
+    localCache: z
+      .object({
+        path: z.string().min(1).optional(),
+        pullMode: z.enum(["manual", "daemon", "ci", "none"]).default("manual"),
+        conflictPolicy: z.enum(["cloud_wins", "local_wins", "merge", "manual_review"]).default("manual_review")
+      })
+      .strict()
+      .optional(),
+    forbiddenSharedRuntimes: z.array(z.string().min(1)).default([...FORBIDDEN_SHARED_CLOUD_RUNTIMES]),
+    dependencies: z.array(z.string().min(1)).default([]),
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const effectiveForbiddenRuntimes = new Set<string>([...FORBIDDEN_SHARED_CLOUD_RUNTIMES, ...value.forbiddenSharedRuntimes]);
+    if (effectiveForbiddenRuntimes.has(value.packageName)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "App-owned cloud manifests cannot be for a forbidden runtime",
+        path: ["packageName"]
+      });
+    }
+    for (const runtime of FORBIDDEN_SHARED_CLOUD_RUNTIMES) {
+      if (!value.forbiddenSharedRuntimes.includes(runtime)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `forbiddenSharedRuntimes must include ${runtime}`,
+          path: ["forbiddenSharedRuntimes"]
+        });
+      }
+    }
+    for (const runtime of effectiveForbiddenRuntimes) {
+      if (value.dependencies.includes(runtime)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `App-owned cloud manifests cannot depend on ${runtime}`,
+          path: ["dependencies"]
+        });
+      }
+    }
+    if (value.storageMode === "local_only" && value.cloudBoundary !== "none") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "local_only storage requires cloudBoundary none",
+        path: ["cloudBoundary"]
+      });
+    }
+    if (value.storageMode === "app_owned_cloud" && value.cloudBoundary !== "app_owned") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "app_owned_cloud storage requires cloudBoundary app_owned",
+        path: ["cloudBoundary"]
+      });
+    }
+    if (value.storageMode === "hybrid_local_cache") {
+      if (value.cloudBoundary !== "local_cache") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "hybrid_local_cache storage requires cloudBoundary local_cache",
+          path: ["cloudBoundary"]
+        });
+      }
+      if (!value.localCache) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "hybrid_local_cache storage requires localCache settings",
+          path: ["localCache"]
+        });
+      }
+    }
+    if (value.storageMode === "external_service") {
+      if (value.cloudBoundary !== "external_service") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "external_service storage requires cloudBoundary external_service",
+          path: ["cloudBoundary"]
+        });
+      }
+      if (value.cloudResources.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "external_service storage must not declare app-owned cloudResources",
+          path: ["cloudResources"]
+        });
+      }
+    }
+    if ((value.storageMode === "app_owned_cloud" || value.storageMode === "hybrid_local_cache") && value.cloudResources.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Cloud-backed storage modes require explicit app-owned cloudResources",
+        path: ["cloudResources"]
+      });
+    }
+    if (value.cloudBoundary === "none" && value.cloudResources.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "cloudBoundary none cannot declare cloudResources",
+        path: ["cloudResources"]
+      });
+    }
+    value.cloudResources.forEach((resource, index) => {
+      if (resource.ownerPackage !== value.packageName) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Cloud resources must be owned by the app package that declares the manifest",
+          path: ["cloudResources", index, "ownerPackage"]
+        });
+      }
+    });
+  });
+export type AppCloudManifest = z.infer<typeof AppCloudManifestSchema>;
+
+export const NoCloudCheckKindSchema = z.enum([
+  "package_manifest",
+  "lockfile",
+  "source_import",
+  "runtime_config",
+  "packed_artifact",
+  "published_metadata",
+  "app_cloud_manifest",
+  "remote_config",
+  "boundary_doc",
+  "other"
+]);
+export type NoCloudCheckKind = z.infer<typeof NoCloudCheckKindSchema>;
+
+export const NoCloudFindingSeveritySchema = z.enum(["low", "medium", "high", "critical"]);
+export type NoCloudFindingSeverity = z.infer<typeof NoCloudFindingSeveritySchema>;
+
+export const NoCloudFindingSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: NoCloudCheckKindSchema,
+    severity: NoCloudFindingSeveritySchema,
+    path: z.string().min(1).optional(),
+    packageName: z.string().min(1).optional(),
+    pattern: z.string().min(1),
+    message: z.string().min(1),
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict();
+export type NoCloudFinding = z.infer<typeof NoCloudFindingSchema>;
+
+export const NoCloudCheckResultSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: NoCloudCheckKindSchema,
+    status: ContractStatusSchema,
+    target: z.string().min(1),
+    command: z.string().min(1).optional(),
+    evidenceRefs: z.array(EvidencePointerSchema).default([]),
+    findings: z.array(NoCloudFindingSchema).default([])
+  })
+  .strict();
+export type NoCloudCheckResult = z.infer<typeof NoCloudCheckResultSchema>;
+
+export const NoCloudEvidencePackSchema = contractBaseSchema(SCHEMA_IDS.noCloudEvidencePack)
+  .extend({
+    subject: ResourcePointerSchema,
+    packageName: z.string().min(1).optional(),
+    packageVersion: z.string().min(1).optional(),
+    generatedBy: ActorPointerSchema.optional(),
+    scanMode: z.enum(["source_tree", "packed_artifact", "published_metadata", "runtime_config", "workspace", "ci"]),
+    status: ContractStatusSchema,
+    verdict: z.enum(["passed", "failed", "warning", "not_run"]),
+    appCloudManifest: AppCloudManifestSchema.optional(),
+    checks: z.array(NoCloudCheckResultSchema).min(1),
+    findings: z.array(NoCloudFindingSchema).default([]),
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const allFindings = [...value.findings, ...value.checks.flatMap((check) => check.findings)];
+    const blockingFindings = allFindings.filter((finding) => finding.severity === "high" || finding.severity === "critical");
+    if (value.verdict === "passed") {
+      if (value.status !== "succeeded") {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Passed no-cloud evidence requires succeeded status", path: ["status"] });
+      }
+      if (blockingFindings.length > 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Passed no-cloud evidence cannot include high or critical findings", path: ["findings"] });
+      }
+      if (value.checks.some((check) => check.status !== "succeeded")) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Passed no-cloud evidence requires every check to be succeeded", path: ["checks"] });
+      }
+    }
+    if (value.verdict === "failed" && allFindings.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Failed no-cloud evidence requires findings", path: ["findings"] });
+    }
+    if (value.status === "succeeded" && value.checks.some((check) => check.status === "failed")) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Succeeded no-cloud evidence cannot contain failed checks", path: ["checks"] });
+    }
+    value.checks.forEach((check, index) => {
+      const checkBlockingFindings = check.findings.filter((finding) => finding.severity === "high" || finding.severity === "critical");
+      if (check.status === "succeeded" && checkBlockingFindings.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Succeeded no-cloud checks cannot contain high or critical findings",
+          path: ["checks", index, "findings"]
+        });
+      }
+    });
+  });
+export type NoCloudEvidencePack = z.infer<typeof NoCloudEvidencePackSchema>;
+
 export const ProofCheckResultSchema = z
   .object({
     checkId: z.string().min(1),
@@ -759,7 +1017,9 @@ export const ContractSchemaRegistry = {
   [SCHEMA_IDS.validationPlan]: ValidationPlanSchema,
   [SCHEMA_IDS.proofBundle]: ProofBundleSchema,
   [SCHEMA_IDS.scaffoldManifest]: ScaffoldManifestSchema,
-  [SCHEMA_IDS.scaffoldInstallRecord]: ScaffoldInstallRecordSchema
+  [SCHEMA_IDS.scaffoldInstallRecord]: ScaffoldInstallRecordSchema,
+  [SCHEMA_IDS.appCloudManifest]: AppCloudManifestSchema,
+  [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePackSchema
 } as const;
 
 export type KnownSchemaId = keyof typeof ContractSchemaRegistry;
@@ -778,6 +1038,8 @@ export type ContractBySchemaId = {
   [SCHEMA_IDS.proofBundle]: ProofBundle;
   [SCHEMA_IDS.scaffoldManifest]: ScaffoldManifest;
   [SCHEMA_IDS.scaffoldInstallRecord]: ScaffoldInstallRecord;
+  [SCHEMA_IDS.appCloudManifest]: AppCloudManifest;
+  [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePack;
 };
 
 export type ActorRefInput = z.input<typeof ActorRefSchema>;
@@ -793,6 +1055,8 @@ export type ValidationPlanInput = z.input<typeof ValidationPlanSchema>;
 export type ProofBundleInput = z.input<typeof ProofBundleSchema>;
 export type ScaffoldManifestInput = z.input<typeof ScaffoldManifestSchema>;
 export type ScaffoldInstallRecordInput = z.input<typeof ScaffoldInstallRecordSchema>;
+export type AppCloudManifestInput = z.input<typeof AppCloudManifestSchema>;
+export type NoCloudEvidencePackInput = z.input<typeof NoCloudEvidencePackSchema>;
 export type ActorPointerInput = z.input<typeof ActorPointerSchema>;
 export type ResourcePointerInput = z.input<typeof ResourcePointerSchema>;
 export type EvidencePointerInput = z.input<typeof EvidencePointerSchema>;
@@ -811,4 +1075,6 @@ export type ContractInputBySchemaId = {
   [SCHEMA_IDS.proofBundle]: ProofBundleInput;
   [SCHEMA_IDS.scaffoldManifest]: ScaffoldManifestInput;
   [SCHEMA_IDS.scaffoldInstallRecord]: ScaffoldInstallRecordInput;
+  [SCHEMA_IDS.appCloudManifest]: AppCloudManifestInput;
+  [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePackInput;
 };

@@ -8,6 +8,7 @@ import {
   ContractSchemaRegistry,
   type KnownSchemaId
 } from "../schemas";
+import { scanNoCloudTarget } from "../no-cloud";
 import { getEmbeddedSchemaId, validateContract } from "../validators";
 
 function collectJsonFiles(root: string): string[] {
@@ -61,14 +62,15 @@ function preflightJsonUsageErrors(argv: string[]) {
     return false;
   }
 
-  if (!["schemas", "validate", "conformance"].includes(command)) {
+  if (!["schemas", "validate", "conformance", "no-cloud-scan"].includes(command)) {
     return reportParserJsonError("commander.unknownCommand", `unknown command '${command}'`);
   }
 
   const allowedOptionsByCommand: Record<string, Set<string>> = {
     schemas: new Set(["--json", "-j"]),
     validate: new Set(["--json", "-j", "--schema"]),
-    conformance: new Set(["--json", "-j"])
+    conformance: new Set(["--json", "-j"]),
+    "no-cloud-scan": new Set(["--json", "-j", "--manifest"])
   };
   const allowedOptions = allowedOptionsByCommand[command] ?? new Set<string>();
   const positionals: string[] = [];
@@ -88,6 +90,20 @@ function preflightJsonUsageErrors(argv: string[]) {
       const schemaValue = args[index + 1];
       if (!schemaValue || schemaValue.startsWith("-")) {
         return reportParserJsonError("commander.optionMissingArgument", "option '--schema <id>' argument missing");
+      }
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--manifest=")) {
+      if (arg.slice("--manifest=".length).length === 0) {
+        return reportParserJsonError("commander.optionMissingArgument", "option '--manifest <file>' argument missing");
+      }
+      continue;
+    }
+    if (arg === "--manifest") {
+      const manifestValue = args[index + 1];
+      if (!manifestValue || manifestValue.startsWith("-")) {
+        return reportParserJsonError("commander.optionMissingArgument", "option '--manifest <file>' argument missing");
       }
       index += 1;
       continue;
@@ -227,6 +243,55 @@ export function createContractsProgram() {
         }
       }
       if (failed.length > 0) {
+        process.exitCode = 1;
+      }
+    });
+
+  program
+    .command("no-cloud-scan")
+    .description("Scan a source tree or packed tarball for forbidden shared cloud runtime edges")
+    .argument("[path]", "Directory, .tgz, or .tar.gz path", ".")
+    .option("--manifest <file>", "Optional app cloud manifest JSON file to validate")
+    .option("-j, --json", "Output JSON evidence pack")
+    .action((target: string, options: { manifest?: string; json?: boolean }) => {
+      let manifest: unknown | undefined;
+      const manifestSupplied = Object.prototype.hasOwnProperty.call(options, "manifest") && options.manifest !== undefined;
+      if (manifestSupplied) {
+        if (!options.manifest) {
+          reportCliError(options, "option '--manifest <file>' argument missing", {
+            code: "manifest_missing_argument"
+          });
+          return;
+        }
+        const loaded = readJsonFile(options.manifest);
+        if (!loaded.ok) {
+          reportCliError(options, `Could not read or parse ${options.manifest}: ${loaded.error}`, {
+            file: options.manifest,
+            code: "manifest_read_or_parse_error"
+          });
+          return;
+        }
+        manifest = loaded.value;
+      }
+
+      let evidence;
+      try {
+        evidence = scanNoCloudTarget(target, manifestSupplied ? { manifest } : {});
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        reportCliError(options, `No-cloud scan failed for ${target}: ${message}`, { path: target, code: "no_cloud_scan_error" });
+        return;
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(evidence, null, 2));
+      } else {
+        console.log(`${evidence.verdict === "passed" ? "ok" : "fail"} ${evidence.schema} ${target}`);
+        for (const finding of evidence.findings) {
+          console.log(`- ${finding.severity} ${finding.kind} ${finding.path ?? "<manifest>"}: ${finding.message}`);
+        }
+      }
+      if (evidence.verdict !== "passed") {
         process.exitCode = 1;
       }
     });

@@ -63,6 +63,18 @@ contracts conformance examples
 contracts conformance --json examples
 ```
 
+Scan a package source tree or packed `.tgz` before publishing. The scan focuses
+on package manifests, lockfiles, source/runtime surfaces, config files, and
+packed artifacts. It intentionally ignores docs/examples so packages can
+document forbidden legacy edges without failing their own checks.
+
+```bash
+contracts no-cloud-scan .
+contracts no-cloud-scan --json .
+contracts no-cloud-scan --manifest app-cloud.manifest.json .
+contracts no-cloud-scan --json hasna-todos-0.11.62.tgz
+```
+
 ## TypeScript
 
 ```ts
@@ -130,6 +142,12 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
 - `hasna.scaffold_install_record.v1`: portable receipt for a scaffold install
   against a target repo or project, including installer, status, generated
   resource refs, evidence, and proof refs.
+- `hasna.app_cloud_manifest.v1`: app-owned cloud boundary declaration for a
+  package that uses its own cloud resources, local cache, and conflict policy
+  without depending on shared `@hasna/cloud` or `open-cloud` runtimes.
+- `hasna.no_cloud_evidence_pack.v1`: prepublish/CI evidence pack for package
+  manifest, lockfile, source/runtime config, packed artifact, published
+  metadata, and app-cloud-manifest scans.
 
 Every top-level contract includes a literal `schema` field. Consumers should
 reject objects whose embedded schema does not match the validator being used.
@@ -187,6 +205,13 @@ helpers. Owning packages still own storage and behavior.
   validate public scaffold manifests and install records with
   `@hasna/contracts`, but `@hasna/contracts` must not import or execute
   `iapp-scaffolds`.
+- Each open-source app that needs cloud support owns that cloud integration in
+  its own package and can publish an `AppCloudManifest`. `@hasna/contracts`
+  validates the boundary, but it must not become a shared cloud runtime.
+- `@hasna/cloud` and `open-cloud` are forbidden shared runtime dependencies for
+  new app-owned cloud support. Use `NoCloudEvidencePack` and
+  `contracts no-cloud-scan` in prepublish/CI checks to prove package manifests,
+  locks, source/runtime config, and packed artifacts do not reintroduce them.
 
 ## Downstream Integration Recipes
 
@@ -237,6 +262,10 @@ native domain objects immediately.
 - `open-reports`: consume `ProofBundle`, `WorkRun`, `ContextPack`,
   `CostEstimate`, and `EvidenceRef` to render compact Markdown/JSON/HTML proof
   reports.
+- Every package that implements app-owned cloud support should emit an
+  `AppCloudManifest` and attach it to a `NoCloudEvidencePack` during release.
+  The manifest names explicit app-owned resources and the evidence pack proves
+  the package does not depend on `@hasna/cloud` or `open-cloud`.
 
 ## WorkflowInvocation And App Storage Boundary
 
@@ -375,5 +404,5 @@ bun run smoke:dist
 bun run verify:release
 ```
 
-`verify:release` runs typecheck, tests, build, and a smoke test against the
-packaged CLI entrypoint in `dist/cli/index.js`.
+`verify:release` runs typecheck, tests, example conformance, build, a smoke test
+against the packaged CLI entrypoint in `dist/cli/index.js`, and a pack dry-run.
