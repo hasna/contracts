@@ -143,6 +143,7 @@ Common resource-kind mappings:
 | `open-todos` | `task`, `project`, `verification`, `proof_bundle` |
 | `open-loops` | `loop`, `workflow`, `run`, `artifact` |
 | `open-actions` | `action`, `tool`, `event`; decisions are emitted as `DecisionEnvelope` contracts, not resource kinds |
+| `open-automations` | `action`, `tool`, `event`; deterministic recipe decisions are emitted as `DecisionEnvelope` contracts |
 | `open-sessions` | `session`, `run`, `machine`, `artifact` |
 | `open-context` | `context_pack`, `file`, `url`, `knowledge` |
 | `open-knowledge` / `open-mementos` | `knowledge`, `memento`, `context_pack` |
@@ -158,10 +159,17 @@ helpers. Owning packages still own storage and behavior.
 
 - `open-todos` owns tasks, task plans, locks, comments, and task evidence.
 - `open-loops` owns loop and workflow execution.
+- `open-events` owns event envelopes, channels, delivery, replay, and
+  notification semantics.
 - `open-actions` owns executable action manifests.
+- `open-automations` owns deterministic product/app automations and
+  connector/action recipes. It does not own agent workflow invocation,
+  admission queues, task/PR/review worker routing, or canonical workflow run
+  artifacts.
 - `open-sessions` owns transcript and trajectory ingestion.
 - `open-context` owns context-pack construction and retrieval.
-- `open-knowledge` owns durable knowledge records and promotion workflows.
+- `open-knowledge` owns durable knowledge records and promotion workflows under
+  `.hasna/knowledge`.
 - `open-files` owns artifact storage, file indexing, and dereference logic.
 - `open-mementos` owns memory lifecycle and recall.
 - `open-reports` owns rendered reports and proof presentation.
@@ -179,10 +187,16 @@ native domain objects immediately.
   records, versions, signed URLs, source manifests, and evidence assets.
 - `open-todos`: expose task refs as `ResourceRef`; verification evidence as
   `ProofBundle`; task execution receipts as `WorkRun`; review gates as
-  `ValidationPlan`.
+  `ValidationPlan`; and workflow/run manifest pointers as compact task fields,
+  not embedded handoff artifacts.
 - `open-loops`: emit loop/workflow runs as `WorkRun`, audit traces as
   `AgentTrajectory`, logs/artifacts as `EvidenceRef`, and verifier output as
-  `ProofBundle`.
+  `ProofBundle`. OpenLoops owns `WorkflowInvocation`, admission/work-item
+  queues, leases, workflow runs, retries, cancellation, worktrees, and run
+  artifacts.
+- `open-events`: emit and replay validated event envelopes to channels.
+  OpenEvents delivers notifications only; it does not create workflow
+  invocations, own queue state, or retry agent work.
 - `open-sessions`: convert messages/tool calls to `AgentTrajectory`, token
   usage to `CostEstimate`, and transcript paths to `EvidenceRef`.
 - `open-context`: serialize built context as `ContextPack` with citations as
@@ -202,9 +216,90 @@ native domain objects immediately.
 - `open-actions`: keep domain action manifests, but expose shared `ActorRef`,
   `EvidenceRef`, `CapabilityCard`, `DecisionEnvelope`, and `WorkRun` adapter
   views.
+- `open-automations`: keep deterministic app/product automation recipes and
+  connector/action recipes. Any agentic task, PR, review, or evaluation flow
+  must hand off to OpenLoops rather than creating a second workflow queue.
 - `open-reports`: consume `ProofBundle`, `WorkRun`, `ContextPack`,
   `CostEstimate`, and `EvidenceRef` to render compact Markdown/JSON/HTML proof
   reports.
+
+## WorkflowInvocation And App Storage Boundary
+
+The canonical agent-work root is a `WorkflowInvocation`, not a todo task.
+Only actionable unfinished work needs a todo. OpenTodos remains the
+human-visible intent ledger; OpenLoops owns the durable workflow root,
+admission queue, execution lifecycle, and canonical run artifacts.
+
+A workflow invocation should carry these fields at the boundary:
+
+- `id`
+- `templateId` or `workflowId`
+- `sourceRef`: a WorkflowInvocation-local source kind such as `task`, `event`,
+  `schedule`, `manual`, `pull_request`, `review`, or `knowledge`, plus an id
+  and dedupe key
+- `subjectRef`: a WorkflowInvocation-local subject kind such as `repo`,
+  `pull_request`, `task`, `document`, `run`, or `metric`, plus a path, URL, or
+  id
+- `intent`: `route`, `mutate`, `review`, `evaluate`, or `report`
+- `scope`: project path, worktree policy, permissions, account policy, and
+  concurrency group
+- `outputPolicy`: when to write reports and when to create a follow-up task
+
+OpenLoops admission/work items are first-class records with route key,
+idempotency key, source/subject refs, project key/group, priority, status,
+attempts, next-attempt time, lease expiry, loop/workflow/run ids, and last
+reason. Status values should be explicit: `queued`, `deferred`, `admitted`,
+`running`, `succeeded`, `failed`, `dead_letter`, or `cancelled`.
+
+Run artifacts live under:
+
+```text
+.hasna/loops/runs/<project-slug>/<subject-key>/<run-id>/manifest.json
+.hasna/loops/runs/<project-slug>/<subject-key>/<run-id>/triage.md
+.hasna/loops/runs/<project-slug>/<subject-key>/<run-id>/plan.md
+.hasna/loops/runs/<project-slug>/<subject-key>/<run-id>/worker-report.md
+.hasna/loops/runs/<project-slug>/<subject-key>/<run-id>/evaluation.md
+.hasna/loops/runs/<project-slug>/<subject-key>/<run-id>/evidence/
+```
+
+The `<subject-key>` is never the raw subject reference. It must be a safe path
+segment derived as `kind-safeSlug-shortHash`. Recommended normalization:
+lowercase ASCII, replace non-alphanumeric runs with `-`, trim separators, cap
+the slug portion at 72 characters, and append at least 12 hex characters from a
+SHA-256 hash of the canonical raw `subjectRef`. Reject `.`/`..`, reserved device
+names, path separators, empty keys, and path traversal. Store the raw
+`subjectRef` only inside `manifest.json`.
+
+OpenEvents webhooks/channels are notifications. A `task.created` notification
+can be delivered through OpenEvents, but OpenLoops consumes the envelope and
+upserts/admits work items. OpenEvents must not import OpenLoops or own
+admission, retries, leases, verifier execution, or workflow run artifacts.
+
+Every Hasna app stores local state under `.hasna/<app>/...`. The obsolete
+`.hasna/apps/<app>` layout is not an operational read path. OpenKnowledge's
+canonical storage is `.hasna/knowledge`, not `.hasna/apps/knowledge`.
+
+No-backcompat migrations must preserve data without keeping legacy shims:
+
+1. Create a read-only backup or export before moving data.
+2. Atomically copy or rename into the canonical `.hasna/<app>` path.
+3. Verify JSON item counts, SQLite integrity and table counts, artifact counts,
+   hashes, and any storage-object or sync-snapshot evidence.
+4. Leave only a diagnostic tombstone at the old path.
+5. Treat mismatched counts, hash failures, or SQLite integrity failures as
+   blockers.
+
+Unattended automatic routes must fail closed when the configured sandbox cannot
+be proven. Acceptable sandbox evidence includes a successful preflight receipt
+that names the isolation provider, filesystem/network policy, writable roots,
+tool allowlist, environment redaction result, and timestamp for the exact route
+or run. `danger-full-access` plus a worktree is a manual break-glass mode, not a
+safe auto-route default.
+
+`WorkflowInvocation` is documented here as the architecture boundary used by
+OpenLoops and neighboring packages. It is not yet a wire schema in the current
+catalog; add a `hasna.workflow_invocation.v1` schema only when at least two
+packages need to validate the object directly at a shared boundary.
 
 ## Enforcement Model
 
