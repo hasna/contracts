@@ -47,7 +47,7 @@
     "lint": "tsc --noEmit",
     "verify:release": "bun run typecheck && bun test && bun run build && bun run smoke:dist && bun run pack:check",
     "smoke:dist": "bun scripts/smoke-dist.ts",
-    "pack:check": "npm pack --dry-run --json --ignore-scripts",
+    "pack:check": "bun pm pack --dry-run --ignore-scripts",
     "dev:cli": "bun run src/cli/index.ts",
     "prepack": "bun run verify:release",
     "prepublishOnly": "bun run typecheck && bun test"
