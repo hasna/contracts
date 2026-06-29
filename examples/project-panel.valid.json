@@ -1,0 +1,43 @@
+{
+  "schema": "hasna.project_panel.v1",
+  "id": "panel_tasks_swiss_bank_account",
+  "createdAt": "2026-06-29T08:00:00.000Z",
+  "projectId": "swiss-bank-account",
+  "provider": {
+    "kind": "todos",
+    "id": "integration_todos_swiss_bank_account",
+    "name": "Project todos",
+    "sourcePackage": "@hasna/todos",
+    "externalId": "swiss-bank-account"
+  },
+  "kind": "tasks",
+  "title": "Tasks",
+  "summary": "Open work and blockers for the project.",
+  "state": "ready",
+  "generatedAt": "2026-06-29T08:05:00.000Z",
+  "freshness": "fresh",
+  "metrics": [
+    {
+      "id": "open_tasks",
+      "label": "Open tasks",
+      "value": 8,
+      "status": "warning"
+    }
+  ],
+  "items": [
+    {
+      "id": "task_read_contract",
+      "title": "Read potential contract from Ionut Babos",
+      "status": "pending",
+      "priority": "high",
+      "resourceRefs": [
+        {
+          "kind": "task",
+          "id": "task_read_contract",
+          "sourcePackage": "@hasna/todos",
+          "externalId": "task_read_contract"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "schema": "hasna.render_manifest.v1",
+  "id": "render_swiss_bank_account_dashboard",
+  "createdAt": "2026-06-29T08:00:00.000Z",
+  "projectId": "swiss-bank-account",
+  "name": "Swiss Bank Account Dashboard",
+  "version": "0.1.0",
+  "manifestPath": ".hasna/project/dashboard.render.json",
+  "renderer": "react_flow",
+  "imports": [
+    {
+      "id": "theme",
+      "kind": "local",
+      "specifier": "theme",
+      "path": ".hasna/project/theme.json"
+    }
+  ],
+  "views": [
+    {
+      "id": "dashboard",
+      "title": "Dashboard",
+      "kind": "canvas",
+      "default": true,
+      "entry": ".hasna/project/views/dashboard.json",
+      "imports": [
+        {
+          "id": "snapshot",
+          "kind": "provider",
+          "specifier": "project-snapshot",
+          "provider": "todos",
+          "schemaId": "hasna.project_snapshot.v1"
+        }
+      ],
+      "panelRefs": [
+        {
+          "kind": "panel",
+          "id": "panel_tasks_swiss_bank_account",
+          "uri": "dashboard://swiss-bank-account/panels/tasks"
+        }
+      ]
+    }
+  ],
+  "compatibility": {
+    "minProjectsVersion": "0.1.0",
+    "minContractsVersion": "0.2.2"
+  }
+}

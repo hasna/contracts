@@ -1,0 +1,22 @@
+{
+  "schema": "hasna.render_manifest.v1",
+  "id": "render_duplicate_defaults",
+  "createdAt": "2026-06-29T08:00:00.000Z",
+  "projectId": "swiss-bank-account",
+  "name": "Duplicate Defaults",
+  "version": "0.1.0",
+  "views": [
+    {
+      "id": "dashboard",
+      "title": "Dashboard",
+      "kind": "canvas",
+      "default": true
+    },
+    {
+      "id": "documents",
+      "title": "Documents",
+      "kind": "document",
+      "default": true
+    }
+  ]
+}

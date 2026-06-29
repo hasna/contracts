@@ -1,0 +1,8 @@
+{
+  "schema": "hasna.project_manifest.v1",
+  "id": "project_slug_mismatch",
+  "createdAt": "2026-06-29T08:00:00.000Z",
+  "projectId": "swiss-bank-account",
+  "slug": "swiss-bank",
+  "name": "Swiss Bank Account"
+}

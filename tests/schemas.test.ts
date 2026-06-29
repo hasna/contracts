@@ -5,10 +5,15 @@ import {
   ContractSchemaRegistry,
   type EvidenceRef,
   EvidenceRefSchema,
+  IntegrationRefSchema,
   NoCloudEvidencePackSchema,
   parseEmbeddedContract,
   parseContract,
+  ProjectManifestSchema,
+  ProjectPanelSchema,
+  ProjectSnapshotSchema,
   ProofBundleSchema,
+  RenderManifestSchema,
   ScaffoldInstallRecordSchema,
   ScaffoldManifestSchema,
   SCHEMA_IDS,
@@ -265,6 +270,291 @@ describe("core schemas", () => {
     });
 
     expect(proof.checks[0]?.status).toBe("succeeded");
+  });
+
+  test("validates project manifests with standardized layout and integration refs", () => {
+    const integration = IntegrationRefSchema.parse({
+      schema: SCHEMA_IDS.integrationRef,
+      id: "integration_todos_swiss_bank_account",
+      createdAt,
+      kind: "todos",
+      name: "Project todos",
+      projectId: "swiss-bank-account",
+      sourcePackage: "@hasna/todos",
+      externalId: "swiss-bank-account"
+    });
+
+    const manifest = ProjectManifestSchema.parse({
+      schema: SCHEMA_IDS.projectManifest,
+      id: "project_swiss_bank_account",
+      createdAt,
+      projectId: "swiss-bank-account",
+      slug: "swiss-bank-account",
+      name: "Swiss Bank Account",
+      classification: "sensitive",
+      integrations: [integration]
+    });
+
+    expect(manifest.layout.schemaRoot).toBe(".hasna/project");
+    expect(manifest.integrations[0]?.kind).toBe("todos");
+  });
+
+  test("rejects unsafe project paths and manifest integration mismatches", () => {
+    const unsafePath = validateContract(SCHEMA_IDS.projectManifest, {
+      schema: SCHEMA_IDS.projectManifest,
+      id: "project_unsafe_path",
+      createdAt,
+      projectId: "swiss-bank-account",
+      slug: "swiss-bank-account",
+      name: "Swiss Bank Account",
+      layout: {
+        dashboardManifest: "../dashboard.json"
+      }
+    });
+    expect(unsafePath.success).toBe(false);
+    if (!unsafePath.success) {
+      expect(unsafePath.error.issues.map((issue) => issue.path.join("."))).toContain("layout.dashboardManifest");
+    }
+
+    const mismatch = validateContract(SCHEMA_IDS.projectManifest, {
+      schema: SCHEMA_IDS.projectManifest,
+      id: "project_mismatch",
+      createdAt,
+      projectId: "swiss-bank-account",
+      slug: "swiss-bank-account",
+      name: "Swiss Bank Account",
+      integrations: [
+        {
+          schema: SCHEMA_IDS.integrationRef,
+          id: "integration_wrong_project",
+          createdAt,
+          kind: "todos",
+          name: "Wrong project",
+          projectId: "other-project",
+          sourcePackage: "@hasna/todos",
+          externalId: "other-project"
+        }
+      ]
+    });
+    expect(mismatch.success).toBe(false);
+    if (!mismatch.success) {
+      expect(mismatch.error.issues.map((issue) => issue.path.join("."))).toContain("integrations.0.projectId");
+    }
+
+    const duplicateAndWrongRenderKind = validateContract(SCHEMA_IDS.projectManifest, {
+      schema: SCHEMA_IDS.projectManifest,
+      id: "project_bad_refs",
+      createdAt,
+      projectId: "swiss-bank-account",
+      slug: "swiss-bank-account",
+      name: "Swiss Bank Account",
+      integrations: [
+        {
+          schema: SCHEMA_IDS.integrationRef,
+          id: "integration_duplicate",
+          createdAt,
+          kind: "todos",
+          name: "Todos",
+          sourcePackage: "@hasna/todos",
+          externalId: "swiss-bank-account"
+        },
+        {
+          schema: SCHEMA_IDS.integrationRef,
+          id: "integration_duplicate",
+          createdAt,
+          kind: "files",
+          name: "Files",
+          sourcePackage: "@hasna/files",
+          externalId: "swiss-bank-account"
+        }
+      ],
+      renderManifests: [{ kind: "file", id: "render_dashboard", uri: "render://projects/swiss-bank-account/dashboard" }]
+    });
+    expect(duplicateAndWrongRenderKind.success).toBe(false);
+    if (!duplicateAndWrongRenderKind.success) {
+      const paths = duplicateAndWrongRenderKind.error.issues.map((issue) => issue.path.join("."));
+      expect(paths).toContain("integrations.1.id");
+      expect(paths).toContain("renderManifests.0.kind");
+    }
+  });
+
+  test("validates project panels and requires explanations for unavailable provider states", () => {
+    const readyPanel = ProjectPanelSchema.parse({
+      schema: SCHEMA_IDS.projectPanel,
+      id: "panel_tasks",
+      createdAt,
+      projectId: "swiss-bank-account",
+      provider: { kind: "todos", id: "integration_todos" },
+      kind: "tasks",
+      title: "Tasks",
+      generatedAt: createdAt,
+      metrics: [{ id: "open_tasks", label: "Open tasks", value: 3 }]
+    });
+    expect(readyPanel.metrics[0]?.status).toBe("unknown");
+
+    const emptyPanel = ProjectPanelSchema.parse({
+      schema: SCHEMA_IDS.projectPanel,
+      id: "panel_empty",
+      createdAt,
+      projectId: "swiss-bank-account",
+      provider: { kind: "files", id: "integration_files" },
+      kind: "files",
+      title: "Files",
+      state: "empty",
+      generatedAt: createdAt
+    });
+    expect(emptyPanel.state).toBe("empty");
+
+    const missingReason = validateContract(SCHEMA_IDS.projectPanel, {
+      schema: SCHEMA_IDS.projectPanel,
+      id: "panel_auth",
+      createdAt,
+      projectId: "swiss-bank-account",
+      provider: { kind: "mailery", id: "integration_mailery" },
+      kind: "mailery",
+      title: "Email",
+      state: "auth_required",
+      generatedAt: createdAt
+    });
+    expect(missingReason.success).toBe(false);
+    if (!missingReason.success) {
+      expect(missingReason.error.issues.map((issue) => issue.path.join("."))).toContain("stateReason");
+    }
+
+    const duplicateMetricsAndWrongAction = validateContract(SCHEMA_IDS.projectPanel, {
+      schema: SCHEMA_IDS.projectPanel,
+      id: "panel_duplicate_metrics",
+      createdAt,
+      projectId: "swiss-bank-account",
+      provider: { kind: "actions", id: "integration_actions" },
+      kind: "actions",
+      title: "Actions",
+      generatedAt: createdAt,
+      metrics: [
+        { id: "available_actions", label: "Available actions", value: 2 },
+        { id: "available_actions", label: "Duplicate actions", value: 2 }
+      ],
+      actions: [{ kind: "tool", id: "action_open_contract", uri: "integration://actions/open-contract" }]
+    });
+    expect(duplicateMetricsAndWrongAction.success).toBe(false);
+    if (!duplicateMetricsAndWrongAction.success) {
+      const paths = duplicateMetricsAndWrongAction.error.issues.map((issue) => issue.path.join("."));
+      expect(paths).toContain("metrics.1.id");
+      expect(paths).toContain("actions.0.kind");
+    }
+  });
+
+  test("validates render manifests and import boundaries", () => {
+    const manifest = RenderManifestSchema.parse({
+      schema: SCHEMA_IDS.renderManifest,
+      id: "render_dashboard",
+      createdAt,
+      projectId: "swiss-bank-account",
+      name: "Dashboard",
+      version: "0.1.0",
+      views: [{ id: "dashboard", title: "Dashboard", kind: "canvas", default: true }]
+    });
+    expect(manifest.manifestPath).toBe(".hasna/project/dashboard.render.json");
+
+    const duplicateDefaults = validateContract(SCHEMA_IDS.renderManifest, {
+      ...manifest,
+      id: "render_duplicate_defaults",
+      views: [
+        { id: "dashboard", title: "Dashboard", kind: "canvas", default: true },
+        { id: "documents", title: "Documents", kind: "document", default: true }
+      ]
+    });
+    expect(duplicateDefaults.success).toBe(false);
+
+    const missingImportPath = validateContract(SCHEMA_IDS.renderManifest, {
+      ...manifest,
+      id: "render_missing_import_path",
+      imports: [{ id: "theme", kind: "local", specifier: "theme" }]
+    });
+    expect(missingImportPath.success).toBe(false);
+    if (!missingImportPath.success) {
+      expect(missingImportPath.error.issues.map((issue) => issue.path.join("."))).toContain("imports.0.path");
+    }
+
+    const duplicateIdsAndWrongPanelRef = validateContract(SCHEMA_IDS.renderManifest, {
+      ...manifest,
+      id: "render_duplicate_ids",
+      imports: [
+        { id: "theme", kind: "local", specifier: "theme", path: ".hasna/project/theme.json" },
+        { id: "theme", kind: "local", specifier: "theme-copy", path: ".hasna/project/theme-copy.json" }
+      ],
+      views: [
+        {
+          id: "dashboard",
+          title: "Dashboard",
+          kind: "canvas",
+          panelRefs: [{ kind: "file", id: "panel_tasks", uri: "dashboard://swiss-bank-account/panels/tasks" }],
+          imports: [
+            { id: "snapshot", kind: "provider", specifier: "project-snapshot", provider: "todos" },
+            { id: "snapshot", kind: "provider", specifier: "project-snapshot-copy", provider: "files" }
+          ]
+        },
+        { id: "dashboard", title: "Duplicate Dashboard", kind: "canvas" }
+      ]
+    });
+    expect(duplicateIdsAndWrongPanelRef.success).toBe(false);
+    if (!duplicateIdsAndWrongPanelRef.success) {
+      const paths = duplicateIdsAndWrongPanelRef.error.issues.map((issue) => issue.path.join("."));
+      expect(paths).toContain("imports.1.id");
+      expect(paths).toContain("views.1.id");
+      expect(paths).toContain("views.0.imports.1.id");
+      expect(paths).toContain("views.0.panelRefs.0.kind");
+    }
+  });
+
+  test("validates project snapshots and rejects mismatched panel ownership", () => {
+    const panel = ProjectPanelSchema.parse({
+      schema: SCHEMA_IDS.projectPanel,
+      id: "panel_tasks",
+      createdAt,
+      projectId: "swiss-bank-account",
+      provider: { kind: "todos", id: "integration_todos" },
+      kind: "tasks",
+      title: "Tasks",
+      generatedAt: createdAt,
+      metrics: [{ id: "open_tasks", label: "Open tasks", value: 3 }]
+    });
+
+    const snapshot = ProjectSnapshotSchema.parse({
+      schema: SCHEMA_IDS.projectSnapshot,
+      id: "snapshot_swiss_bank_account",
+      createdAt,
+      projectId: "swiss-bank-account",
+      generatedAt: createdAt,
+      manifestRef: { kind: "project", id: "swiss-bank-account", uri: "project://swiss-bank-account" },
+      panels: [panel]
+    });
+    expect(snapshot.panels).toHaveLength(1);
+
+    const mismatch = validateContract(SCHEMA_IDS.projectSnapshot, {
+      ...snapshot,
+      id: "snapshot_mismatch",
+      panels: [{ ...panel, id: "panel_other", projectId: "other-project" }]
+    });
+    expect(mismatch.success).toBe(false);
+    if (!mismatch.success) {
+      expect(mismatch.error.issues.map((issue) => issue.path.join("."))).toContain("panels.0.projectId");
+    }
+
+    const badRefs = validateContract(SCHEMA_IDS.projectSnapshot, {
+      ...snapshot,
+      id: "snapshot_bad_refs",
+      manifestRef: { kind: "file", id: "swiss-bank-account", uri: "project://swiss-bank-account" },
+      renderManifestRef: { kind: "file", id: "render_dashboard", uri: "render://projects/swiss-bank-account/dashboard" },
+      proofBundleRefs: [{ kind: "report", id: "proof_dashboard", uri: "artifact://proof/dashboard.json" }]
+    });
+    expect(badRefs.success).toBe(false);
+    if (!badRefs.success) {
+      const paths = badRefs.error.issues.map((issue) => issue.path.join("."));
+      expect(paths).toContain("manifestRef.kind");
+      expect(paths).toContain("renderManifestRef.kind");
+      expect(paths).toContain("proofBundleRefs.0.kind");
+    }
   });
 
   test("validates app-owned cloud manifests without allowing shared cloud runtimes", () => {

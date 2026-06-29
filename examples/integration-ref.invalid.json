@@ -1,0 +1,7 @@
+{
+  "schema": "hasna.integration_ref.v1",
+  "id": "integration_missing_locator",
+  "createdAt": "2026-06-29T08:00:00.000Z",
+  "kind": "todos",
+  "name": "Missing locator"
+}

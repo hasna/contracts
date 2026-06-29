@@ -1,0 +1,14 @@
+{
+  "schema": "hasna.integration_ref.v1",
+  "id": "integration_todos_swiss_bank_account",
+  "createdAt": "2026-06-29T08:00:00.000Z",
+  "kind": "todos",
+  "name": "Project todos",
+  "projectId": "swiss-bank-account",
+  "sourcePackage": "@hasna/todos",
+  "externalId": "swiss-bank-account",
+  "enabled": true,
+  "readOnly": true,
+  "capabilities": ["project-panel", "task-summary"],
+  "freshness": "fresh"
+}

@@ -1,0 +1,58 @@
+{
+  "schema": "hasna.project_manifest.v1",
+  "id": "project_swiss_bank_account",
+  "createdAt": "2026-06-29T08:00:00.000Z",
+  "projectId": "swiss-bank-account",
+  "slug": "swiss-bank-account",
+  "name": "Swiss Bank Account",
+  "summary": "Personal banking project for document review, bank shortlist, tasks, evidence, and family decisions.",
+  "status": "active",
+  "classification": "sensitive",
+  "layout": {
+    "schemaRoot": ".hasna/project",
+    "dashboardManifest": ".hasna/project/dashboard.render.json",
+    "snapshotsDir": ".hasna/project/snapshots",
+    "documentsDir": "documents",
+    "reportsDir": "reports",
+    "evidenceDir": ".hasna/project/evidence",
+    "privateDir": ".hasna/project/private"
+  },
+  "integrations": [
+    {
+      "schema": "hasna.integration_ref.v1",
+      "id": "integration_todos_swiss_bank_account",
+      "createdAt": "2026-06-29T08:00:00.000Z",
+      "kind": "todos",
+      "name": "Project todos",
+      "projectId": "swiss-bank-account",
+      "sourcePackage": "@hasna/todos",
+      "externalId": "swiss-bank-account",
+      "capabilities": ["project-panel"]
+    },
+    {
+      "schema": "hasna.integration_ref.v1",
+      "id": "integration_mailery_swiss_bank_account",
+      "createdAt": "2026-06-29T08:00:00.000Z",
+      "kind": "mailery",
+      "name": "Contract email search",
+      "projectId": "swiss-bank-account",
+      "uri": "mailery://search/from/ionut-babos/contracts",
+      "capabilities": ["project-panel", "evidence-refs"]
+    }
+  ],
+  "renderManifests": [
+    {
+      "kind": "render",
+      "id": "render_dashboard",
+      "uri": "render://projects/swiss-bank-account/dashboard"
+    }
+  ],
+  "resourceRefs": [
+    {
+      "kind": "project",
+      "id": "swiss-bank-account",
+      "uri": "project://swiss-bank-account"
+    }
+  ],
+  "tags": ["banking", "documents", "family"]
+}

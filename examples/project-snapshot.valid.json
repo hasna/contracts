@@ -1,0 +1,43 @@
+{
+  "schema": "hasna.project_snapshot.v1",
+  "id": "snapshot_swiss_bank_account",
+  "createdAt": "2026-06-29T08:10:00.000Z",
+  "projectId": "swiss-bank-account",
+  "generatedAt": "2026-06-29T08:10:00.000Z",
+  "status": "succeeded",
+  "manifestRef": {
+    "kind": "project",
+    "id": "swiss-bank-account",
+    "uri": "project://swiss-bank-account"
+  },
+  "renderManifestRef": {
+    "kind": "render",
+    "id": "render_swiss_bank_account_dashboard",
+    "uri": "render://projects/swiss-bank-account/dashboard"
+  },
+  "panels": [
+    {
+      "schema": "hasna.project_panel.v1",
+      "id": "panel_tasks_swiss_bank_account",
+      "createdAt": "2026-06-29T08:00:00.000Z",
+      "projectId": "swiss-bank-account",
+      "provider": {
+        "kind": "todos",
+        "id": "integration_todos_swiss_bank_account"
+      },
+      "kind": "tasks",
+      "title": "Tasks",
+      "state": "ready",
+      "generatedAt": "2026-06-29T08:05:00.000Z",
+      "metrics": [
+        {
+          "id": "open_tasks",
+          "label": "Open tasks",
+          "value": 8,
+          "status": "warning"
+        }
+      ]
+    }
+  ],
+  "freshness": "fresh"
+}

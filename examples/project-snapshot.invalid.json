@@ -1,0 +1,35 @@
+{
+  "schema": "hasna.project_snapshot.v1",
+  "id": "snapshot_project_mismatch",
+  "createdAt": "2026-06-29T08:10:00.000Z",
+  "projectId": "swiss-bank-account",
+  "generatedAt": "2026-06-29T08:10:00.000Z",
+  "manifestRef": {
+    "kind": "project",
+    "id": "swiss-bank-account",
+    "uri": "project://swiss-bank-account"
+  },
+  "panels": [
+    {
+      "schema": "hasna.project_panel.v1",
+      "id": "panel_wrong_project",
+      "createdAt": "2026-06-29T08:00:00.000Z",
+      "projectId": "other-project",
+      "provider": {
+        "kind": "todos",
+        "id": "integration_todos_other_project"
+      },
+      "kind": "tasks",
+      "title": "Tasks",
+      "state": "ready",
+      "generatedAt": "2026-06-29T08:05:00.000Z",
+      "metrics": [
+        {
+          "id": "open_tasks",
+          "label": "Open tasks",
+          "value": 1
+        }
+      ]
+    }
+  ]
+}

@@ -131,6 +131,21 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
   MCP tool, API operation, workflow, or agent skill.
 - `hasna.context_pack.v1`: bounded context bundle with objective, resources,
   evidence, constraints, and token budget.
+- `hasna.integration_ref.v1`: portable pointer to a project integration provider
+  such as todos, files, mailery, conversations, knowledge, mementos, reports,
+  actions, render, contracts, or a custom provider.
+- `hasna.project_manifest.v1`: canonical agent-managed project manifest with
+  slug, classification, `.hasna/project` layout, integrations, render manifests,
+  resource refs, and evidence refs.
+- `hasna.project_panel.v1`: compact provider output for a dashboard panel,
+  including state, freshness, metrics, items, safe action refs, evidence, and an
+  optional render fragment.
+- `hasna.project_snapshot.v1`: bounded point-in-time project dashboard snapshot
+  that groups panels, context packs, proof refs, resources, evidence, and
+  freshness metadata for rendering.
+- `hasna.render_manifest.v1`: project-local render manifest for JSON/render,
+  React Flow/infinite canvas, report, document, or custom views with explicit
+  import boundaries.
 - `hasna.agent_trajectory.v1`: compact trace of agent steps, tool calls,
   decisions, blockers, and final outcome.
 - `hasna.validation_plan.v1`: deterministic checks a package or agent should run.
@@ -171,7 +186,10 @@ Common resource-kind mappings:
 | `open-sessions` | `session`, `run`, `machine`, `artifact` |
 | `open-context` | `context_pack`, `file`, `url`, `knowledge` |
 | `open-knowledge` / `open-mementos` | `knowledge`, `memento`, `context_pack` |
-| `open-files` | `file`, `artifact`, `url` |
+| `open-files` | `file`, `document`, `artifact`, `url` |
+| `open-mailery` | `email`, `document`, `artifact` |
+| `open-conversations` | `conversation`, `comment`, `event` |
+| `open-projects` | `project`, `dashboard`, `render`, `panel`, `integration` |
 | `open-evals` | `eval`, `verification`, `report`, `proof_bundle` |
 | `open-economy` | `cost`, `budget`; budget choices are emitted as `DecisionEnvelope` contracts, not resource kinds |
 | `open-monitor` | `alert`, `incident`, `machine`, `report` |
@@ -195,6 +213,10 @@ helpers. Owning packages still own storage and behavior.
 - `open-knowledge` owns durable knowledge records and promotion workflows under
   `.hasna/knowledge`.
 - `open-files` owns artifact storage, file indexing, and dereference logic.
+- `open-projects` owns project folder discovery, `.hasna/project` conventions,
+  dashboard snapshot assembly, render manifest loading, and the local dashboard
+  viewer. It validates project manifests, panels, snapshots, and render
+  manifests with `@hasna/contracts`.
 - `open-mementos` owns memory lifecycle and recall.
 - `open-reports` owns rendered reports and proof presentation.
 - `open-evals` owns evaluation execution and scored validation results.

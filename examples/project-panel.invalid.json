@@ -1,0 +1,14 @@
+{
+  "schema": "hasna.project_panel.v1",
+  "id": "panel_mailery_auth_missing_reason",
+  "createdAt": "2026-06-29T08:00:00.000Z",
+  "projectId": "swiss-bank-account",
+  "provider": {
+    "kind": "mailery",
+    "id": "integration_mailery_swiss_bank_account"
+  },
+  "kind": "mailery",
+  "title": "Email",
+  "state": "auth_required",
+  "generatedAt": "2026-06-29T08:05:00.000Z"
+}

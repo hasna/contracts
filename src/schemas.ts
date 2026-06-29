@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const CONTRACTS_PACKAGE_NAME = "@hasna/contracts";
-export const CONTRACTS_PACKAGE_VERSION = "0.2.1";
+export const CONTRACTS_PACKAGE_VERSION = "0.2.2";
 
 export const SCHEMA_IDS = {
   actorRef: "hasna.actor_ref.v1",
@@ -12,6 +12,11 @@ export const SCHEMA_IDS = {
   costEstimate: "hasna.cost_estimate.v1",
   capabilityCard: "hasna.capability_card.v1",
   contextPack: "hasna.context_pack.v1",
+  integrationRef: "hasna.integration_ref.v1",
+  projectManifest: "hasna.project_manifest.v1",
+  projectPanel: "hasna.project_panel.v1",
+  projectSnapshot: "hasna.project_snapshot.v1",
+  renderManifest: "hasna.render_manifest.v1",
   agentTrajectory: "hasna.agent_trajectory.v1",
   validationPlan: "hasna.validation_plan.v1",
   proofBundle: "hasna.proof_bundle.v1",
@@ -32,12 +37,22 @@ export const UriSchema = NonEmptyStringSchema.refine(
   (value) =>
     value.startsWith("artifact://") ||
     value.startsWith("repo://") ||
+    value.startsWith("project://") ||
+    value.startsWith("dashboard://") ||
+    value.startsWith("render://") ||
+    value.startsWith("integration://") ||
     value.startsWith("task://") ||
+    value.startsWith("todo://") ||
     value.startsWith("file://") ||
+    value.startsWith("files://") ||
+    value.startsWith("mailery://") ||
+    value.startsWith("conversation://") ||
+    value.startsWith("knowledge://") ||
+    value.startsWith("memento://") ||
     value.startsWith("https://") ||
     value.startsWith("http://") ||
     value.startsWith("git+https://"),
-  "URI must use artifact://, repo://, task://, file://, http(s)://, or git+https://"
+  "URI must use artifact://, repo://, project://, dashboard://, render://, integration://, task://, todo://, file://, files://, mailery://, conversation://, knowledge://, memento://, http(s)://, or git+https://"
 );
 export const Sha256DigestSchema = z.string().regex(/^[a-fA-F0-9]{64}$/);
 export const HashStringSchema = z.string().regex(/^(sha256:)?[a-fA-F0-9]{64}$/);
@@ -124,14 +139,21 @@ export const ResourceKindSchema = z.enum([
   "workflow",
   "action",
   "event",
+  "integration",
   "session",
   "machine",
   "model",
   "tool",
   "file",
+  "document",
   "url",
   "artifact",
   "knowledge",
+  "email",
+  "conversation",
+  "dashboard",
+  "render",
+  "panel",
   "report",
   "commit",
   "branch",
@@ -387,6 +409,474 @@ export const ContextPackSchema = contractBaseSchema(SCHEMA_IDS.contextPack)
   })
   .strict();
 export type ContextPack = z.infer<typeof ContextPackSchema>;
+
+export const RelativeProjectPathSchema = NonEmptyStringSchema.refine(
+  (value) => !value.startsWith("/") && !value.includes("\\") && !value.split("/").includes(".."),
+  "Project paths must be relative and cannot contain parent-directory segments"
+);
+export type RelativeProjectPath = z.infer<typeof RelativeProjectPathSchema>;
+
+export const ProjectSlugSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Project slugs must be lowercase dashed identifiers");
+export type ProjectSlug = z.infer<typeof ProjectSlugSchema>;
+
+export const ProjectClassificationSchema = z.enum(["public", "internal", "private", "sensitive"]);
+export type ProjectClassification = z.infer<typeof ProjectClassificationSchema>;
+
+export const ProjectStatusSchema = z.enum(["draft", "active", "paused", "archived"]);
+export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
+
+export const ProjectIntegrationKindSchema = z.enum([
+  "todos",
+  "files",
+  "mailery",
+  "conversations",
+  "knowledge",
+  "mementos",
+  "reports",
+  "actions",
+  "render",
+  "contracts",
+  "custom"
+]);
+export type ProjectIntegrationKind = z.infer<typeof ProjectIntegrationKindSchema>;
+
+export const IntegrationRefSchema = contractBaseSchema(SCHEMA_IDS.integrationRef)
+  .extend({
+    kind: ProjectIntegrationKindSchema,
+    name: z.string().min(1),
+    projectId: ProjectSlugSchema.optional(),
+    sourcePackage: NonEmptyStringSchema.optional(),
+    externalId: NonEmptyStringSchema.optional(),
+    uri: UriSchema.optional(),
+    enabled: z.boolean().default(true),
+    readOnly: z.boolean().default(true),
+    capabilities: z.array(z.string().min(1)).default([]),
+    freshness: z.enum(["fresh", "stale", "unknown"]).default("unknown"),
+    resourceRef: ResourcePointerSchema.optional(),
+    evidenceRefs: z.array(EvidencePointerSchema).default([]),
+    config: MetadataSchema.optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.uri && !(value.sourcePackage && value.externalId) && !value.resourceRef) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Integration refs require uri, resourceRef, or both sourcePackage and externalId",
+        path: ["uri"]
+      });
+    }
+  });
+export type IntegrationRef = z.infer<typeof IntegrationRefSchema>;
+
+export const ProjectLayoutSchema = z
+  .object({
+    schemaRoot: RelativeProjectPathSchema.default(".hasna/project"),
+    dashboardManifest: RelativeProjectPathSchema.default(".hasna/project/dashboard.render.json"),
+    snapshotsDir: RelativeProjectPathSchema.default(".hasna/project/snapshots"),
+    documentsDir: RelativeProjectPathSchema.default("documents"),
+    reportsDir: RelativeProjectPathSchema.default("reports"),
+    evidenceDir: RelativeProjectPathSchema.default(".hasna/project/evidence"),
+    privateDir: RelativeProjectPathSchema.default(".hasna/project/private")
+  })
+  .strict();
+export type ProjectLayout = z.infer<typeof ProjectLayoutSchema>;
+
+export const ProjectManifestSchema = contractBaseSchema(SCHEMA_IDS.projectManifest)
+  .extend({
+    projectId: ProjectSlugSchema,
+    slug: ProjectSlugSchema,
+    name: z.string().min(1),
+    summary: z.string().min(1).optional(),
+    status: ProjectStatusSchema.default("active"),
+    classification: ProjectClassificationSchema.default("private"),
+    owner: ActorPointerSchema.optional(),
+    layout: ProjectLayoutSchema.default({}),
+    integrations: z.array(IntegrationRefSchema).default([]),
+    renderManifests: z.array(ResourcePointerSchema).default([]),
+    resourceRefs: z.array(ResourcePointerSchema).default([]),
+    evidenceRefs: z.array(EvidencePointerSchema).default([]),
+    tags: TagsSchema
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const integrationIds = new Set<string>();
+    const renderManifestIds = new Set<string>();
+    if (value.projectId !== value.slug) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "projectId and slug must match for canonical project manifests",
+        path: ["slug"]
+      });
+    }
+    for (const [index, integration] of value.integrations.entries()) {
+      if (integrationIds.has(integration.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Project manifest integration ids must be unique",
+          path: ["integrations", index, "id"]
+        });
+      }
+      integrationIds.add(integration.id);
+      if (integration.projectId && integration.projectId !== value.projectId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Integration projectId must match the manifest projectId",
+          path: ["integrations", index, "projectId"]
+        });
+      }
+    }
+    for (const [index, renderManifest] of value.renderManifests.entries()) {
+      if (renderManifest.kind !== "render") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Project renderManifests must use resource kind render",
+          path: ["renderManifests", index, "kind"]
+        });
+      }
+      if (renderManifestIds.has(renderManifest.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Project renderManifest refs must be unique",
+          path: ["renderManifests", index, "id"]
+        });
+      }
+      renderManifestIds.add(renderManifest.id);
+    }
+  });
+export type ProjectManifest = z.infer<typeof ProjectManifestSchema>;
+
+export const RenderImportKindSchema = z.enum(["local", "package", "provider", "url"]);
+export type RenderImportKind = z.infer<typeof RenderImportKindSchema>;
+
+export const RenderImportSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: RenderImportKindSchema,
+    specifier: z.string().min(1),
+    path: RelativeProjectPathSchema.optional(),
+    packageName: z.string().min(1).optional(),
+    uri: UriSchema.optional(),
+    provider: ProjectIntegrationKindSchema.optional(),
+    schemaId: SchemaIdSchema.optional(),
+    integrity: HashStringSchema.optional(),
+    resourceRef: ResourcePointerSchema.optional(),
+    optional: z.boolean().default(false)
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.kind === "local" && !value.path) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Local render imports require path", path: ["path"] });
+    }
+    if (value.kind === "package" && !value.packageName) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Package render imports require packageName", path: ["packageName"] });
+    }
+    if (value.kind === "provider" && !value.provider) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Provider render imports require provider", path: ["provider"] });
+    }
+    if (value.kind === "url" && !value.uri) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "URL render imports require uri", path: ["uri"] });
+    }
+  });
+export type RenderImport = z.infer<typeof RenderImportSchema>;
+
+export const RenderViewKindSchema = z.enum(["dashboard", "canvas", "panel", "report", "document", "custom"]);
+export type RenderViewKind = z.infer<typeof RenderViewKindSchema>;
+
+export const RenderViewSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    kind: RenderViewKindSchema,
+    default: z.boolean().default(false),
+    entry: RelativeProjectPathSchema.optional(),
+    imports: z.array(RenderImportSchema).default([]),
+    panelRefs: z.array(ResourcePointerSchema).default([]),
+    dataRefs: z.array(ResourcePointerSchema).default([]),
+    layout: MetadataSchema.optional()
+  })
+  .strict();
+export type RenderView = z.infer<typeof RenderViewSchema>;
+
+export const RenderManifestSchema = contractBaseSchema(SCHEMA_IDS.renderManifest)
+  .extend({
+    projectId: ProjectSlugSchema,
+    name: z.string().min(1),
+    version: z.string().min(1),
+    manifestPath: RelativeProjectPathSchema.default(".hasna/project/dashboard.render.json"),
+    renderer: z.enum(["json_render", "react_flow", "markdown", "html", "custom"]).default("json_render"),
+    views: z.array(RenderViewSchema).min(1),
+    imports: z.array(RenderImportSchema).default([]),
+    theme: MetadataSchema.optional(),
+    compatibility: z
+      .object({
+        minProjectsVersion: z.string().min(1).optional(),
+        minContractsVersion: z.string().min(1).optional()
+      })
+      .strict()
+      .optional(),
+    resourceRefs: z.array(ResourcePointerSchema).default([]),
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const defaults = value.views.filter((view) => view.default);
+    const viewIds = new Set<string>();
+    const importIds = new Set<string>();
+    if (defaults.length > 1) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Render manifests can have at most one default view", path: ["views"] });
+    }
+    for (const [index, importRef] of value.imports.entries()) {
+      if (importIds.has(importRef.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Render manifest import ids must be unique",
+          path: ["imports", index, "id"]
+        });
+      }
+      importIds.add(importRef.id);
+    }
+    for (const [viewIndex, view] of value.views.entries()) {
+      if (viewIds.has(view.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Render manifest view ids must be unique",
+          path: ["views", viewIndex, "id"]
+        });
+      }
+      viewIds.add(view.id);
+      const viewImportIds = new Set<string>();
+      for (const [importIndex, importRef] of view.imports.entries()) {
+        if (viewImportIds.has(importRef.id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Render view import ids must be unique",
+            path: ["views", viewIndex, "imports", importIndex, "id"]
+          });
+        }
+        viewImportIds.add(importRef.id);
+      }
+      for (const [panelIndex, panelRef] of view.panelRefs.entries()) {
+        if (panelRef.kind !== "panel") {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Render view panelRefs must use resource kind panel",
+            path: ["views", viewIndex, "panelRefs", panelIndex, "kind"]
+          });
+        }
+      }
+    }
+  });
+export type RenderManifest = z.infer<typeof RenderManifestSchema>;
+
+export const ProjectPanelStateSchema = z.enum(["ready", "empty", "loading", "error", "auth_required", "unavailable", "stale"]);
+export type ProjectPanelState = z.infer<typeof ProjectPanelStateSchema>;
+
+export const ProjectPanelKindSchema = z.enum([
+  "overview",
+  "tasks",
+  "files",
+  "mailery",
+  "conversations",
+  "knowledge",
+  "mementos",
+  "reports",
+  "actions",
+  "timeline",
+  "risks",
+  "documents",
+  "custom"
+]);
+export type ProjectPanelKind = z.infer<typeof ProjectPanelKindSchema>;
+
+export const ProjectPanelMetricSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    value: z.union([z.string(), z.number(), z.boolean()]),
+    unit: z.string().min(1).optional(),
+    status: z.enum(["good", "warning", "critical", "unknown"]).default("unknown"),
+    resourceRefs: z.array(ResourcePointerSchema).default([])
+  })
+  .strict();
+export type ProjectPanelMetric = z.infer<typeof ProjectPanelMetricSchema>;
+
+export const ProjectPanelItemSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    summary: z.string().min(1).optional(),
+    status: z.string().min(1).optional(),
+    priority: z.enum(["low", "medium", "high", "critical", "unknown"]).default("unknown"),
+    timestamp: TimestampSchema.optional(),
+    resourceRefs: z.array(ResourcePointerSchema).default([]),
+    evidenceRefs: z.array(EvidencePointerSchema).default([]),
+    metadata: MetadataSchema.optional()
+  })
+  .strict();
+export type ProjectPanelItem = z.infer<typeof ProjectPanelItemSchema>;
+
+export const ProjectRenderFragmentSchema = z
+  .object({
+    renderer: z.enum(["json_render", "react_flow", "markdown", "html", "custom"]).default("json_render"),
+    title: z.string().min(1).optional(),
+    entry: RelativeProjectPathSchema.optional(),
+    imports: z.array(RenderImportSchema).default([]),
+    spec: MetadataSchema.default({})
+  })
+  .strict();
+export type ProjectRenderFragment = z.infer<typeof ProjectRenderFragmentSchema>;
+
+export const ProjectPanelSchema = contractBaseSchema(SCHEMA_IDS.projectPanel)
+  .extend({
+    projectId: ProjectSlugSchema,
+    provider: z
+      .object({
+        kind: ProjectIntegrationKindSchema,
+        id: z.string().min(1),
+        name: z.string().min(1).optional(),
+        sourcePackage: NonEmptyStringSchema.optional(),
+        externalId: NonEmptyStringSchema.optional()
+      })
+      .strict(),
+    kind: ProjectPanelKindSchema,
+    title: z.string().min(1),
+    summary: z.string().min(1).optional(),
+    state: ProjectPanelStateSchema.default("ready"),
+    stateReason: z.string().min(1).optional(),
+    generatedAt: TimestampSchema,
+    freshness: z.enum(["fresh", "stale", "unknown"]).default("unknown"),
+    metrics: z.array(ProjectPanelMetricSchema).default([]),
+    items: z.array(ProjectPanelItemSchema).default([]),
+    actions: z.array(ResourcePointerSchema).default([]),
+    resourceRefs: z.array(ResourcePointerSchema).default([]),
+    evidenceRefs: z.array(EvidencePointerSchema).default([]),
+    renderFragment: ProjectRenderFragmentSchema.optional(),
+    warnings: z.array(z.string().min(1)).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const reasonStates = new Set<ProjectPanelState>(["error", "auth_required", "unavailable", "stale"]);
+    const metricIds = new Set<string>();
+    const itemIds = new Set<string>();
+    if (reasonStates.has(value.state) && !value.stateReason) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Non-ready provider states require stateReason",
+        path: ["stateReason"]
+      });
+    }
+    if (value.state === "ready" && value.metrics.length === 0 && value.items.length === 0 && !value.renderFragment) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Ready panels require metrics, items, or a renderFragment; use state=empty for empty panels",
+        path: ["state"]
+      });
+    }
+    for (const [index, metric] of value.metrics.entries()) {
+      if (metricIds.has(metric.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Project panel metric ids must be unique",
+          path: ["metrics", index, "id"]
+        });
+      }
+      metricIds.add(metric.id);
+    }
+    for (const [index, item] of value.items.entries()) {
+      if (itemIds.has(item.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Project panel item ids must be unique",
+          path: ["items", index, "id"]
+        });
+      }
+      itemIds.add(item.id);
+    }
+    for (const [index, action] of value.actions.entries()) {
+      if (action.kind !== "action") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Project panel actions must use resource kind action",
+          path: ["actions", index, "kind"]
+        });
+      }
+    }
+  });
+export type ProjectPanel = z.infer<typeof ProjectPanelSchema>;
+
+export const ProjectSnapshotSchema = contractBaseSchema(SCHEMA_IDS.projectSnapshot)
+  .extend({
+    projectId: ProjectSlugSchema,
+    generatedAt: TimestampSchema,
+    status: ContractStatusSchema.default("unknown"),
+    manifestRef: ResourcePointerSchema,
+    renderManifestRef: ResourcePointerSchema.optional(),
+    panels: z.array(ProjectPanelSchema).default([]),
+    contextPacks: z.array(ContextPackSchema).default([]),
+    proofBundleRefs: z.array(ResourcePointerSchema).default([]),
+    resourceRefs: z.array(ResourcePointerSchema).default([]),
+    evidenceRefs: z.array(EvidencePointerSchema).default([]),
+    warnings: z.array(z.string().min(1)).default([]),
+    freshness: z.enum(["fresh", "stale", "unknown"]).default("unknown")
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const panelIds = new Set<string>();
+    const contextPackIds = new Set<string>();
+    if (value.manifestRef.kind !== "project") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Project snapshot manifestRef must use resource kind project",
+        path: ["manifestRef", "kind"]
+      });
+    }
+    if (value.renderManifestRef && value.renderManifestRef.kind !== "render") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Project snapshot renderManifestRef must use resource kind render",
+        path: ["renderManifestRef", "kind"]
+      });
+    }
+    for (const [index, proofBundleRef] of value.proofBundleRefs.entries()) {
+      if (proofBundleRef.kind !== "proof_bundle") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Project snapshot proofBundleRefs must use resource kind proof_bundle",
+          path: ["proofBundleRefs", index, "kind"]
+        });
+      }
+    }
+    for (const [index, panel] of value.panels.entries()) {
+      if (panel.projectId !== value.projectId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Panel projectId must match snapshot projectId",
+          path: ["panels", index, "projectId"]
+        });
+      }
+      if (panelIds.has(panel.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Project snapshot panel ids must be unique",
+          path: ["panels", index, "id"]
+        });
+      }
+      panelIds.add(panel.id);
+    }
+    for (const [index, contextPack] of value.contextPacks.entries()) {
+      if (contextPackIds.has(contextPack.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Project snapshot context pack ids must be unique",
+          path: ["contextPacks", index, "id"]
+        });
+      }
+      contextPackIds.add(contextPack.id);
+    }
+  });
+export type ProjectSnapshot = z.infer<typeof ProjectSnapshotSchema>;
 
 export const ValidationCheckSchema = z
   .object({
@@ -1013,6 +1503,11 @@ export const ContractSchemaRegistry = {
   [SCHEMA_IDS.costEstimate]: CostEstimateSchema,
   [SCHEMA_IDS.capabilityCard]: CapabilityCardSchema,
   [SCHEMA_IDS.contextPack]: ContextPackSchema,
+  [SCHEMA_IDS.integrationRef]: IntegrationRefSchema,
+  [SCHEMA_IDS.projectManifest]: ProjectManifestSchema,
+  [SCHEMA_IDS.projectPanel]: ProjectPanelSchema,
+  [SCHEMA_IDS.projectSnapshot]: ProjectSnapshotSchema,
+  [SCHEMA_IDS.renderManifest]: RenderManifestSchema,
   [SCHEMA_IDS.agentTrajectory]: AgentTrajectorySchema,
   [SCHEMA_IDS.validationPlan]: ValidationPlanSchema,
   [SCHEMA_IDS.proofBundle]: ProofBundleSchema,
@@ -1033,6 +1528,11 @@ export type ContractBySchemaId = {
   [SCHEMA_IDS.costEstimate]: CostEstimate;
   [SCHEMA_IDS.capabilityCard]: CapabilityCard;
   [SCHEMA_IDS.contextPack]: ContextPack;
+  [SCHEMA_IDS.integrationRef]: IntegrationRef;
+  [SCHEMA_IDS.projectManifest]: ProjectManifest;
+  [SCHEMA_IDS.projectPanel]: ProjectPanel;
+  [SCHEMA_IDS.projectSnapshot]: ProjectSnapshot;
+  [SCHEMA_IDS.renderManifest]: RenderManifest;
   [SCHEMA_IDS.agentTrajectory]: AgentTrajectory;
   [SCHEMA_IDS.validationPlan]: ValidationPlan;
   [SCHEMA_IDS.proofBundle]: ProofBundle;
@@ -1050,6 +1550,11 @@ export type DecisionEnvelopeInput = z.input<typeof DecisionEnvelopeSchema>;
 export type CostEstimateInput = z.input<typeof CostEstimateSchema>;
 export type CapabilityCardInput = z.input<typeof CapabilityCardSchema>;
 export type ContextPackInput = z.input<typeof ContextPackSchema>;
+export type IntegrationRefInput = z.input<typeof IntegrationRefSchema>;
+export type ProjectManifestInput = z.input<typeof ProjectManifestSchema>;
+export type ProjectPanelInput = z.input<typeof ProjectPanelSchema>;
+export type ProjectSnapshotInput = z.input<typeof ProjectSnapshotSchema>;
+export type RenderManifestInput = z.input<typeof RenderManifestSchema>;
 export type AgentTrajectoryInput = z.input<typeof AgentTrajectorySchema>;
 export type ValidationPlanInput = z.input<typeof ValidationPlanSchema>;
 export type ProofBundleInput = z.input<typeof ProofBundleSchema>;
@@ -1070,6 +1575,11 @@ export type ContractInputBySchemaId = {
   [SCHEMA_IDS.costEstimate]: CostEstimateInput;
   [SCHEMA_IDS.capabilityCard]: CapabilityCardInput;
   [SCHEMA_IDS.contextPack]: ContextPackInput;
+  [SCHEMA_IDS.integrationRef]: IntegrationRefInput;
+  [SCHEMA_IDS.projectManifest]: ProjectManifestInput;
+  [SCHEMA_IDS.projectPanel]: ProjectPanelInput;
+  [SCHEMA_IDS.projectSnapshot]: ProjectSnapshotInput;
+  [SCHEMA_IDS.renderManifest]: RenderManifestInput;
   [SCHEMA_IDS.agentTrajectory]: AgentTrajectoryInput;
   [SCHEMA_IDS.validationPlan]: ValidationPlanInput;
   [SCHEMA_IDS.proofBundle]: ProofBundleInput;
