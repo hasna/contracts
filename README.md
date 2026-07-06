@@ -115,6 +115,84 @@ The generated files carry a `KIT_VERSION` header and are recorded in
 `src/generated/storage-kit/.storage-kit-manifest.json`. Do not hand-edit them;
 regenerate instead.
 
+## API-Key Auth (`@hasna/contracts/auth`)
+
+Stateless, verifiable API keys for the `<app>-serve` HTTP services. A key is an
+HMAC-signed compact token with the human prefix `hasna_<app>_`; the signed claims
+carry the app, scopes, and TTL, so verification needs **no** database round-trip.
+Only the sha256 hash is stored at rest (the secret is shown once at issue time),
+and revocation is layered on top via the key store.
+
+**Exact import + usage every `<app>-serve` service calls** (Express shown; Hono
+is identical via `honoApiKey`):
+
+```ts
+import { expressApiKey, ApiKeyStore } from "@hasna/contracts/auth";
+import { createCloudPoolFromEnv } from "./generated/storage-kit"; // vendored kit
+
+const APP = "todos";
+const signingSecret = process.env.HASNA_TODOS_API_SIGNING_KEY!; // shared: HASNA_API_SIGNING_KEY
+const { client } = createCloudPoolFromEnv(APP);                 // RDS pool (Amendment A1)
+const keys = new ApiKeyStore(client);
+await keys.ensureSchema();                                      // idempotent: api_keys table
+
+app.use(
+  expressApiKey({
+    app: APP,
+    signingSecret,
+    isRevoked: keys.isRevoked,          // per-request revocation check against RDS
+    requiredScopes: ["todos:read"],     // optional per-mount scope gate
+    audit: (e) => log.info("api_auth", e), // per-request AUDIT hook (allow + deny)
+  }),
+);
+// On success: req.apiKey = { kid, app, scopes, agent, claims }
+```
+
+Framework-agnostic core (for custom routers): `verifyApiKey({ app, signingSecret })`
+returns `{ authenticate(headers, ctx) }`. Tokens are read from the `x-api-key`
+header or `Authorization: Bearer <key>`.
+
+**Serve env vars:**
+
+| Env var                        | Purpose                                                    |
+| ------------------------------ | ---------------------------------------------------------- |
+| `HASNA_<APP>_API_SIGNING_KEY`  | HMAC signing secret (falls back to `HASNA_API_SIGNING_KEY`) |
+| `HASNA_<APP>_DATABASE_URL`     | RDS URL for the `api_keys` store (revocation lookups)      |
+
+**Client env vars (self_hosted mode):** `<APP>_API_URL` + `<APP>_API_KEY` — never a DSN.
+
+Scope grammar is `<app>:<action>` with wildcards (`*`, `<app>:*`, `*:<action>`).
+
+### Issuing keys
+
+```bash
+# Mint a scoped key: stores the hashed record in RDS, prints the secret ONCE.
+contracts issue-key --app todos --agent worker-1 --scopes 'todos:read,todos:write'
+
+# Bootstrap admin key (scopes default to '<app>:*', agent 'bootstrap'):
+contracts issue-key --app todos --bootstrap
+
+# Print secret + hash without persisting (e.g. offline signing):
+contracts issue-key --app todos --scopes 'todos:read' --no-store --json
+```
+
+Signing secret is read from `HASNA_<APP>_API_SIGNING_KEY` (then `HASNA_API_SIGNING_KEY`);
+the record store uses `HASNA_<APP>_DATABASE_URL`. Generate a signing secret with
+`openssl rand -hex 32`. Revoke with `store.revoke(kid)`.
+
+## SDK from OpenAPI (`@hasna/contracts/sdk`)
+
+`generateSdkFromOpenApi(spec)` turns an `<app>-serve` OpenAPI 3 document into a
+typed, dependency-free `fetch` client plus interfaces from `components.schemas`.
+The generated client sends the API key as `x-api-key`, so a self_hosted consumer
+only needs `<APP>_API_URL` + `<APP>_API_KEY`.
+
+```ts
+import { generateSdkFromOpenApi } from "@hasna/contracts/sdk";
+const { code, operations, warnings } = generateSdkFromOpenApi(openapiDoc, { className: "TodosClient" });
+// write `code` to the app SDK package's client.ts
+```
+
 ## TypeScript
 
 ```ts

@@ -5,3 +5,5 @@ export * from "./mode";
 export * from "./service-contract";
 export * from "./conformance";
 export * from "./kit/generate";
+export * from "./auth/index";
+export * from "./sdk/generate";

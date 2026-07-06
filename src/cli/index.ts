@@ -12,6 +12,7 @@ import { scanNoCloudTarget } from "../no-cloud";
 import { runRepoConformance } from "../conformance";
 import { getEmbeddedSchemaId, validateContract } from "../validators";
 import { runVendorKit } from "./kit-runner";
+import { runIssueKey } from "./issue-key";
 
 function collectJsonFiles(root: string): string[] {
   const stat = statSync(root);
@@ -64,8 +65,14 @@ function preflightJsonUsageErrors(argv: string[]) {
     return false;
   }
 
-  if (!["schemas", "validate", "conformance", "no-cloud-scan", "repo-conformance", "vendor-kit"].includes(command)) {
+  if (!["schemas", "validate", "conformance", "no-cloud-scan", "repo-conformance", "vendor-kit", "issue-key"].includes(command)) {
     return reportParserJsonError("commander.unknownCommand", `unknown command '${command}'`);
+  }
+
+  // issue-key has rich value-taking options; let commander parse it (its
+  // CommanderError is already rendered as JSON by main()).
+  if (command === "issue-key") {
+    return false;
   }
 
   const allowedOptionsByCommand: Record<string, Set<string>> = {
@@ -343,6 +350,24 @@ export function createContractsProgram() {
         const message = error instanceof Error ? error.message : String(error);
         reportCliError(options, `vendor-kit failed for ${target}: ${message}`, { path: target, code: "vendor_kit_error" });
       }
+    });
+
+  program
+    .command("issue-key")
+    .description("Mint an API key (prefix hasna_<app>_): stores the hashed record and prints the secret ONCE")
+    .requiredOption("--app <app>", "App slug the key authenticates (e.g. todos)")
+    .option("--agent <agent>", "Issued-to agent/subject (informational)")
+    .option("--scopes <csv>", "Comma-separated scopes, e.g. 'todos:read,todos:write' or 'todos:*'")
+    .option("--ttl-days <days>", "Days until expiry (default 90)")
+    .option("--no-expiry", "Mint a non-expiring key")
+    .option("--bootstrap", "Mint a bootstrap admin key (scopes default to '<app>:*', agent 'bootstrap')")
+    .option("--signing-secret-env <name>", "Env var holding the HMAC signing secret (default HASNA_<APP>_API_SIGNING_KEY, then HASNA_API_SIGNING_KEY)")
+    .option("--database-url-env <name>", "Env var holding the Postgres URL for the record store (default HASNA_<APP>_DATABASE_URL)")
+    .option("--table <name>", "api-keys table name (default api_keys)")
+    .option("--no-store", "Do not persist the hashed record (print secret + hash only)")
+    .option("-j, --json", "Output JSON")
+    .action(async (options: Record<string, unknown>) => {
+      await runIssueKey(options, { report: reportCliError });
     });
 
   return program;

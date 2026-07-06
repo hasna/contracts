@@ -1,6 +1,6 @@
 {
   "name": "@hasna/contracts",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Shared schemas and validators for Hasna open-source agent infrastructure contracts.",
   "type": "module",
   "license": "Apache-2.0",
@@ -53,6 +53,14 @@
       "types": "./dist/kit/generate.d.ts",
       "import": "./dist/kit/generate.js"
     },
+    "./auth": {
+      "types": "./dist/auth/index.d.ts",
+      "import": "./dist/auth/index.js"
+    },
+    "./sdk": {
+      "types": "./dist/sdk/generate.d.ts",
+      "import": "./dist/sdk/generate.js"
+    },
     "./hasna.contract.schema.json": "./dist/hasna.contract.schema.json"
   },
   "files": [
@@ -66,12 +74,12 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "rm -rf dist && bun build src/index.ts src/schemas.ts src/validators.ts src/no-cloud.ts src/mode.ts src/service-contract.ts src/conformance.ts src/kit/generate.ts --outdir dist --target bun && bun build src/cli/index.ts --outdir dist/cli --target bun && cp src/hasna.contract.schema.json dist/hasna.contract.schema.json && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
+    "build": "rm -rf dist && bun build src/index.ts src/schemas.ts src/validators.ts src/no-cloud.ts src/mode.ts src/service-contract.ts src/conformance.ts src/kit/generate.ts src/auth/index.ts src/sdk/generate.ts --root src --outdir dist --target bun && bun build src/cli/index.ts --outdir dist/cli --target bun && cp src/hasna.contract.schema.json dist/hasna.contract.schema.json && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "lint": "tsc --noEmit",
     "conformance": "bun run src/cli/index.ts conformance examples",
-    "verify:release": "bun run typecheck && bun test && bun run conformance && bun run build && bun run smoke:dist && bun run pack:check",
+    "verify:release": "rm -rf dist && bun run typecheck && bun test && bun run conformance && bun run build && bun run smoke:dist && bun run pack:check",
     "smoke:dist": "bun scripts/smoke-dist.ts",
     "pack:check": "bun pm pack --dry-run --ignore-scripts",
     "dev:cli": "bun run src/cli/index.ts",
