@@ -48,17 +48,14 @@ const DECLARATION_FILE_MARKERS = [
   "hasna.app_cloud_manifest.v1",
   "hasna.no_cloud_evidence_pack.v1"
 ] as const;
-const CONTRACTS_DECLARATION_PATHS = new Set([
-  "src/no-cloud.ts",
-  "src/schemas.ts",
-  "dist/no-cloud.js",
-  "dist/schemas.js",
-  "dist/validators.js",
-  "dist/index.js",
-  "dist/cli/index.js",
-  "dist/no-cloud.d.ts",
-  "dist/schemas.d.ts"
-]);
+// The forbidden-runtime pattern strings legitimately live in exactly two source
+// modules. Any file under dist/ is a build artifact derived from those sources;
+// bundlers inline the declaration content into whichever entrypoints import it,
+// so the exact set of dist files carrying it changes with the build config.
+// Match the two sources explicitly and treat any dist/ artifact generically —
+// the >= 2 declaration-marker gate below (plus the @hasna/contracts package gate)
+// keeps downstream packages from bypassing the scan.
+const CONTRACTS_DECLARATION_SOURCES = new Set(["src/no-cloud.ts", "src/schemas.ts"]);
 
 function stableId(input: string) {
   let hash = 0;
@@ -169,7 +166,9 @@ function isAppCloudManifestDocument(file: ScanFile): boolean {
 function isNoCloudDeclarationFile(file: ScanFile, packageName?: string): boolean {
   if (packageName !== "@hasna/contracts") return false;
   const normalized = file.path.replaceAll("\\", "/");
-  if (!CONTRACTS_DECLARATION_PATHS.has(normalized)) return false;
+  const isDeclarationSource = CONTRACTS_DECLARATION_SOURCES.has(normalized);
+  const isBuildArtifact = normalized === "dist" || normalized.startsWith("dist/");
+  if (!isDeclarationSource && !isBuildArtifact) return false;
   if (!/\.(cjs|cts|js|jsx|mjs|mts|ts|tsx)$/i.test(normalized)) return false;
   const markerCount = DECLARATION_FILE_MARKERS.filter((marker) => file.text.includes(marker)).length;
   return markerCount >= 2;
