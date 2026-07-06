@@ -75,6 +75,46 @@ contracts no-cloud-scan --manifest app-cloud.manifest.json .
 contracts no-cloud-scan --json hasna-todos-0.11.62.tgz
 ```
 
+## Storage Kit (vendored codegen)
+
+`vendor-kit` stamps a canonical, self-contained Postgres storage kit into a
+target repo at `src/generated/storage-kit/`. The kit is **vendored** (copied
+source, zero runtime dependency on `@hasna/contracts`) and is **PURE REMOTE**
+per Amendment A1: it contains no sync engine, no cache-as-mode, and no merge
+logic. It ships:
+
+| File            | Purpose                                                              |
+| --------------- | ------------------------------------------------------------------- |
+| `mode.ts`       | Storage-mode + env resolution (`local` \| `cloud`), per the contract |
+| `tls.ts`        | The one correct TLS approach (libpq `sslmode` semantics + RDS CA)    |
+| `pool.ts`       | `pg.Pool` factory (`createPgPool`, `createCloudPoolFromEnv`)         |
+| `query.ts`      | Typed query wrapper: `query` / `many` / `get` / `one` / `execute`    |
+| `migrations.ts` | `schema_migrations` ledger with sha256 checksums + drift guards      |
+| `health.ts`     | `checkHealth` (SELECT 1) and `checkReady` (migrated?) probes         |
+
+The host repo must provide `pg` (and `@types/pg`) as a dependency.
+
+Stamp or refresh the kit (also writes `kitVersion` into `hasna.contract.json`):
+
+```bash
+bunx @hasna/contracts vendor-kit                 # into the current repo
+bunx @hasna/contracts vendor-kit ./path/to/repo  # into another repo
+bunx @hasna/contracts vendor-kit --no-contract .  # skip the manifest update
+bunx @hasna/contracts vendor-kit --json .
+```
+
+Verify in CI — fails (exit 1) if the vendored kit is stale (an older
+`@hasna/contracts` version) or hand-edited (content hash differs):
+
+```bash
+bunx @hasna/contracts vendor-kit --check .
+bunx @hasna/contracts vendor-kit --check --json .
+```
+
+The generated files carry a `KIT_VERSION` header and are recorded in
+`src/generated/storage-kit/.storage-kit-manifest.json`. Do not hand-edit them;
+regenerate instead.
+
 ## TypeScript
 
 ```ts

@@ -4,3 +4,4 @@ export * from "./no-cloud";
 export * from "./mode";
 export * from "./service-contract";
 export * from "./conformance";
+export * from "./kit/generate";
