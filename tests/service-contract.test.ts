@@ -96,10 +96,65 @@ describe("service contract manifest validation", () => {
       contractVersion: SERVICE_CONTRACT_VERSION,
       kitVersion: "0.3.0",
       bins: ["loops", "loops-serve"],
-      storage: { mode: "cloud", databaseUrlSecretRef: "hasna/oss/loops/database-url" }
+      storage: { mode: "cloud", databaseUrlSecretRef: "hasna/oss/loops/database-url" },
+      deploymentModes: ["local", "self-hosted"],
+      serviceSurfaces: [
+        {
+          name: "http",
+          status: "supported",
+          bin: "loops-serve",
+          authMode: "api-key",
+          deploymentModes: ["local", "self-hosted"],
+          health: { method: "GET", path: "/health", public: true },
+          readiness: { method: "GET", path: "/ready", public: false },
+          version: { method: "GET", path: "/version", public: true },
+          apiBasePath: "/v1",
+          readinessGates: [
+            {
+              id: "redaction",
+              kind: "redaction",
+              status: "pending"
+            }
+          ]
+        }
+      ]
     };
     expect(validateServiceContractManifest(svc).success).toBe(true);
     expect(validateServiceContractManifest({ ...svc, bins: ["loops"] }).success).toBe(false);
+    expect(validateServiceContractManifest({ ...svc, serviceSurfaces: [] }).success).toBe(false);
+  });
+
+  test("service surfaces require lifecycle endpoints or explicit defer reasons", () => {
+    const badSupported = {
+      ...baseCliWithStore,
+      class: "service",
+      bins: ["todos", "todos-serve"],
+      storage: { mode: "cloud", databaseUrlSecretRef: "hasna/oss/todos/database-url" },
+      serviceSurfaces: [
+        {
+          name: "http",
+          status: "supported",
+          bin: "todos-serve",
+          authMode: "api-key",
+          deploymentModes: ["local"]
+        }
+      ]
+    };
+    expect(validateServiceContractManifest(badSupported).success).toBe(false);
+
+    const deferred = {
+      ...badSupported,
+      serviceSurfaces: [
+        {
+          name: "http",
+          status: "deferred",
+          authMode: "api-key",
+          deploymentModes: ["local"],
+          deferReason: "Hosted service boundary still returns raw secret values."
+        }
+      ]
+    };
+    expect(validateServiceContractManifest(deferred).success).toBe(true);
   });
 
   test("saas class must be cloud mode", () => {

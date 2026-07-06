@@ -539,6 +539,13 @@ The conformance command intentionally treats unknown schemas, malformed JSON,
 and empty fixture sets as harness failures. Invalid fixtures must fail because
 the schema rejected them, not because the fixture cannot be parsed.
 
+## Infra Service Entrypoints
+
+Service-capable infra repos should declare supported, deferred, or unsupported
+HTTP/MCP service surfaces in `hasna.contract.json` instead of adding `*-serve`
+bins mechanically. The current Worker 2 baseline matrix is in
+[`docs/infra-service-entrypoint-matrix.md`](docs/infra-service-entrypoint-matrix.md).
+
 ## Verification
 
 ```bash

@@ -53,6 +53,89 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
       description:
         "Declared bins. Allowlisted: <name>, <name>-cli, <name>-mcp, <name>-serve, <name>-worker, <name>-runner, <name>-daemon, <name>-migrate, <name>-doctor."
     },
+    deploymentModes: {
+      type: "array",
+      items: { enum: ["local", "self-hosted", "cloud"] },
+      description:
+        "Supported deployment modes. local = this machine, self-hosted = Hasna-owned AWS, cloud = multi-tenant SaaS for outside users."
+    },
+    serviceSurfaces: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "status", "authMode", "deploymentModes"],
+        properties: {
+          name: { type: "string", minLength: 1 },
+          status: { enum: ["supported", "deferred", "unsupported"] },
+          bin: { type: "string", minLength: 1 },
+          mcpBin: { type: "string", minLength: 1 },
+          authMode: { enum: ["none", "local-only", "api-key", "session", "service-token", "custom"] },
+          deploymentModes: {
+            type: "array",
+            items: { enum: ["local", "self-hosted", "cloud"] },
+            minItems: 1
+          },
+          health: {
+            type: "object",
+            additionalProperties: false,
+            required: ["method", "path"],
+            properties: {
+              method: { enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+              path: { type: "string", pattern: "^/[A-Za-z0-9_./:*-]*$" },
+              public: { type: "boolean" },
+              description: { type: "string", minLength: 1 }
+            }
+          },
+          readiness: {
+            type: "object",
+            additionalProperties: false,
+            required: ["method", "path"],
+            properties: {
+              method: { enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+              path: { type: "string", pattern: "^/[A-Za-z0-9_./:*-]*$" },
+              public: { type: "boolean" },
+              description: { type: "string", minLength: 1 }
+            }
+          },
+          version: {
+            type: "object",
+            additionalProperties: false,
+            required: ["method", "path"],
+            properties: {
+              method: { enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+              path: { type: "string", pattern: "^/[A-Za-z0-9_./:*-]*$" },
+              public: { type: "boolean" },
+              description: { type: "string", minLength: 1 }
+            }
+          },
+          apiBasePath: { type: "string", pattern: "^/v[0-9]+$" },
+          openApiPath: { type: "string", pattern: "^/[A-Za-z0-9_./:-]*$" },
+          deferReason: { type: "string", minLength: 1 },
+          readinessGates: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id", "kind"],
+              properties: {
+                id: { type: "string", minLength: 1 },
+                kind: {
+                  enum: ["auth", "storage", "secret-ref", "migration", "health", "readiness", "redaction", "smoke", "operator", "other"]
+                },
+                required: { type: "boolean" },
+                command: { type: "string", minLength: 1 },
+                evidenceRef: { type: "object" },
+                status: { enum: ["pending", "passed", "failed", "blocked", "deferred"] },
+                summary: { type: "string", minLength: 1 }
+              }
+            }
+          }
+        }
+      },
+      description:
+        "Declared HTTP/MCP service surfaces. Supported surfaces name lifecycle endpoints; unsafe or unfinished surfaces use deferred/unsupported with a reason."
+    },
     storage: {
       type: "object",
       additionalProperties: false,
