@@ -86,10 +86,10 @@ describe("core schemas", () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.schemaId).toBe(SCHEMA_IDS.evidenceRef);
-      expect(result.data.id).toBe(evidence.id);
+      expect((result.data as EvidenceRef).id).toBe(evidence.id);
     }
 
-    expect(parseEmbeddedContract(value).id).toBe(evidence.id);
+    expect((parseEmbeddedContract(value) as EvidenceRef).id).toBe(evidence.id);
     expect(validateEmbeddedContract({ schema: "hasna.missing.v1", id: "x" }).success).toBe(false);
   });
 

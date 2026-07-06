@@ -163,6 +163,11 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
 - `hasna.no_cloud_evidence_pack.v1`: prepublish/CI evidence pack for package
   manifest, lockfile, source/runtime config, packed artifact, published
   metadata, and app-cloud-manifest scans.
+- `hasna.service_contract.v1`: repo self-description (`hasna.contract.json`) for
+  the Hasna Service Contract v1 — name, repo class, targeted contract version,
+  tracked kit version, declared bins, and the `local | cloud` storage boundary.
+  See `CONTRACT.md` for the normative spec and `contracts repo-conformance` /
+  `runRepoConformance` for the self-check kit.
 
 Every top-level contract includes a literal `schema` field. Consumers should
 reject objects whose embedded schema does not match the validator being used.
