@@ -193,13 +193,21 @@ export interface KitCheckResult {
   targetDir: string;
   files: KitCheckFileResult[];
   extras: string[];
+  manifest: KitFileStatus | "invalid";
+  manifestIssues: string[];
   /** Present when the on-disk manifest records a different kitVersion. */
   staleVersion: string | null;
+  contractKitVersion: string | null;
+  contractStaleVersion: string | null;
+  contractMissing: boolean;
+  contractIssues: string[];
 }
 
 export interface CheckKitOptions {
   targetRepo: string;
   version?: string;
+  /** Check `hasna.contract.json` kitVersion. Default true. */
+  writeContract?: boolean;
 }
 
 /**
@@ -210,7 +218,8 @@ export interface CheckKitOptions {
 export function checkKit(options: CheckKitOptions): KitCheckResult {
   const version = options.version ?? getKitVersion();
   const rendered = renderKit(version);
-  const targetDir = join(resolve(options.targetRepo), KIT_TARGET_SUBDIR);
+  const targetRepo = resolve(options.targetRepo);
+  const targetDir = join(targetRepo, KIT_TARGET_SUBDIR);
 
   const files: KitCheckFileResult[] = [];
   for (const file of KIT_TEMPLATE_FILES) {
@@ -232,17 +241,86 @@ export function checkKit(options: CheckKitOptions): KitCheckResult {
     }
   }
 
+  let manifest: KitCheckResult["manifest"] = "missing";
+  const manifestIssues: string[] = [];
   let staleVersion: string | null = null;
   const manifestPath = join(targetDir, KIT_MANIFEST_FILE);
   if (existsSync(manifestPath)) {
     try {
-      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as KitManifest;
-      if (manifest.kitVersion !== version) staleVersion = manifest.kitVersion;
+      const actualManifestText = readFileSync(manifestPath, "utf8");
+      const actualManifest = JSON.parse(actualManifestText) as Partial<KitManifest>;
+      const expectedManifestText = JSON.stringify(rendered.manifest, null, 2) + "\n";
+      manifest = actualManifestText === expectedManifestText ? "ok" : "modified";
+      if (actualManifest.generator !== rendered.manifest.generator) manifestIssues.push("generator mismatch");
+      if (actualManifest.kitVersion !== version) {
+        staleVersion = typeof actualManifest.kitVersion === "string" ? actualManifest.kitVersion : null;
+        manifestIssues.push("kitVersion mismatch");
+      }
+      if (!actualManifest.files || typeof actualManifest.files !== "object") {
+        manifestIssues.push("files map missing");
+      } else {
+        for (const file of KIT_TEMPLATE_FILES) {
+          if (actualManifest.files[file] !== rendered.manifest.files[file]) {
+            manifestIssues.push(`checksum mismatch ${file}`);
+          }
+        }
+        for (const file of Object.keys(actualManifest.files)) {
+          if (!KIT_TEMPLATE_FILES.includes(file as KitTemplateFile)) {
+            manifestIssues.push(`unexpected manifest file ${file}`);
+          }
+        }
+      }
     } catch {
-      staleVersion = null;
+      manifest = "invalid";
+      manifestIssues.push("invalid JSON");
     }
   }
 
-  const ok = files.every((f) => f.status === "ok") && extras.length === 0;
-  return { ok, version, targetDir, files, extras, staleVersion };
+  let contractKitVersion: string | null = null;
+  let contractStaleVersion: string | null = null;
+  let contractMissing = false;
+  const contractIssues: string[] = [];
+  if (options.writeContract !== false) {
+    const contractPath = join(targetRepo, "hasna.contract.json");
+    if (!existsSync(contractPath)) {
+      contractMissing = true;
+      contractIssues.push("missing hasna.contract.json");
+    } else {
+      try {
+        const contract = JSON.parse(readFileSync(contractPath, "utf8")) as { kitVersion?: unknown };
+        contractKitVersion = typeof contract.kitVersion === "string" ? contract.kitVersion : null;
+        if (contractKitVersion === null) {
+          contractIssues.push("kitVersion missing");
+        } else if (contractKitVersion !== version) {
+          contractStaleVersion = contractKitVersion;
+          contractIssues.push("kitVersion mismatch");
+        }
+      } catch {
+        contractIssues.push("invalid JSON");
+      }
+    }
+  }
+
+  const ok =
+    files.every((f) => f.status === "ok") &&
+    extras.length === 0 &&
+    manifest === "ok" &&
+    manifestIssues.length === 0 &&
+    contractMissing === false &&
+    contractStaleVersion === null &&
+    contractIssues.length === 0;
+  return {
+    ok,
+    version,
+    targetDir,
+    files,
+    extras,
+    manifest,
+    manifestIssues,
+    staleVersion,
+    contractKitVersion,
+    contractStaleVersion,
+    contractMissing,
+    contractIssues,
+  };
 }

@@ -64,15 +64,40 @@ export interface MigrationRunnerOptions {
   ledgerTable?: string;
 }
 
+function quoteIdentifier(identifier: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
+    throw new Error(`Invalid migration ledger table identifier segment: ${identifier}`);
+  }
+  return `"${identifier.replace(/"/g, "\"\"")}"`;
+}
+
+function quoteIdentifierPath(name: string): string {
+  const parts = name.split(".");
+  if (parts.length === 0 || parts.length > 2 || parts.some((part) => part.length === 0)) {
+    throw new Error(`Invalid migration ledger table name: ${name}`);
+  }
+  return parts.map(quoteIdentifier).join(".");
+}
+
+interface TransactionCapableClient extends TypedQueryClient {
+  transaction<T>(fn: (client: TypedQueryClient) => Promise<T>): Promise<T>;
+}
+
+function hasTransaction(client: TypedQueryClient): client is TransactionCapableClient {
+  return typeof (client as { transaction?: unknown }).transaction === "function";
+}
+
 export class MigrationLedger {
   private readonly ledgerTable: string;
+  private readonly ledgerTableName: string;
 
   constructor(
     private readonly client: TypedQueryClient,
     private readonly migrations: readonly Migration[],
     options: MigrationRunnerOptions = {},
   ) {
-    this.ledgerTable = options.ledgerTable ?? DEFAULT_MIGRATION_LEDGER_TABLE;
+    this.ledgerTableName = options.ledgerTable ?? DEFAULT_MIGRATION_LEDGER_TABLE;
+    this.ledgerTable = quoteIdentifierPath(this.ledgerTableName);
     const seen = new Set<string>();
     for (const migration of migrations) {
       if (seen.has(migration.id)) throw new Error(`Duplicate migration id: ${migration.id}`);
@@ -81,13 +106,30 @@ export class MigrationLedger {
   }
 
   async ensureLedger(): Promise<void> {
-    await this.client.execute(
+    await this.ensureLedgerFrom(this.client);
+  }
+
+  private async ensureLedgerFrom(client: TypedQueryClient): Promise<void> {
+    await client.execute(
       `CREATE TABLE IF NOT EXISTS ${this.ledgerTable} (
          id TEXT PRIMARY KEY,
          checksum TEXT NOT NULL,
          applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
        )`,
     );
+  }
+
+  private async runTransaction<T>(fn: (client: TypedQueryClient) => Promise<T>): Promise<T> {
+    if (!hasTransaction(this.client)) {
+      throw new Error(
+        "Migration application requires a transaction-capable query client. Use createQueryClient(pool) or pass a client with transaction().",
+      );
+    }
+    return this.client.transaction(fn);
+  }
+
+  private async takeMigrationLock(client: TypedQueryClient): Promise<void> {
+    await client.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [this.ledgerTableName]);
   }
 
   async listApplied(): Promise<AppliedMigration[]> {
@@ -132,20 +174,40 @@ export class MigrationLedger {
   /** Apply all pending migrations. With `dryRun`, report the plan only. */
   async migrate(opts: { dryRun?: boolean } = {}): Promise<MigrationResult> {
     const dryRun = opts.dryRun === true;
-    await this.ensureLedger();
-    const applied = await this.readApplied();
-    const plan = this.buildPlan(applied);
-    if (dryRun) return { dryRun, applied, plan };
-
-    for (const item of plan) {
-      if (item.state === "already_applied") continue;
-      await this.client.execute(item.migration.sql);
-      await this.client.execute(
-        `INSERT INTO ${this.ledgerTable} (id, checksum, applied_at) VALUES ($1, $2, now())`,
-        [item.migration.id, item.migration.checksum],
-      );
+    if (dryRun) {
+      await this.ensureLedger();
+      const applied = await this.readApplied();
+      const plan = this.buildPlan(applied);
+      return { dryRun, applied, plan };
     }
+
+    const plan = await this.runTransaction(async (tx) => {
+      await this.takeMigrationLock(tx);
+      await this.ensureLedgerFrom(tx);
+      const txApplied = await this.readAppliedFrom(tx);
+      const txPlan = this.buildPlan(txApplied);
+      for (const item of txPlan) {
+        if (item.state === "already_applied") continue;
+        await tx.execute(item.migration.sql);
+        await tx.execute(
+          `INSERT INTO ${this.ledgerTable} (id, checksum, applied_at) VALUES ($1, $2, now())`,
+          [item.migration.id, item.migration.checksum],
+        );
+      }
+      return txPlan;
+    });
     return { dryRun, applied: await this.readApplied(), plan };
+  }
+
+  private async readAppliedFrom(client: TypedQueryClient): Promise<AppliedMigration[]> {
+    const rows = await client.many<LedgerRow>(
+      `SELECT id, checksum, applied_at FROM ${this.ledgerTable} ORDER BY id ASC`,
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      checksum: row.checksum,
+      appliedAt: row.applied_at instanceof Date ? row.applied_at.toISOString() : String(row.applied_at),
+    }));
   }
 }
 

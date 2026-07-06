@@ -33,6 +33,7 @@ export function runCheckKit(targetRepo: string, options: VendorKitCliOptions): v
   const result = checkKit({
     targetRepo,
     ...(options.kitVersion !== undefined ? { version: options.kitVersion } : {}),
+    writeContract: options.contract !== false,
   });
   if (options.json) {
     console.log(JSON.stringify({ action: "check", ...result }, null, 2));
@@ -44,8 +45,24 @@ export function runCheckKit(targetRepo: string, options: VendorKitCliOptions): v
     for (const extra of result.extras) {
       console.log(`  unexpected ${extra}`);
     }
+    if (result.manifest !== "ok") {
+      console.log(`  ${result.manifest} ${".storage-kit-manifest.json"}`);
+    }
+    for (const issue of result.manifestIssues) {
+      console.log(`    manifest: ${issue}`);
+    }
     if (result.staleVersion) {
       console.log(`  stale: on-disk kit is v${result.staleVersion}, regenerate to v${result.version}`);
+    }
+    if (result.contractMissing) {
+      console.log("  missing hasna.contract.json kitVersion stamp");
+    } else if (result.contractStaleVersion !== null) {
+      console.log(
+        `  stale: hasna.contract.json kitVersion is ${result.contractStaleVersion ?? "<missing>"}, regenerate to v${result.version}`,
+      );
+    }
+    for (const issue of result.contractIssues) {
+      console.log(`    hasna.contract.json: ${issue}`);
     }
     if (!result.ok) {
       console.log("  run: bunx @hasna/contracts vendor-kit   (regenerate the kit)");

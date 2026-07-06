@@ -107,6 +107,72 @@ describe("storage-kit generator", () => {
     const result = checkKit({ targetRepo: dir, version: getKitVersion() });
     expect(result.ok).toBe(false);
     expect(result.staleVersion).toBe("9.9.9");
+    expect(result.contractStaleVersion).toBe("9.9.9");
+  });
+
+  test("check fails when the manifest is hand-edited, invalid, or missing", () => {
+    const dir = makeTarget();
+    generateKit({ targetRepo: dir });
+    const kitDir = join(dir, KIT_TARGET_SUBDIR);
+    const manifestPath = join(kitDir, KIT_MANIFEST_FILE);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as KitManifest;
+
+    manifest.files["mode.ts"] = "sha256:tampered";
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+    const tampered = checkKit({ targetRepo: dir });
+    expect(tampered.ok).toBe(false);
+    expect(tampered.manifest).toBe("modified");
+    expect(tampered.manifestIssues).toContain("checksum mismatch mode.ts");
+
+    writeFileSync(manifestPath, "{not json", "utf8");
+    const invalid = checkKit({ targetRepo: dir });
+    expect(invalid.ok).toBe(false);
+    expect(invalid.manifest).toBe("invalid");
+
+    generateKit({ targetRepo: dir });
+    rmSync(manifestPath);
+    const missing = checkKit({ targetRepo: dir });
+    expect(missing.ok).toBe(false);
+    expect(missing.manifest).toBe("missing");
+  });
+
+  test("check fails on stale or missing hasna.contract.json kitVersion unless contract stamping is disabled", () => {
+    const dir = makeTarget();
+    const version = getKitVersion();
+    generateKit({ targetRepo: dir, version });
+
+    writeFileSync(
+      join(dir, "hasna.contract.json"),
+      JSON.stringify(
+        { schema: "hasna.service_contract.v1", name: "demo", class: "cli-with-store", contractVersion: "v1", kitVersion: "0.0.0" },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+    const stale = checkKit({ targetRepo: dir, version });
+    expect(stale.ok).toBe(false);
+    expect(stale.contractKitVersion).toBe("0.0.0");
+    expect(stale.contractStaleVersion).toBe("0.0.0");
+    expect(stale.contractIssues).toContain("kitVersion mismatch");
+
+    expect(checkKit({ targetRepo: dir, version, writeContract: false }).ok).toBe(true);
+
+    writeFileSync(join(dir, "hasna.contract.json"), JSON.stringify({ name: "demo" }, null, 2) + "\n", "utf8");
+    const withoutStamp = checkKit({ targetRepo: dir, version });
+    expect(withoutStamp.ok).toBe(false);
+    expect(withoutStamp.contractIssues).toContain("kitVersion missing");
+
+    writeFileSync(join(dir, "hasna.contract.json"), "{not json", "utf8");
+    const invalid = checkKit({ targetRepo: dir, version });
+    expect(invalid.ok).toBe(false);
+    expect(invalid.contractIssues).toContain("invalid JSON");
+
+    rmSync(join(dir, "hasna.contract.json"));
+    const missing = checkKit({ targetRepo: dir, version });
+    expect(missing.ok).toBe(false);
+    expect(missing.contractMissing).toBe(true);
+    expect(missing.contractIssues).toContain("missing hasna.contract.json");
   });
 
   test("render is deterministic for a version", () => {

@@ -125,15 +125,46 @@ describe("kit typed query wrapper", () => {
  * ledger, so ledger logic is testable without a live Postgres (pragmatic
  * sqlite/pg-mem substitute). It interprets the exact SQL the ledger emits.
  */
-function inMemoryLedgerClient(): TypedQueryClient & { appliedDdl: string[] } {
+function inMemoryLedgerClient(): TypedQueryClient & {
+  appliedDdl: string[];
+  statements: string[];
+  transaction<T>(fn: (client: TypedQueryClient) => Promise<T>): Promise<T>;
+} {
   const ledger = new Map<string, { id: string; checksum: string; applied_at: string }>();
   const appliedDdl: string[] = [];
-  const client: TypedQueryClient & { appliedDdl: string[] } = {
+  const statements: string[] = [];
+  let txSnapshot: { ledger: Map<string, { id: string; checksum: string; applied_at: string }>; ddl: string[] } | null = null;
+  const client: TypedQueryClient & {
+    appliedDdl: string[];
+    statements: string[];
+    transaction<T>(fn: (client: TypedQueryClient) => Promise<T>): Promise<T>;
+  } = {
     appliedDdl,
+    statements,
+    async transaction<T>(fn: (tx: TypedQueryClient) => Promise<T>): Promise<T> {
+      statements.push("BEGIN");
+      txSnapshot = { ledger: new Map(ledger), ddl: [...appliedDdl] };
+      try {
+        const result = await fn(client);
+        statements.push("COMMIT");
+        txSnapshot = null;
+        return result;
+      } catch (error) {
+        statements.push("ROLLBACK");
+        if (txSnapshot) {
+          ledger.clear();
+          for (const [id, row] of txSnapshot.ledger) ledger.set(id, row);
+          appliedDdl.splice(0, appliedDdl.length, ...txSnapshot.ddl);
+        }
+        txSnapshot = null;
+        throw error;
+      }
+    },
     async query<T>() {
       return { rows: [] as T[], rowCount: 0 };
     },
     async many<T>(sql: string): Promise<T[]> {
+      statements.push(sql);
       if (/SELECT id, checksum, applied_at FROM/.test(sql)) {
         return [...ledger.values()].sort((a, b) => a.id.localeCompare(b.id)) as unknown as T[];
       }
@@ -146,13 +177,16 @@ function inMemoryLedgerClient(): TypedQueryClient & { appliedDdl: string[] } {
       throw new Error("not used");
     },
     async execute(sql: string, params?: readonly unknown[]) {
+      statements.push(sql);
       if (/CREATE TABLE IF NOT EXISTS/.test(sql)) return;
+      if (/pg_advisory_xact_lock/.test(sql)) return;
       if (/^INSERT INTO/.test(sql.trim()) && params) {
         const [id, checksum] = params as [string, string];
         ledger.set(id, { id, checksum, applied_at: new Date().toISOString() });
         return;
       }
       appliedDdl.push(sql);
+      if (sql.includes("FAIL_AFTER_DDL")) throw new Error("simulated migration failure after DDL");
     },
   };
   return client;
@@ -175,6 +209,9 @@ describe("kit migration ledger", () => {
     const first = await ledger.migrate();
     expect(first.applied.map((m) => m.id)).toEqual(["0001_init", "0002_more"]);
     expect(client.appliedDdl).toHaveLength(2);
+    expect(client.statements).toContain("BEGIN");
+    expect(client.statements).toContain("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))");
+    expect(client.statements).toContain("COMMIT");
 
     const second = await ledger.migrate();
     expect(second.plan.every((p) => p.state === "already_applied")).toBe(true);
@@ -209,6 +246,31 @@ describe("kit migration ledger", () => {
   test("rejects duplicate migration ids", () => {
     expect(() => new MigrationLedger(inMemoryLedgerClient(), [migrations[0]!, migrations[0]!])).toThrow(
       /Duplicate migration id/,
+    );
+  });
+
+  test("quotes ledger table names and rejects unsafe identifiers", async () => {
+    const client = inMemoryLedgerClient();
+    await new MigrationLedger(client, [migrations[0]!], { ledgerTable: "public.schema_migrations" }).migrate();
+    expect(client.statements.some((sql) => sql.includes('"public"."schema_migrations"'))).toBe(true);
+    expect(() => new MigrationLedger(inMemoryLedgerClient(), [], { ledgerTable: "schema_migrations; DROP TABLE users" })).toThrow(
+      /Invalid migration ledger table/,
+    );
+  });
+
+  test("rolls back migration SQL and ledger insert together on failure", async () => {
+    const client = inMemoryLedgerClient();
+    const failing = [defineMigration("0001_fail", "CREATE TABLE fail_marker (id int); -- FAIL_AFTER_DDL")];
+    await expect(new MigrationLedger(client, failing).migrate()).rejects.toThrow(/simulated migration failure/);
+    expect(client.statements).toContain("ROLLBACK");
+    expect(client.appliedDdl).toHaveLength(0);
+    expect(await new MigrationLedger(client, failing).listApplied()).toEqual([]);
+  });
+
+  test("refuses to apply with a non-transaction-capable client", async () => {
+    const { transaction: _transaction, ...client } = inMemoryLedgerClient();
+    await expect(new MigrationLedger(client, [migrations[0]!]).migrate()).rejects.toThrow(
+      /transaction-capable query client/,
     );
   });
 });
