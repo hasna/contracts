@@ -180,6 +180,13 @@ Signing secret is read from `HASNA_<APP>_API_SIGNING_KEY` (then `HASNA_API_SIGNI
 the record store uses `HASNA_<APP>_DATABASE_URL`. Generate a signing secret with
 `openssl rand -hex 32`. Revoke with `store.revoke(kid)`.
 
+Services that expose API, MCP, CLI-token, dashboard, worker, sync/export, or
+provider webhook surfaces must also follow the shared
+[Auth And RBAC Verifier Contract](docs/AUTH_RBAC_VERIFIER_CONTRACT.md). That
+contract defines the common auth context, token types, scope and role matrix,
+tenant/workspace/entity boundaries, provider webhook rules, audit events, and
+negative-test matrix.
+
 ## SDK from OpenAPI (`@hasna/contracts/sdk`)
 
 `generateSdkFromOpenApi(spec)` turns an `<app>-serve` OpenAPI 3 document into a
