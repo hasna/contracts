@@ -1724,6 +1724,96 @@ export const SERVICE_CONTRACT_VERSION = "v1";
 export const RepoClassSchema = z.enum(["library", "cli-with-store", "service", "saas"]);
 export type RepoClass = z.infer<typeof RepoClassSchema>;
 
+export const DEPLOYMENT_MODES = ["local", "self-hosted", "cloud"] as const;
+export const DeploymentModeSchema = z.enum(DEPLOYMENT_MODES);
+export type DeploymentMode = z.infer<typeof DeploymentModeSchema>;
+
+export const ServiceSurfaceStatusSchema = z.enum(["supported", "deferred", "unsupported"]);
+export type ServiceSurfaceStatus = z.infer<typeof ServiceSurfaceStatusSchema>;
+
+export const ServiceAuthModeSchema = z.enum(["none", "local-only", "api-key", "session", "service-token", "custom"]);
+export type ServiceAuthMode = z.infer<typeof ServiceAuthModeSchema>;
+
+export const ServiceEndpointSchema = z
+  .object({
+    method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+    path: z.string().regex(/^\/[A-Za-z0-9_./:*-]*$/, "Endpoint paths must be absolute HTTP paths"),
+    public: z.boolean().default(false),
+    description: z.string().min(1).optional()
+  })
+  .strict();
+export type ServiceEndpoint = z.infer<typeof ServiceEndpointSchema>;
+
+export const DeploymentReadinessGateSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: z.enum(["auth", "storage", "secret-ref", "migration", "health", "readiness", "redaction", "smoke", "operator", "other"]),
+    required: z.boolean().default(true),
+    command: z.string().min(1).optional(),
+    evidenceRef: EvidencePointerSchema.optional(),
+    status: z.enum(["pending", "passed", "failed", "blocked", "deferred"]).default("pending"),
+    summary: z.string().min(1).optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if ((value.status === "passed" || value.status === "failed" || value.status === "blocked") && !value.command && !value.evidenceRef && !value.summary) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Terminal readiness gates require command, evidenceRef, or summary",
+        path: ["status"]
+      });
+    }
+  });
+export type DeploymentReadinessGate = z.infer<typeof DeploymentReadinessGateSchema>;
+
+export const ServiceSurfaceSchema = z
+  .object({
+    name: z.string().min(1),
+    status: ServiceSurfaceStatusSchema,
+    bin: z.string().min(1).optional(),
+    mcpBin: z.string().min(1).optional(),
+    authMode: ServiceAuthModeSchema,
+    deploymentModes: z.array(DeploymentModeSchema).min(1),
+    health: ServiceEndpointSchema.optional(),
+    readiness: ServiceEndpointSchema.optional(),
+    version: ServiceEndpointSchema.optional(),
+    apiBasePath: z.string().regex(/^\/v[0-9]+$/, "Stable API base path must be /vN").optional(),
+    openApiPath: z.string().regex(/^\/[A-Za-z0-9_./:-]*$/).optional(),
+    deferReason: z.string().min(1).optional(),
+    readinessGates: z.array(DeploymentReadinessGateSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.status === "supported") {
+      if (!value.bin) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported service surfaces require a serve bin", path: ["bin"] });
+      }
+      if (!value.health) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported service surfaces require a health endpoint", path: ["health"] });
+      }
+      if (!value.version) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported service surfaces require a version endpoint", path: ["version"] });
+      }
+    }
+    if ((value.status === "deferred" || value.status === "unsupported") && !value.deferReason) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Deferred or unsupported service surfaces require a deferReason",
+        path: ["deferReason"]
+      });
+    }
+    if (value.health && value.health.path !== "/health") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Health endpoint must be /health", path: ["health", "path"] });
+    }
+    if (value.readiness && value.readiness.path !== "/ready") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Readiness endpoint must be /ready", path: ["readiness", "path"] });
+    }
+    if (value.version && value.version.path !== "/version") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Version endpoint must be /version", path: ["version", "path"] });
+    }
+  });
+export type ServiceSurface = z.infer<typeof ServiceSurfaceSchema>;
+
 /** Runtime storage enum. `local | cloud` ONLY (Amendment A1: PURE REMOTE). */
 export const STORAGE_MODES = ["local", "cloud"] as const;
 export const StorageModeSchema = z.enum(STORAGE_MODES);
@@ -1798,6 +1888,8 @@ export const ServiceContractManifestSchema = z
     description: z.string().min(1).optional(),
     bins: z.array(z.string().min(1)).default([]),
     storage: StorageContractSchema.optional(),
+    deploymentModes: z.array(DeploymentModeSchema).default(["local"]),
+    serviceSurfaces: z.array(ServiceSurfaceSchema).default([]),
     metadata: MetadataSchema.optional()
   })
   .strict()
@@ -1880,6 +1972,13 @@ export const ServiceContractManifestSchema = z
       if (!hasBin("-serve")) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `service repos must ship the "${value.name}-serve" bin`, path: ["bins"] });
       }
+      if (value.serviceSurfaces.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "service repos must declare at least one service surface",
+          path: ["serviceSurfaces"]
+        });
+      }
     }
 
     if (value.class === "saas") {
@@ -1890,6 +1989,35 @@ export const ServiceContractManifestSchema = z
       }
       if (!hasBin("-serve")) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `saas repos must ship the "${value.name}-serve" bin`, path: ["bins"] });
+      }
+      if (value.serviceSurfaces.length === 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "saas repos must declare at least one service surface", path: ["serviceSurfaces"] });
+      }
+    }
+
+    for (const [index, surface] of value.serviceSurfaces.entries()) {
+      if (surface.bin && !seenBins.has(surface.bin)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Service surface bin "${surface.bin}" must be declared in bins`,
+          path: ["serviceSurfaces", index, "bin"]
+        });
+      }
+      if (surface.mcpBin && !seenBins.has(surface.mcpBin)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Service surface MCP bin "${surface.mcpBin}" must be declared in bins`,
+          path: ["serviceSurfaces", index, "mcpBin"]
+        });
+      }
+      for (const [modeIndex, deploymentMode] of surface.deploymentModes.entries()) {
+        if (!value.deploymentModes.includes(deploymentMode)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Service surface deployment mode "${deploymentMode}" must be declared in deploymentModes`,
+            path: ["serviceSurfaces", index, "deploymentModes", modeIndex]
+          });
+        }
       }
     }
   });
