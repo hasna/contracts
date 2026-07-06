@@ -9,6 +9,7 @@ import {
   type KnownSchemaId
 } from "../schemas";
 import { scanNoCloudTarget } from "../no-cloud";
+import { runRepoConformance } from "../conformance";
 import { getEmbeddedSchemaId, validateContract } from "../validators";
 
 function collectJsonFiles(root: string): string[] {
@@ -62,7 +63,7 @@ function preflightJsonUsageErrors(argv: string[]) {
     return false;
   }
 
-  if (!["schemas", "validate", "conformance", "no-cloud-scan"].includes(command)) {
+  if (!["schemas", "validate", "conformance", "no-cloud-scan", "repo-conformance"].includes(command)) {
     return reportParserJsonError("commander.unknownCommand", `unknown command '${command}'`);
   }
 
@@ -70,7 +71,8 @@ function preflightJsonUsageErrors(argv: string[]) {
     schemas: new Set(["--json", "-j"]),
     validate: new Set(["--json", "-j", "--schema"]),
     conformance: new Set(["--json", "-j"]),
-    "no-cloud-scan": new Set(["--json", "-j", "--manifest"])
+    "no-cloud-scan": new Set(["--json", "-j", "--manifest"]),
+    "repo-conformance": new Set(["--json", "-j"])
   };
   const allowedOptions = allowedOptionsByCommand[command] ?? new Set<string>();
   const positionals: string[] = [];
@@ -292,6 +294,34 @@ export function createContractsProgram() {
         }
       }
       if (evidence.verdict !== "passed") {
+        process.exitCode = 1;
+      }
+    });
+
+  program
+    .command("repo-conformance")
+    .description("Check a repo against the Hasna Service Contract v1 using its hasna.contract.json")
+    .argument("[path]", "Repo root path", ".")
+    .option("-j, --json", "Output JSON report")
+    .action((target: string, options: { json?: boolean }) => {
+      let report;
+      try {
+        report = runRepoConformance(target);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        reportCliError(options, `Repo conformance failed for ${target}: ${message}`, { path: target, code: "repo_conformance_error" });
+        return;
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        console.log(`${report.ok ? "ok" : "fail"} hasna.service_contract.v1 ${report.name ?? "?"} (${report.class ?? "?"}) ${target}`);
+        for (const check of report.checks) {
+          console.log(`  ${check.status} ${check.id}: ${check.detail}`);
+        }
+      }
+      if (!report.ok) {
         process.exitCode = 1;
       }
     });

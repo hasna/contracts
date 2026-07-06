@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const CONTRACTS_PACKAGE_NAME = "@hasna/contracts";
-export const CONTRACTS_PACKAGE_VERSION = "0.2.2";
+export const CONTRACTS_PACKAGE_VERSION = "0.3.0";
 
 export const SCHEMA_IDS = {
   actorRef: "hasna.actor_ref.v1",
@@ -23,7 +23,8 @@ export const SCHEMA_IDS = {
   scaffoldManifest: "hasna.scaffold_manifest.v1",
   scaffoldInstallRecord: "hasna.scaffold_install_record.v1",
   appCloudManifest: "hasna.app_cloud_manifest.v1",
-  noCloudEvidencePack: "hasna.no_cloud_evidence_pack.v1"
+  noCloudEvidencePack: "hasna.no_cloud_evidence_pack.v1",
+  serviceContract: "hasna.service_contract.v1"
 } as const;
 
 export const SchemaIdSchema = z
@@ -1494,6 +1495,221 @@ export const AgentTrajectorySchema = contractBaseSchema(SCHEMA_IDS.agentTrajecto
   .strict();
 export type AgentTrajectory = z.infer<typeof AgentTrajectorySchema>;
 
+// ---------------------------------------------------------------------------
+// Hasna Service Contract v1 (`hasna.contract.json` repo self-description)
+//
+// A repo's `hasna.contract.json` declares its name, repo class, the contract
+// version it targets, the contract-kit version it tracks, its declared bins,
+// and its storage boundary. Storage runtime enum is `local | cloud` ONLY per
+// Amendment A1 (PURE REMOTE): `cloud` sends reads AND writes straight to a
+// cloud Postgres owned by the app; there is no sync engine, no cache-as-mode,
+// and no hybrid/remote/self_hosted runtime. Those legacy words are accepted
+// only as deprecated *aliases* that normalize to `cloud` (see src/mode.ts).
+// ---------------------------------------------------------------------------
+
+export const SERVICE_CONTRACT_VERSION = "v1";
+
+export const RepoClassSchema = z.enum(["library", "cli-with-store", "service", "saas"]);
+export type RepoClass = z.infer<typeof RepoClassSchema>;
+
+/** Runtime storage enum. `local | cloud` ONLY (Amendment A1: PURE REMOTE). */
+export const STORAGE_MODES = ["local", "cloud"] as const;
+export const StorageModeSchema = z.enum(STORAGE_MODES);
+export type StorageMode = z.infer<typeof StorageModeSchema>;
+
+/** Deprecated storage-mode aliases accepted at parse time and mapped to cloud. */
+export const DEPRECATED_STORAGE_MODE_ALIASES = ["remote", "hybrid", "self_hosted"] as const;
+export type DeprecatedStorageModeAlias = (typeof DEPRECATED_STORAGE_MODE_ALIASES)[number];
+
+/** Lowercase dashed app short-name, e.g. `todos`, `mailery`, `loops`. */
+export const AppNameSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/, "App names must be lowercase dashed identifiers");
+export type AppName = z.infer<typeof AppNameSchema>;
+
+/** Bin suffixes an app may ship without a per-repo allowlist waiver. */
+export const ALLOWED_BIN_SUFFIXES = [
+  "",
+  "-cli",
+  "-mcp",
+  "-serve",
+  "-worker",
+  "-runner",
+  "-daemon",
+  "-migrate",
+  "-doctor"
+] as const;
+
+/** All bin names an app named `name` may declare by default. */
+export function allowedBinsForName(name: string): string[] {
+  return ALLOWED_BIN_SUFFIXES.map((suffix) => `${name}${suffix}`);
+}
+
+/** Canonical secret ref for an app database URL: `hasna/oss/<name>/database-url`. */
+export function databaseUrlSecretRefFor(name: string): string {
+  return `hasna/oss/${name}/database-url`;
+}
+
+/** Canonical local sqlite path for an app: `~/.hasna/<name>/<name>.db`. */
+export function defaultSqlitePathFor(name: string): string {
+  return `~/.hasna/${name}/${name}.db`;
+}
+
+export const StorageContractSchema = z
+  .object({
+    mode: StorageModeSchema,
+    /** Primary env prefix, e.g. `HASNA_TODOS_`. Defaults to `HASNA_<NAME>_`. */
+    envPrefix: z.string().regex(/^HASNA_[A-Z][A-Z0-9]*_$/).optional(),
+    /** Optional short alias env prefix, e.g. `TODOS_`. */
+    aliasEnvPrefix: z.string().regex(/^[A-Z][A-Z0-9]*_$/).optional(),
+    /** Secret Manager ref for the cloud database URL. */
+    databaseUrlSecretRef: z
+      .string()
+      .regex(/^hasna\/oss\/[a-z0-9-]+\/database-url$/)
+      .optional(),
+    /** Local sqlite path (`~/.hasna/<name>/<name>.db`). */
+    sqlitePath: z.string().min(1).optional()
+  })
+  .strict();
+export type StorageContract = z.infer<typeof StorageContractSchema>;
+
+export const ServiceContractManifestSchema = z
+  .object({
+    /** Optional editor hint pointing at the JSON Schema; ignored at runtime. */
+    $schema: z.string().min(1).optional(),
+    schema: z.literal(SCHEMA_IDS.serviceContract),
+    name: AppNameSchema,
+    class: RepoClassSchema,
+    contractVersion: z.literal(SERVICE_CONTRACT_VERSION),
+    /** Version of `@hasna/contracts` (the contract kit) the repo tracks. */
+    kitVersion: z.string().min(1),
+    description: z.string().min(1).optional(),
+    bins: z.array(z.string().min(1)).default([]),
+    storage: StorageContractSchema.optional(),
+    metadata: MetadataSchema.optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const allowed = new Set(allowedBinsForName(value.name));
+    const seenBins = new Set<string>();
+    for (const [index, bin] of value.bins.entries()) {
+      if (seenBins.has(bin)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Duplicate bin declaration", path: ["bins", index] });
+      }
+      seenBins.add(bin);
+      if (!allowed.has(bin)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Bin "${bin}" is not allowlisted for app "${value.name}"; allowed: ${[...allowed].join(", ")}`,
+          path: ["bins", index]
+        });
+      }
+    }
+
+    const hasBin = (suffix: string) => seenBins.has(`${value.name}${suffix}`);
+
+    if (value.storage) {
+      const upper = value.name.toUpperCase().replace(/-/g, "_");
+      if (value.storage.envPrefix && value.storage.envPrefix !== `HASNA_${upper}_`) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `storage.envPrefix must be HASNA_${upper}_`,
+          path: ["storage", "envPrefix"]
+        });
+      }
+      if (value.storage.databaseUrlSecretRef && value.storage.databaseUrlSecretRef !== databaseUrlSecretRefFor(value.name)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `storage.databaseUrlSecretRef must be ${databaseUrlSecretRefFor(value.name)}`,
+          path: ["storage", "databaseUrlSecretRef"]
+        });
+      }
+      if (value.storage.mode === "cloud" && !value.storage.databaseUrlSecretRef) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "cloud storage requires a databaseUrlSecretRef (PURE REMOTE: reads and writes go to cloud Postgres)",
+          path: ["storage", "databaseUrlSecretRef"]
+        });
+      }
+    }
+
+    if (value.class === "library") {
+      if (value.storage) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "library repos must not declare storage", path: ["storage"] });
+      }
+      if (hasBin("-serve") || hasBin("-mcp")) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "library repos must not ship a -serve or -mcp bin",
+          path: ["bins"]
+        });
+      }
+    }
+
+    if (value.class === "cli-with-store") {
+      if (!value.storage) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "cli-with-store repos must declare storage", path: ["storage"] });
+      } else if (value.storage.mode === "local" && !value.storage.sqlitePath) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "local cli-with-store storage requires sqlitePath (~/.hasna/<name>/<name>.db)",
+          path: ["storage", "sqlitePath"]
+        });
+      }
+      if (!seenBins.has(value.name)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `cli-with-store repos must ship the "${value.name}" bin`, path: ["bins"] });
+      }
+    }
+
+    if (value.class === "service") {
+      if (!value.storage) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "service repos must declare storage", path: ["storage"] });
+      }
+      if (!hasBin("-serve")) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `service repos must ship the "${value.name}-serve" bin`, path: ["bins"] });
+      }
+    }
+
+    if (value.class === "saas") {
+      if (!value.storage) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "saas repos must declare storage", path: ["storage"] });
+      } else if (value.storage.mode !== "cloud") {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "saas repos must use cloud storage mode", path: ["storage", "mode"] });
+      }
+      if (!hasBin("-serve")) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `saas repos must ship the "${value.name}-serve" bin`, path: ["bins"] });
+      }
+    }
+  });
+export type ServiceContractManifest = z.infer<typeof ServiceContractManifestSchema>;
+
+/** Shape of `GET /health` for a Hasna service (`{ status, version, mode }`). */
+export const HealthResponseSchema = z
+  .object({
+    status: z.enum(["ok", "degraded", "unavailable"]),
+    version: z.string().min(1),
+    mode: StorageModeSchema
+  })
+  .strict();
+export type HealthResponse = z.infer<typeof HealthResponseSchema>;
+
+/** Shape of `GET /ready`. */
+export const ReadyResponseSchema = z
+  .object({
+    ready: z.boolean(),
+    reason: z.string().min(1).optional()
+  })
+  .strict();
+export type ReadyResponse = z.infer<typeof ReadyResponseSchema>;
+
+/** Shape of `GET /version`. */
+export const VersionResponseSchema = z
+  .object({
+    version: z.string().min(1)
+  })
+  .strict();
+export type VersionResponse = z.infer<typeof VersionResponseSchema>;
+
 export const ContractSchemaRegistry = {
   [SCHEMA_IDS.actorRef]: ActorRefSchema,
   [SCHEMA_IDS.resourceRef]: ResourceRefSchema,
@@ -1514,7 +1730,8 @@ export const ContractSchemaRegistry = {
   [SCHEMA_IDS.scaffoldManifest]: ScaffoldManifestSchema,
   [SCHEMA_IDS.scaffoldInstallRecord]: ScaffoldInstallRecordSchema,
   [SCHEMA_IDS.appCloudManifest]: AppCloudManifestSchema,
-  [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePackSchema
+  [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePackSchema,
+  [SCHEMA_IDS.serviceContract]: ServiceContractManifestSchema
 } as const;
 
 export type KnownSchemaId = keyof typeof ContractSchemaRegistry;
@@ -1540,6 +1757,7 @@ export type ContractBySchemaId = {
   [SCHEMA_IDS.scaffoldInstallRecord]: ScaffoldInstallRecord;
   [SCHEMA_IDS.appCloudManifest]: AppCloudManifest;
   [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePack;
+  [SCHEMA_IDS.serviceContract]: ServiceContractManifest;
 };
 
 export type ActorRefInput = z.input<typeof ActorRefSchema>;
@@ -1562,6 +1780,7 @@ export type ScaffoldManifestInput = z.input<typeof ScaffoldManifestSchema>;
 export type ScaffoldInstallRecordInput = z.input<typeof ScaffoldInstallRecordSchema>;
 export type AppCloudManifestInput = z.input<typeof AppCloudManifestSchema>;
 export type NoCloudEvidencePackInput = z.input<typeof NoCloudEvidencePackSchema>;
+export type ServiceContractManifestInput = z.input<typeof ServiceContractManifestSchema>;
 export type ActorPointerInput = z.input<typeof ActorPointerSchema>;
 export type ResourcePointerInput = z.input<typeof ResourcePointerSchema>;
 export type EvidencePointerInput = z.input<typeof EvidencePointerSchema>;
@@ -1587,4 +1806,5 @@ export type ContractInputBySchemaId = {
   [SCHEMA_IDS.scaffoldInstallRecord]: ScaffoldInstallRecordInput;
   [SCHEMA_IDS.appCloudManifest]: AppCloudManifestInput;
   [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePackInput;
+  [SCHEMA_IDS.serviceContract]: ServiceContractManifestInput;
 };
