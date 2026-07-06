@@ -5,6 +5,7 @@ import { ContractSchemaRegistry, SCHEMA_IDS, type KnownSchemaId, validateContrac
 
 const examplesDir = join(import.meta.dir, "..", "examples");
 const expectedInvalidIssuePaths: Record<string, string[]> = {
+  "agent-run-provenance.invalid.json": ["verifierResult"],
   "app-cloud-manifest.invalid.json": ["cloudResources.0.ownerPackage", "dependencies", "forbiddenSharedRuntimes", "packageName"],
   "integration-ref.invalid.json": ["uri"],
   "no-cloud-evidence-pack.invalid.json": ["checks", "checks", "findings"],

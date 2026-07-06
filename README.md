@@ -241,6 +241,10 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
   traces, or other evidence.
 - `hasna.work_run.v1`: normalized run receipt for agent, command, workflow, loop,
   eval, test, deploy, or review work.
+- `hasna.agent_run_provenance.v1`: durable control-plane provenance for agent
+  runs, linking task, prompt/model version, auth profile reference, sandbox,
+  approval policy, tool calls, costs, verifier result, commit/PR, artifacts,
+  provider health, and credential references without raw secret material.
 - `hasna.decision_envelope.v1`: decision record with selected/skipped
   resources, rationale, actor, costs, obligations, redactions, and evidence.
 - `hasna.cost_estimate.v1`: money and token estimates with provider, model,

@@ -8,6 +8,7 @@ export const SCHEMA_IDS = {
   resourceRef: "hasna.resource_ref.v1",
   evidenceRef: "hasna.evidence_ref.v1",
   workRun: "hasna.work_run.v1",
+  agentRunProvenance: "hasna.agent_run_provenance.v1",
   decisionEnvelope: "hasna.decision_envelope.v1",
   costEstimate: "hasna.cost_estimate.v1",
   capabilityCard: "hasna.capability_card.v1",
@@ -1683,6 +1684,134 @@ export const WorkRunSchema = contractBaseSchema(SCHEMA_IDS.workRun)
   });
 export type WorkRun = z.infer<typeof WorkRunSchema>;
 
+export const AgentRunSandboxModeSchema = z.enum(["none", "read_only", "workspace_write", "worktree_write", "networked", "danger_full_access"]);
+export type AgentRunSandboxMode = z.infer<typeof AgentRunSandboxModeSchema>;
+
+export const AgentRunApprovalPolicySchema = z
+  .object({
+    mode: z.enum(["never", "on_request", "on_failure", "manual", "unknown"]),
+    requiresVerifier: z.boolean().default(false),
+    mutationAllowed: z.boolean().default(false),
+    approvalRefs: z.array(ResourcePointerSchema).default([])
+  })
+  .strict();
+export type AgentRunApprovalPolicy = z.infer<typeof AgentRunApprovalPolicySchema>;
+
+export const AgentRunToolCallSchema = z
+  .object({
+    id: z.string().min(1),
+    toolName: z.string().min(1),
+    action: z.string().min(1).optional(),
+    status: ContractStatusSchema.default("unknown"),
+    startedAt: OptionalTimestampSchema,
+    completedAt: OptionalTimestampSchema,
+    inputHash: HashStringSchema.optional(),
+    outputHash: HashStringSchema.optional(),
+    resourceRefs: z.array(ResourcePointerSchema).default([]),
+    evidenceRefs: z.array(EvidencePointerSchema).default([]),
+    redaction: RedactionStateSchema.default("unknown")
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.startedAt && value.completedAt && Date.parse(value.completedAt) < Date.parse(value.startedAt)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "completedAt must be after or equal to startedAt", path: ["completedAt"] });
+    }
+  });
+export type AgentRunToolCall = z.infer<typeof AgentRunToolCallSchema>;
+
+export const AgentRunVerifierResultSchema = z
+  .object({
+    status: z.enum(["passed", "failed", "not_required", "not_run", "unknown"]),
+    verifier: ActorPointerSchema.optional(),
+    summary: z.string().min(1).optional(),
+    proofBundleRef: ResourcePointerSchema.optional(),
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if ((value.status === "passed" || value.status === "failed") && !value.verifier && !value.proofBundleRef) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Verifier pass/fail results require verifier or proofBundleRef",
+        path: ["verifier"]
+      });
+    }
+  });
+export type AgentRunVerifierResult = z.infer<typeof AgentRunVerifierResultSchema>;
+
+export const CommitOrPrRefSchema = z
+  .object({
+    commit: ResourcePointerSchema.optional(),
+    branch: ResourcePointerSchema.optional(),
+    pullRequest: ResourcePointerSchema.optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.commit && !value.branch && !value.pullRequest) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "commitOrPr requires at least one commit, branch, or pullRequest ref",
+        path: ["commit"]
+      });
+    }
+  });
+export type CommitOrPrRef = z.infer<typeof CommitOrPrRefSchema>;
+
+export const AgentRunProvenanceSchema = contractBaseSchema(SCHEMA_IDS.agentRunProvenance)
+  .extend({
+    taskId: z.string().min(1),
+    projectId: z.string().min(1).optional(),
+    repoPath: z.string().min(1),
+    agentId: z.string().min(1),
+    runId: z.string().min(1),
+    parentRunId: z.string().min(1).optional(),
+    promptRef: ResourcePointerSchema,
+    promptVersion: z.string().min(1).optional(),
+    modelRef: ResourcePointerSchema,
+    modelCapabilityRef: ResourcePointerSchema.optional(),
+    authProfileRef: ResourcePointerSchema.optional(),
+    sandboxMode: AgentRunSandboxModeSchema,
+    approvalPolicy: AgentRunApprovalPolicySchema,
+    toolCalls: z.array(AgentRunToolCallSchema).default([]),
+    cost: CostEstimateSchema.optional(),
+    startedAt: OptionalTimestampSchema,
+    completedAt: OptionalTimestampSchema,
+    status: ContractStatusSchema,
+    verifierResult: AgentRunVerifierResultSchema.optional(),
+    commitOrPr: CommitOrPrRefSchema.optional(),
+    artifactRefs: z.array(EvidencePointerSchema).default([]),
+    providerHealthRefs: z.array(ResourcePointerSchema).default([]),
+    credentialRefs: z.array(ResourcePointerSchema).default([]),
+    redactionStatus: RedactionStateSchema.default("unknown")
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.runId !== value.id) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "runId must match id", path: ["runId"] });
+    }
+    if (value.startedAt && value.completedAt && Date.parse(value.completedAt) < Date.parse(value.startedAt)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "completedAt must be after or equal to startedAt", path: ["completedAt"] });
+    }
+    if (TerminalStatuses.has(value.status) && !value.completedAt) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Terminal provenance records require completedAt", path: ["completedAt"] });
+    }
+    if (value.approvalPolicy.requiresVerifier && value.verifierResult?.status !== "passed") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Review-required runs require a passed verifierResult",
+        path: ["verifierResult"]
+      });
+    }
+    if (value.status === "succeeded" && value.artifactRefs.length === 0 && !value.commitOrPr && !value.verifierResult?.proofBundleRef) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Succeeded provenance records require artifactRefs, commitOrPr, or verifier proof",
+        path: ["artifactRefs"]
+      });
+    }
+  });
+export type AgentRunProvenance = z.infer<typeof AgentRunProvenanceSchema>;
+
 export const TrajectoryEventSchema = z
   .object({
     id: z.string().min(1),
@@ -1927,6 +2056,7 @@ export const ContractSchemaRegistry = {
   [SCHEMA_IDS.resourceRef]: ResourceRefSchema,
   [SCHEMA_IDS.evidenceRef]: EvidenceRefSchema,
   [SCHEMA_IDS.workRun]: WorkRunSchema,
+  [SCHEMA_IDS.agentRunProvenance]: AgentRunProvenanceSchema,
   [SCHEMA_IDS.decisionEnvelope]: DecisionEnvelopeSchema,
   [SCHEMA_IDS.costEstimate]: CostEstimateSchema,
   [SCHEMA_IDS.capabilityCard]: CapabilityCardSchema,
@@ -1954,6 +2084,7 @@ export type ContractBySchemaId = {
   [SCHEMA_IDS.resourceRef]: ResourceRef;
   [SCHEMA_IDS.evidenceRef]: EvidenceRef;
   [SCHEMA_IDS.workRun]: WorkRun;
+  [SCHEMA_IDS.agentRunProvenance]: AgentRunProvenance;
   [SCHEMA_IDS.decisionEnvelope]: DecisionEnvelope;
   [SCHEMA_IDS.costEstimate]: CostEstimate;
   [SCHEMA_IDS.capabilityCard]: CapabilityCard;
@@ -1978,6 +2109,7 @@ export type ActorRefInput = z.input<typeof ActorRefSchema>;
 export type ResourceRefInput = z.input<typeof ResourceRefSchema>;
 export type EvidenceRefInput = z.input<typeof EvidenceRefSchema>;
 export type WorkRunInput = z.input<typeof WorkRunSchema>;
+export type AgentRunProvenanceInput = z.input<typeof AgentRunProvenanceSchema>;
 export type DecisionEnvelopeInput = z.input<typeof DecisionEnvelopeSchema>;
 export type CostEstimateInput = z.input<typeof CostEstimateSchema>;
 export type CapabilityCardInput = z.input<typeof CapabilityCardSchema>;
@@ -2005,6 +2137,7 @@ export type ContractInputBySchemaId = {
   [SCHEMA_IDS.resourceRef]: ResourceRefInput;
   [SCHEMA_IDS.evidenceRef]: EvidenceRefInput;
   [SCHEMA_IDS.workRun]: WorkRunInput;
+  [SCHEMA_IDS.agentRunProvenance]: AgentRunProvenanceInput;
   [SCHEMA_IDS.decisionEnvelope]: DecisionEnvelopeInput;
   [SCHEMA_IDS.costEstimate]: CostEstimateInput;
   [SCHEMA_IDS.capabilityCard]: CapabilityCardInput;

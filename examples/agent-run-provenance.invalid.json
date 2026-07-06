@@ -1,0 +1,45 @@
+{
+  "schema": "hasna.agent_run_provenance.v1",
+  "id": "run_missing_verifier",
+  "createdAt": "2026-07-06T13:40:00.000Z",
+  "taskId": "task_missing_verifier",
+  "repoPath": "/home/hasna/workspace/hasna/opensource/open-coders",
+  "agentId": "worker-x",
+  "runId": "run_missing_verifier",
+  "promptRef": {
+    "kind": "document",
+    "id": "prompt_missing_verifier",
+    "uri": "task://task_missing_verifier"
+  },
+  "modelRef": {
+    "kind": "model",
+    "id": "model_missing_verifier",
+    "sourcePackage": "@hasna/models",
+    "externalId": "model_missing_verifier"
+  },
+  "sandboxMode": "worktree_write",
+  "approvalPolicy": {
+    "mode": "manual",
+    "requiresVerifier": true,
+    "mutationAllowed": true
+  },
+  "startedAt": "2026-07-06T13:40:00.000Z",
+  "completedAt": "2026-07-06T13:41:00.000Z",
+  "status": "succeeded",
+  "commitOrPr": {
+    "commit": {
+      "kind": "commit",
+      "id": "commit_missing_verifier",
+      "externalId": "abcdef0",
+      "sourcePackage": "git"
+    }
+  },
+  "artifactRefs": [
+    {
+      "id": "ev_missing_verifier_tests",
+      "kind": "test_result",
+      "uri": "artifact://runs/run_missing_verifier/tests.txt"
+    }
+  ],
+  "redactionStatus": "partial"
+}

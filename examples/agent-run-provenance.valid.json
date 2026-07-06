@@ -1,0 +1,130 @@
+{
+  "schema": "hasna.agent_run_provenance.v1",
+  "id": "run_worker_2_gateway_20260706",
+  "createdAt": "2026-07-06T13:40:00.000Z",
+  "taskId": "84481fea-7d49-4b2e-88d2-f4a8a81ecafc",
+  "projectId": "wks_dclch11fniur",
+  "repoPath": "/home/hasna/workspace/hasna/opensource/open-gateway",
+  "agentId": "worker-2",
+  "runId": "run_worker_2_gateway_20260706",
+  "parentRunId": "run_missing_core_worker_2",
+  "promptRef": {
+    "kind": "document",
+    "id": "prompt_missing_core_worker_2",
+    "uri": "task://84481fea-7d49-4b2e-88d2-f4a8a81ecafc"
+  },
+  "promptVersion": "2026-07-06.worker-2",
+  "modelRef": {
+    "kind": "model",
+    "id": "codewith-default",
+    "sourcePackage": "@hasna/codewith",
+    "externalId": "selected-session-model"
+  },
+  "modelCapabilityRef": {
+    "kind": "model",
+    "id": "model_capability_code",
+    "uri": "artifact://model-capabilities/codewith-default.json"
+  },
+  "authProfileRef": {
+    "kind": "integration",
+    "id": "auth_profile_live_codewith",
+    "sourcePackage": "@hasna/accounts",
+    "externalId": "live-codewith"
+  },
+  "sandboxMode": "worktree_write",
+  "approvalPolicy": {
+    "mode": "on_request",
+    "requiresVerifier": true,
+    "mutationAllowed": true,
+    "approvalRefs": [
+      {
+        "kind": "task",
+        "id": "task_approval_84481fea",
+        "uri": "task://84481fea-7d49-4b2e-88d2-f4a8a81ecafc"
+      }
+    ]
+  },
+  "toolCalls": [
+    {
+      "id": "tool_git_diff",
+      "toolName": "exec_command",
+      "action": "git diff --check",
+      "status": "succeeded",
+      "startedAt": "2026-07-06T13:43:00.000Z",
+      "completedAt": "2026-07-06T13:43:01.000Z",
+      "evidenceRefs": [
+        {
+          "id": "ev_git_diff_check",
+          "kind": "command_output",
+          "uri": "artifact://runs/run_worker_2_gateway_20260706/git-diff-check.txt"
+        }
+      ],
+      "redaction": "none"
+    }
+  ],
+  "cost": {
+    "schema": "hasna.cost_estimate.v1",
+    "id": "cost_worker_2_gateway",
+    "createdAt": "2026-07-06T13:44:00.000Z",
+    "currency": "USD",
+    "amountMicros": 0,
+    "basis": "actual"
+  },
+  "startedAt": "2026-07-06T13:40:00.000Z",
+  "completedAt": "2026-07-06T13:45:00.000Z",
+  "status": "succeeded",
+  "verifierResult": {
+    "status": "passed",
+    "verifier": {
+      "kind": "agent",
+      "id": "adversarial-self-review",
+      "name": "Worker 2 adversarial self-review"
+    },
+    "summary": "Validated bounded scope, no raw secrets, and evidence-backed claims.",
+    "evidenceRefs": [
+      {
+        "id": "ev_adversarial_review",
+        "kind": "report",
+        "uri": "artifact://runs/run_worker_2_gateway_20260706/adversarial-review.md"
+      }
+    ]
+  },
+  "commitOrPr": {
+    "commit": {
+      "kind": "commit",
+      "id": "commit_1065ea5",
+      "externalId": "1065ea5",
+      "sourcePackage": "git"
+    },
+    "branch": {
+      "kind": "branch",
+      "id": "missing-core-infra-control-84481fea",
+      "externalId": "missing-core/infra-control-84481fea",
+      "sourcePackage": "git"
+    }
+  },
+  "artifactRefs": [
+    {
+      "id": "ev_gateway_tests",
+      "kind": "test_result",
+      "uri": "artifact://runs/run_worker_2_gateway_20260706/tests.txt",
+      "summary": "bun run typecheck && bun test && bun run build"
+    }
+  ],
+  "providerHealthRefs": [
+    {
+      "kind": "verification",
+      "id": "gateway_mock_provider_health",
+      "uri": "artifact://runs/run_worker_2_gateway_20260706/mock-provider-health.json"
+    }
+  ],
+  "credentialRefs": [
+    {
+      "kind": "integration",
+      "id": "gateway_api_key_env",
+      "sourcePackage": "@hasna/gateway",
+      "externalId": "GATEWAY_API_KEY"
+    }
+  ],
+  "redactionStatus": "full"
+}

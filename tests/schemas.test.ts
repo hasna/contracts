@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   ActorRefSchema,
+  AgentRunProvenanceSchema,
   AppCloudManifestSchema,
   ContractSchemaRegistry,
   type EvidenceRef,
@@ -23,6 +24,7 @@ import {
   WorkRunSchema
 } from "../src";
 import providerLiveModeStandard from "../examples/provider-live-mode-standard.valid.json";
+import agentRunProvenance from "../examples/agent-run-provenance.valid.json";
 
 const createdAt = "2026-06-27T10:00:00.000Z";
 
@@ -270,6 +272,30 @@ describe("core schemas", () => {
       expect(issuePaths).toContain("operationCards.0.operations.0.rollbackOrRevocation");
       expect(issuePaths).toContain("operationCards.0.operations.0.reconciliation");
       expect(issuePaths).toContain("operationCards.0.credentialRequirements");
+    }
+  });
+
+  test("validates agent run provenance with reference-only control-plane fields", () => {
+    const parsed = AgentRunProvenanceSchema.parse(agentRunProvenance);
+    expect(parsed.taskId).toBe("84481fea-7d49-4b2e-88d2-f4a8a81ecafc");
+    expect(parsed.runId).toBe(parsed.id);
+    expect(parsed.authProfileRef?.externalId).toBe("live-codewith");
+    expect(parsed.credentialRefs[0]?.externalId).toBe("GATEWAY_API_KEY");
+    expect(parsed.verifierResult?.status).toBe("passed");
+    expect(parsed.redactionStatus).toBe("full");
+  });
+
+  test("rejects review-required successful provenance without passed verifier result", () => {
+    const result = validateContract(SCHEMA_IDS.agentRunProvenance, {
+      ...agentRunProvenance,
+      id: "run_missing_passed_verifier",
+      runId: "run_missing_passed_verifier",
+      verifierResult: { status: "not_run" }
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.path.join("."))).toContain("verifierResult");
     }
   });
 
