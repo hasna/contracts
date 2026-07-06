@@ -8,6 +8,18 @@ const expectedInvalidIssuePaths: Record<string, string[]> = {
   "app-cloud-manifest.invalid.json": ["cloudResources.0.ownerPackage", "dependencies", "forbiddenSharedRuntimes", "packageName"],
   "integration-ref.invalid.json": ["uri"],
   "no-cloud-evidence-pack.invalid.json": ["checks", "checks", "findings"],
+  "provider-live-mode-standard.invalid.json": [
+    "modes",
+    "operationCards.0.credentialRequirements",
+    "operationCards.0.operations.0.requiresApproval",
+    "operationCards.0.operations.0.requiresIdempotencyKey",
+    "operationCards.0.operations.0.requiresSandboxEvidence",
+    "operationCards.0.operations.0.rollbackOrRevocation",
+    "operationCards.0.operations.0.reconciliation",
+    "operationCards.0.operations.0.sideEffectClass",
+    "operationCards.0.auditEvents",
+    "firstAdoptionTargets"
+  ],
   "project-manifest.invalid.json": ["slug"],
   "project-panel.invalid.json": ["stateReason"],
   "project-snapshot.invalid.json": ["panels.0.projectId"],

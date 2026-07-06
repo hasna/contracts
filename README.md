@@ -247,6 +247,10 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
   account, basis, and resource references.
 - `hasna.capability_card.v1`: machine-readable description of a package command,
   MCP tool, API operation, workflow, or agent skill.
+- `hasna.provider_live_mode_standard.v1`: provider/live-mode standard with
+  canonical modes, capability cards, fail-closed credentials, no-side-effect
+  smokes, approval/idempotency/rollback/reconciliation gates, and first adopter
+  targets.
 - `hasna.context_pack.v1`: bounded context bundle with objective, resources,
   evidence, constraints, and token budget.
 - `hasna.integration_ref.v1`: portable pointer to a project integration provider

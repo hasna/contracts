@@ -66,6 +66,7 @@
   "files": [
     "dist",
     "src/kit",
+    "docs",
     "examples",
     "CONTRACT.md",
     "docker-compose.yml",
