@@ -1,0 +1,53 @@
+# Hasna Service Contract v1 — reference self-host artifact.
+#
+# Every `service` / `saas` class repo ships a docker-compose.yml at its root as
+# THE self-host artifact. This template shows the two-container shape a repo
+# copies and renames <name> for: an app-owned Postgres plus the app in `cloud`
+# storage mode (Amendment A1 PURE REMOTE — reads AND writes go straight to this
+# Postgres; there is no sync engine and no cache mode).
+#
+# The app's short name is `<name>` (e.g. todos, mailery). Replace it and the
+# HASNA_<NAME>_* env keys with the real upper-snake token (e.g. HASNA_TODOS_*).
+# Provide the database password via a .env file or your secret store
+# (canonical secret ref: hasna/oss/<name>/database-url). Never commit secrets.
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your env or .env}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    image: ${APP_IMAGE:-ghcr.io/hasna/app:latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Storage runtime enum is local|cloud ONLY. Self-host = cloud pointed at
+      # the app-owned Postgres above.
+      HASNA_APP_STORAGE_MODE: cloud
+      # Provided at runtime; not baked into the image. Points at the db service.
+      HASNA_APP_DATABASE_URL: ${HASNA_APP_DATABASE_URL:?set HASNA_APP_DATABASE_URL to the app-owned Postgres URL}
+    command: ["app-serve"]
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    healthcheck:
+      # GET /health -> { status, version, mode }
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db-data:

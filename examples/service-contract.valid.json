@@ -1,0 +1,16 @@
+{
+  "schema": "hasna.service_contract.v1",
+  "name": "todos",
+  "class": "cli-with-store",
+  "contractVersion": "v1",
+  "kitVersion": "0.3.0",
+  "description": "Universal task management for AI coding agents.",
+  "bins": ["todos", "todos-mcp", "todos-serve"],
+  "storage": {
+    "mode": "cloud",
+    "envPrefix": "HASNA_TODOS_",
+    "aliasEnvPrefix": "TODOS_",
+    "databaseUrlSecretRef": "hasna/oss/todos/database-url",
+    "sqlitePath": "~/.hasna/todos/todos.db"
+  }
+}
