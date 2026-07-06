@@ -1,0 +1,30 @@
+{
+  "schema": "hasna.announcement.v1",
+  "id": "announcement_open_todos_0_11_63",
+  "createdAt": "2026-07-06T11:00:00.000Z",
+  "campaignId": "campaign_release_open_todos_0_11_63",
+  "appId": "open-todos",
+  "releaseRef": {
+    "kind": "release",
+    "id": "release_open_todos_0_11_63",
+    "sourcePackage": "@hasna/contracts",
+    "externalId": "release_open_todos_0_11_63"
+  },
+  "channels": [
+    {
+      "channel": "email",
+      "status": "sent",
+      "deliveredAt": "2026-07-06T11:05:00.000Z"
+    },
+    {
+      "channel": "telegram",
+      "status": "skipped",
+      "detail": "audience has no telegram members"
+    }
+  ],
+  "audienceRef": {
+    "kind": "audience",
+    "id": "audience_oss_operators"
+  },
+  "sentAt": "2026-07-06T11:05:00.000Z"
+}

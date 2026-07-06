@@ -1,0 +1,23 @@
+{
+  "schema": "hasna.rollout_record.v1",
+  "id": "rollout_open_todos_spark01_0_11_63",
+  "createdAt": "2026-07-06T10:00:00.000Z",
+  "appId": "open-todos",
+  "package": "@hasna/todos",
+  "version": "0.11.63",
+  "machine": "spark01",
+  "action": "update",
+  "result": "succeeded",
+  "verifiedBy": {
+    "cliVersion": "0.11.63",
+    "mcpHealth": "ok"
+  },
+  "at": "2026-07-06T10:00:00.000Z",
+  "evidenceRefs": [
+    {
+      "id": "ev_rollout_open_todos_spark01",
+      "kind": "command_output",
+      "uri": "artifact://rollouts/open-todos/spark01/install-output.txt"
+    }
+  ]
+}

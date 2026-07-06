@@ -933,3 +933,252 @@ describe("core schemas", () => {
     expect(missingEvidence.success).toBe(false);
   });
 });
+
+describe("distribution schemas", () => {
+  const validApp = {
+    schema: SCHEMA_IDS.app,
+    id: "app_open_todos",
+    createdAt,
+    appId: "open-todos",
+    npmName: "@hasna/todos",
+    repoFolder: "open-todos",
+    githubUrl: "https://github.com/hasna/todos",
+    projectSlug: "open-todos",
+    surfaces: {
+      bins: ["todos", "todos-mcp"],
+      mcp: { transport: "http", bin: "todos-mcp" },
+      http: { healthPath: "/health", port: 4310 }
+    },
+    lifecycle: "active",
+    releaseChannel: "stable"
+  } as const;
+
+  const validRelease = {
+    schema: SCHEMA_IDS.release,
+    id: "release_open_todos_0_11_63",
+    createdAt,
+    appId: "open-todos",
+    package: "@hasna/todos",
+    version: "0.11.63",
+    gitSha: "9fceb02d0ae598e95dc970b74767f19372d61af8",
+    publishedAt: createdAt,
+    publishPath: "skill",
+    evidenceRefs: [evidencePointer]
+  } as const;
+
+  const validRollout = {
+    schema: SCHEMA_IDS.rolloutRecord,
+    id: "rollout_open_todos_spark01",
+    createdAt,
+    appId: "open-todos",
+    package: "@hasna/todos",
+    version: "0.11.63",
+    machine: "spark01",
+    action: "update",
+    result: "succeeded",
+    verifiedBy: { cliVersion: "0.11.63", mcpHealth: "ok" },
+    at: createdAt
+  } as const;
+
+  test("validates canonical app identity and applies defaults", () => {
+    const app = parseContract(SCHEMA_IDS.app, validApp);
+    expect(app.appId).toBe("open-todos");
+    expect(app.surfaces.bins).toEqual(["todos", "todos-mcp"]);
+    expect(app.tags).toEqual([]);
+
+    const minimal = parseContract(SCHEMA_IDS.app, {
+      schema: SCHEMA_IDS.app,
+      id: "app_open_uptime",
+      createdAt,
+      appId: "open-uptime",
+      npmName: "@hasna/uptime",
+      repoFolder: "open-uptime",
+      githubUrl: "git+https://github.com/hasna/uptime.git",
+      projectSlug: "open-uptime",
+      lifecycle: "stub"
+    });
+    expect(minimal.releaseChannel).toBe("stable");
+    expect(minimal.surfaces).toEqual({ bins: [] });
+  });
+
+  test("rejects apps with bad slugs, non-github urls, or duplicate bins", () => {
+    expect(validateContract(SCHEMA_IDS.app, { ...validApp, appId: "Open Todos" }).success).toBe(false);
+    expect(validateContract(SCHEMA_IDS.app, { ...validApp, githubUrl: "https://gitlab.com/hasna/todos" }).success).toBe(false);
+    expect(validateContract(SCHEMA_IDS.app, { ...validApp, lifecycle: "retired" }).success).toBe(false);
+
+    const duplicateBins = validateContract(SCHEMA_IDS.app, {
+      ...validApp,
+      surfaces: { bins: ["todos", "todos"] }
+    });
+    expect(duplicateBins.success).toBe(false);
+    if (!duplicateBins.success) {
+      expect(duplicateBins.error.issues.map((issue) => issue.path.join("."))).toContain("surfaces.bins.1");
+    }
+  });
+
+  test("validates releases and allows deferred changelog refs", () => {
+    const release = parseContract(SCHEMA_IDS.release, validRelease);
+    expect(release.changelogRef).toBeUndefined();
+    expect(release.publishPath).toBe("skill");
+
+    const withChangelog = parseContract(SCHEMA_IDS.release, {
+      ...validRelease,
+      changelogRef: { kind: "document", id: "changelog_open_todos_0_11_63", uri: "https://github.com/hasna/todos/blob/main/CHANGELOG.md" }
+    });
+    expect(withChangelog.changelogRef?.id).toBe("changelog_open_todos_0_11_63");
+  });
+
+  test("requires publish evidence unless the release is backfilled", () => {
+    const missingEvidence = validateContract(SCHEMA_IDS.release, { ...validRelease, evidenceRefs: [] });
+    expect(missingEvidence.success).toBe(false);
+    if (!missingEvidence.success) {
+      expect(missingEvidence.error.issues.map((issue) => issue.path.join("."))).toContain("evidenceRefs");
+    }
+
+    const backfilled = validateContract(SCHEMA_IDS.release, {
+      ...validRelease,
+      publishPath: "backfilled",
+      evidenceRefs: []
+    });
+    expect(backfilled.success).toBe(true);
+
+    expect(validateContract(SCHEMA_IDS.release, { ...validRelease, gitSha: "not-a-sha" }).success).toBe(false);
+    expect(validateContract(SCHEMA_IDS.release, { ...validRelease, version: "v1.2" }).success).toBe(false);
+  });
+
+  test("validates rollout records and enforces action/result coupling", () => {
+    const rollout = parseContract(SCHEMA_IDS.rolloutRecord, validRollout);
+    expect(rollout.verifiedBy?.mcpHealth).toBe("ok");
+
+    const freezeBlockedOk = validateContract(SCHEMA_IDS.rolloutRecord, {
+      ...validRollout,
+      id: "rollout_freeze_blocked",
+      action: "freeze-blocked",
+      result: "blocked",
+      verifiedBy: undefined
+    });
+    expect(freezeBlockedOk.success).toBe(true);
+
+    const freezeBlockedBad = validateContract(SCHEMA_IDS.rolloutRecord, {
+      ...validRollout,
+      action: "freeze-blocked",
+      result: "succeeded"
+    });
+    expect(freezeBlockedBad.success).toBe(false);
+    if (!freezeBlockedBad.success) {
+      expect(freezeBlockedBad.error.issues.map((issue) => issue.path.join("."))).toContain("result");
+    }
+
+    const unverifiedSuccess = validateContract(SCHEMA_IDS.rolloutRecord, {
+      ...validRollout,
+      verifiedBy: undefined
+    });
+    expect(unverifiedSuccess.success).toBe(false);
+    if (!unverifiedSuccess.success) {
+      expect(unverifiedSuccess.error.issues.map((issue) => issue.path.join("."))).toContain("verifiedBy");
+    }
+  });
+
+  test("validates announcements with per-channel delivery status", () => {
+    const announcement = parseContract(SCHEMA_IDS.announcement, {
+      schema: SCHEMA_IDS.announcement,
+      id: "announcement_open_todos_0_11_63",
+      createdAt,
+      campaignId: "campaign_open_todos_0_11_63",
+      appId: "open-todos",
+      releaseRef: { kind: "release", id: "release_open_todos_0_11_63" },
+      channels: [
+        { channel: "email", status: "sent", deliveredAt: createdAt },
+        { channel: "telegram", status: "failed", detail: "bot token expired" }
+      ],
+      audienceRef: { kind: "audience", id: "audience_oss_operators" },
+      sentAt: createdAt
+    });
+    expect(announcement.channels).toHaveLength(2);
+  });
+
+  test("rejects announcements with wrong ref kinds or incomplete channel states", () => {
+    const base = {
+      schema: SCHEMA_IDS.announcement,
+      id: "announcement_bad",
+      createdAt,
+      campaignId: "campaign_bad",
+      channels: [{ channel: "email", status: "sent", deliveredAt: createdAt }],
+      audienceRef: { kind: "audience", id: "audience_oss_operators" },
+      sentAt: createdAt
+    } as const;
+
+    expect(validateContract(SCHEMA_IDS.announcement, { ...base, audienceRef: { kind: "task", id: "x" } }).success).toBe(false);
+    expect(validateContract(SCHEMA_IDS.announcement, { ...base, releaseRef: { kind: "task", id: "x" } }).success).toBe(false);
+    expect(validateContract(SCHEMA_IDS.announcement, { ...base, channels: [] }).success).toBe(false);
+    expect(
+      validateContract(SCHEMA_IDS.announcement, { ...base, channels: [{ channel: "email", status: "sent" }] }).success
+    ).toBe(false);
+    expect(
+      validateContract(SCHEMA_IDS.announcement, { ...base, channels: [{ channel: "telegram", status: "failed" }] }).success
+    ).toBe(false);
+  });
+
+  test("validates audiences with tag/attribute/group predicates and consent policy", () => {
+    const audience = parseContract(SCHEMA_IDS.audience, {
+      schema: SCHEMA_IDS.audience,
+      id: "audience_oss_operators",
+      createdAt,
+      audienceId: "oss-operators",
+      name: "OSS fleet operators",
+      definition: {
+        predicates: [
+          { kind: "tag", value: "fleet-operator" },
+          { kind: "attribute", key: "machine", op: "in", values: ["spark01", "spark02"] },
+          { kind: "group", op: "exists", value: "oss" }
+        ]
+      },
+      consentPolicy: "opt_in",
+      suppressionSyncedAt: null
+    });
+    expect(audience.definition.match).toBe("all");
+    expect(audience.definition.predicates[0]?.op).toBe("eq");
+  });
+
+  test("rejects audiences with malformed predicates", () => {
+    const base = {
+      schema: SCHEMA_IDS.audience,
+      id: "audience_bad",
+      createdAt,
+      audienceId: "oss-operators",
+      name: "OSS fleet operators",
+      consentPolicy: "opt_in"
+    } as const;
+
+    const missingKey = validateContract(SCHEMA_IDS.audience, {
+      ...base,
+      definition: { predicates: [{ kind: "attribute", op: "eq", value: "spark01" }] }
+    });
+    expect(missingKey.success).toBe(false);
+    if (!missingKey.success) {
+      expect(missingKey.error.issues.map((issue) => issue.path.join("."))).toContain("definition.predicates.0.key");
+    }
+
+    expect(
+      validateContract(SCHEMA_IDS.audience, {
+        ...base,
+        definition: { predicates: [{ kind: "tag", op: "in", values: [] }] }
+      }).success
+    ).toBe(false);
+    expect(validateContract(SCHEMA_IDS.audience, { ...base, definition: { predicates: [] } }).success).toBe(false);
+  });
+
+  test("app cloud manifests reference canonical hasna.app.v1 identity by appId slug", () => {
+    const manifest = {
+      schema: SCHEMA_IDS.appCloudManifest,
+      id: "cloud_manifest_open_todos",
+      createdAt,
+      packageName: "@hasna/todos",
+      appId: "open-todos",
+      storageMode: "local_only",
+      cloudBoundary: "none"
+    } as const;
+    expect(validateContract(SCHEMA_IDS.appCloudManifest, manifest).success).toBe(true);
+    expect(validateContract(SCHEMA_IDS.appCloudManifest, { ...manifest, appId: "Open Todos!" }).success).toBe(false);
+  });
+});

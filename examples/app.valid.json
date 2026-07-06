@@ -1,0 +1,25 @@
+{
+  "schema": "hasna.app.v1",
+  "id": "app_open_todos",
+  "createdAt": "2026-07-06T08:00:00.000Z",
+  "appId": "open-todos",
+  "npmName": "@hasna/todos",
+  "repoFolder": "open-todos",
+  "githubUrl": "https://github.com/hasna/todos",
+  "projectSlug": "open-todos",
+  "surfaces": {
+    "bins": ["todos", "todos-cli", "todos-mcp"],
+    "mcp": {
+      "transport": "http",
+      "bin": "todos-mcp"
+    },
+    "http": {
+      "healthPath": "/health",
+      "port": 4310
+    }
+  },
+  "lifecycle": "active",
+  "releaseChannel": "stable",
+  "summary": "Task and plan tracking for Hasna agents",
+  "tags": ["distribution", "oss"]
+}
