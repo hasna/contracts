@@ -3,6 +3,7 @@ export * from "./validators";
 export * from "./no-cloud";
 export * from "./mode";
 export * from "./service-contract";
+export * from "./secure-local-store";
 export * from "./conformance";
 export * from "./kit/generate";
 export * from "./auth/index";
