@@ -1,0 +1,19 @@
+{
+  "schema": "hasna.announcement.v1",
+  "id": "announcement_bad_audience_ref_kind",
+  "createdAt": "2026-07-06T11:00:00.000Z",
+  "campaignId": "campaign_release_open_todos_0_11_63",
+  "appId": "open-todos",
+  "channels": [
+    {
+      "channel": "email",
+      "status": "sent",
+      "deliveredAt": "2026-07-06T11:05:00.000Z"
+    }
+  ],
+  "audienceRef": {
+    "kind": "task",
+    "id": "audience_oss_operators"
+  },
+  "sentAt": "2026-07-06T11:05:00.000Z"
+}

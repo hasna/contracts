@@ -277,7 +277,9 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
   resource refs, evidence, and proof refs.
 - `hasna.app_cloud_manifest.v1`: app-owned cloud boundary declaration for a
   package that uses its own cloud resources, local cache, and conflict policy
-  without depending on shared `@hasna/cloud` or `open-cloud` runtimes.
+  without depending on shared `@hasna/cloud` or `open-cloud` runtimes. This is
+  NOT an identity schema: canonical app identity lives in `hasna.app.v1`, and
+  this manifest references it by the same stable `appId` slug.
 - `hasna.no_cloud_evidence_pack.v1`: prepublish/CI evidence pack for package
   manifest, lockfile, source/runtime config, packed artifact, published
   metadata, and app-cloud-manifest scans.
@@ -286,6 +288,25 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
   tracked kit version, declared bins, and the `local | cloud` storage boundary.
   See `CONTRACT.md` for the normative spec and `contracts repo-conformance` /
   `runRepoConformance` for the self-check kit.
+- `hasna.app.v1`: canonical app identity for the distribution apps plan —
+  stable `appId` slug, `npmName`, `repoFolder`, `githubUrl`, `projectSlug`,
+  surfaces (`bins`, optional `mcp`/`http`), lifecycle
+  (`active|stub|deprecated|archived`), and release channel. All other
+  distribution documents reference apps by `appId` only.
+- `hasna.release.v1`: publish receipt for one app package version — `appId`,
+  `package`, semver `version`, `gitSha`, `publishedAt`, publish path
+  (`skill|ci|backfilled`), optional deferred `changelogRef`, and publish
+  evidence (required unless backfilled).
+- `hasna.rollout_record.v1`: per-machine rollout receipt — `appId`, `package`,
+  `version`, `machine`, action (`install|update|rollback|freeze-blocked`),
+  contract-status `result`, optional `verifiedBy` (`cliVersion`, `mcpHealth`),
+  and `at`.
+- `hasna.announcement.v1`: release/campaign announcement receipt — `campaignId`,
+  optional `appId` and `releaseRef`, per-channel delivery statuses, an
+  `audienceRef` (resource kind `audience`), and `sentAt`.
+- `hasna.audience.v1`: named audience definition — `audienceId`, tag/attribute/
+  group predicates with `all|any` matching, consent policy
+  (`opt_in|opt_out|transactional|none`), and `suppressionSyncedAt`.
 
 Every top-level contract includes a literal `schema` field. Consumers should
 reject objects whose embedded schema does not match the validator being used.

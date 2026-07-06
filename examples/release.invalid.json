@@ -1,0 +1,12 @@
+{
+  "schema": "hasna.release.v1",
+  "id": "release_missing_publish_evidence",
+  "createdAt": "2026-07-06T09:00:00.000Z",
+  "appId": "open-todos",
+  "package": "@hasna/todos",
+  "version": "0.11.63",
+  "gitSha": "9fceb02d0ae598e95dc970b74767f19372d61af8",
+  "publishedAt": "2026-07-06T09:00:00.000Z",
+  "publishPath": "skill",
+  "evidenceRefs": []
+}
