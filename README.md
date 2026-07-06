@@ -115,6 +115,15 @@ The generated files carry a `KIT_VERSION` header and are recorded in
 `src/generated/storage-kit/.storage-kit-manifest.json`. Do not hand-edit them;
 regenerate instead.
 
+## Service/API Baseline
+
+Built `open-*` and `iapp-*` packages that expose a server, MCP server,
+dashboard, worker, or externally documented API follow the shared
+[Service/API Baseline](docs/SERVICE_API_BASELINE.md). The baseline ties
+`hasna.contract.json` to serve binaries, lifecycle endpoints, `/v1` policy,
+OpenAPI/schema export, cross-surface parity, package smoke checks, auth-negative
+tests, worker/provider readiness, and readiness evidence bundles.
+
 ## API-Key Auth (`@hasna/contracts/auth`)
 
 Stateless, verifiable API keys for the `<app>-serve` HTTP services. A key is an
