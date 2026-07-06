@@ -1,0 +1,27 @@
+{
+  "schema": "hasna.comms_message_metadata.v1",
+  "id": "msg_announcements_freeze_20260706",
+  "createdAt": "2026-07-06T10:00:05.000Z",
+  "tag": "FREEZE",
+  "envelope": {
+    "schema": "hasna.comms_event_envelope.v1",
+    "id": "evt_fleet_freeze_20260706",
+    "createdAt": "2026-07-06T10:00:00.000Z",
+    "type": "fleet.freeze",
+    "severity": "critical",
+    "scope": "fleet",
+    "summary": "Freeze publish, deploy, and shared config apply during the conversations storage cutover",
+    "source": {
+      "kind": "agent",
+      "id": "chief",
+      "name": "chief"
+    },
+    "affected_packages": [],
+    "affected_machines": ["spark01", "spark02", "apple01", "apple03", "apple06"],
+    "action_required": true,
+    "ack_by": "2026-07-06T12:00:00.000Z",
+    "dedupe_key": "fleet.freeze:2026-07-06:conversations-storage-cutover",
+    "resourceRefs": [],
+    "evidenceRefs": []
+  }
+}

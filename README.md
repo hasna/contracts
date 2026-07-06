@@ -286,6 +286,28 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
   tracked kit version, declared bins, and the `local | cloud` storage boundary.
   See `CONTRACT.md` for the normative spec and `contracts repo-conformance` /
   `runRepoConformance` for the self-check kit.
+- `hasna.comms_event_envelope.v1`: fleet comms event envelope carried in
+  conversations message metadata — namespaced `<source>.<entity>.<action>` type,
+  severity (`info | notice | breaking | critical`), scope
+  (`fleet | package | machine`), `affected_packages`/`affected_machines`,
+  `action_required`, `ack_by`, and a mandatory `dedupe_key`.
+  `fleet.freeze`/`fleet.unfreeze` are pinned critical + fleet-scoped +
+  action-required. The one severity mapping table ships as
+  `COMMS_EVENT_TYPES`/`COMMS_SEVERITY_TAG_INFO`.
+- `hasna.comms_channel_metadata.v1`: the object stored under a conversations
+  channel's `metadata.channel_schema` key — channel `class`
+  (`fleet | package | product | loop-lane | initiative | personal`), noise class
+  (`quiet | work | firehose`), initiative `owner` + `until` horizon, and an
+  optional archived-channel `successor` pointer.
+- `hasna.comms_message_metadata.v1`: structured metadata for severity-tagged
+  posts. The message text starts with `[FREEZE]`/`[UNFREEZE]`/`[BREAKING]`/
+  `[CUTOVER]`/`[POLICY]`/`[RELEASE]` as its exact-case first token; the tag plus
+  the full event envelope ride in `--metadata`, never parsed from text.
+  Publishers, hooks, and loops validate with `validateCommsTaggedMessage`
+  (or `extractCommsSeverityTag` + `validateContract`) before emit/post. The
+  human-facing rules live in knowledge items `hasna-agent-comms-protocol` /
+  `hasna-agent-comms-envelope`; these schemas are the machine-validatable
+  source of truth.
 
 Every top-level contract includes a literal `schema` field. Consumers should
 reject objects whose embedded schema does not match the validator being used.
