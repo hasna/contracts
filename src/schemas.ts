@@ -11,6 +11,7 @@ export const SCHEMA_IDS = {
   decisionEnvelope: "hasna.decision_envelope.v1",
   costEstimate: "hasna.cost_estimate.v1",
   capabilityCard: "hasna.capability_card.v1",
+  providerLiveModeStandard: "hasna.provider_live_mode_standard.v1",
   contextPack: "hasna.context_pack.v1",
   integrationRef: "hasna.integration_ref.v1",
   projectManifest: "hasna.project_manifest.v1",
@@ -376,6 +377,217 @@ export const CapabilityCardSchema = contractBaseSchema(SCHEMA_IDS.capabilityCard
   })
   .strict();
 export type CapabilityCard = z.infer<typeof CapabilityCardSchema>;
+
+export const ProviderModeSchema = z.enum(["mock", "fixture", "sandbox", "read_only_live", "live_mutating"]);
+export type ProviderMode = z.infer<typeof ProviderModeSchema>;
+
+export const ProviderSideEffectClassSchema = z.enum([
+  "none",
+  "read_only",
+  "external_notification",
+  "external_mutation",
+  "money_movement",
+  "dns_or_domain_change",
+  "bulk_message_or_call",
+  "legal_or_filing",
+  "compute_or_infra_mutation",
+  "irreversible"
+]);
+export type ProviderSideEffectClass = z.infer<typeof ProviderSideEffectClassSchema>;
+
+export const CredentialRequirementSchema = z
+  .object({
+    refName: NonEmptyStringSchema,
+    requiredForModes: z.array(ProviderModeSchema).min(1),
+    allowedSecretInputs: z.array(z.enum(["credential_ref", "lease_ref"])).min(1).default(["credential_ref"]),
+    failClosedDiagnostic: NonEmptyStringSchema,
+    revocationCheck: z.boolean().default(true)
+  })
+  .strict();
+export type CredentialRequirement = z.infer<typeof CredentialRequirementSchema>;
+
+export const ProviderOperationCardSchema = z
+  .object({
+    operation: NonEmptyStringSchema,
+    supportedModes: z.array(ProviderModeSchema).min(1),
+    sideEffectClass: ProviderSideEffectClassSchema,
+    requiresApproval: z.boolean().default(false),
+    requiresIdempotencyKey: z.boolean().default(false),
+    requiresSandboxEvidence: z.boolean().default(false),
+    requiresRollbackOrRevocation: z.boolean().default(false),
+    rollbackOrRevocation: NonEmptyStringSchema.optional(),
+    noSideEffectSmoke: NonEmptyStringSchema.optional(),
+    reconciliation: NonEmptyStringSchema.optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.supportedModes.includes("live_mutating")) {
+      if (value.sideEffectClass === "none" || value.sideEffectClass === "read_only") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating operations must declare a side-effecting class",
+          path: ["sideEffectClass"]
+        });
+      }
+      if (!value.requiresApproval) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating operations require approval",
+          path: ["requiresApproval"]
+        });
+      }
+      if (!value.requiresIdempotencyKey) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating operations require idempotency keys",
+          path: ["requiresIdempotencyKey"]
+        });
+      }
+      if (!value.requiresSandboxEvidence) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating operations require sandbox evidence before live proof",
+          path: ["requiresSandboxEvidence"]
+        });
+      }
+      if (!value.requiresRollbackOrRevocation || !value.rollbackOrRevocation) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating operations require rollback or revocation instructions",
+          path: ["rollbackOrRevocation"]
+        });
+      }
+      if (!value.reconciliation) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating operations require reconciliation behavior",
+          path: ["reconciliation"]
+        });
+      }
+    }
+  });
+export type ProviderOperationCard = z.infer<typeof ProviderOperationCardSchema>;
+
+export const ProviderCapabilityCardSchema = z
+  .object({
+    providerId: NonEmptyStringSchema,
+    appId: NonEmptyStringSchema,
+    adapterId: NonEmptyStringSchema,
+    ownerPackage: NonEmptyStringSchema,
+    modes: z.array(ProviderModeSchema).min(1),
+    defaultMode: ProviderModeSchema,
+    credentialRequirements: z.array(CredentialRequirementSchema).default([]),
+    operations: z.array(ProviderOperationCardSchema).min(1),
+    rateLimitPosture: NonEmptyStringSchema,
+    costPosture: NonEmptyStringSchema.optional(),
+    auditEvents: z.array(NonEmptyStringSchema).default([]),
+    redactionRules: z.array(NonEmptyStringSchema).default([]),
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.modes.includes(value.defaultMode)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "defaultMode must be one of modes",
+        path: ["defaultMode"]
+      });
+    }
+
+    const operationModes = new Set(value.operations.flatMap((operation) => operation.supportedModes));
+    for (const mode of operationModes) {
+      if (!value.modes.includes(mode)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `operation mode ${mode} is not declared in provider modes`,
+          path: ["operations"]
+        });
+      }
+    }
+
+    if (operationModes.has("live_mutating")) {
+      const liveCredential = value.credentialRequirements.some((credential) => credential.requiredForModes.includes("live_mutating"));
+      if (!liveCredential) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating providers require at least one live credential reference requirement",
+          path: ["credentialRequirements"]
+        });
+      }
+      if (value.auditEvents.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating providers require audit events",
+          path: ["auditEvents"]
+        });
+      }
+    }
+  });
+export type ProviderCapabilityCard = z.infer<typeof ProviderCapabilityCardSchema>;
+
+export const ProviderLiveModeTargetSchema = z
+  .object({
+    appId: NonEmptyStringSchema,
+    repo: NonEmptyStringSchema,
+    priority: z.enum(["p0", "p1", "p2"]).default("p1"),
+    requiredEvidence: z.array(NonEmptyStringSchema).min(1),
+    firstOperations: z.array(NonEmptyStringSchema).min(1),
+    blockedUntil: z.array(NonEmptyStringSchema).default([])
+  })
+  .strict();
+export type ProviderLiveModeTarget = z.infer<typeof ProviderLiveModeTargetSchema>;
+
+export const ProviderLiveModeStandardSchema = contractBaseSchema(SCHEMA_IDS.providerLiveModeStandard)
+  .extend({
+    name: NonEmptyStringSchema,
+    version: NonEmptyStringSchema,
+    modes: z.array(ProviderModeSchema).refine(
+      (modes) => ["mock", "fixture", "sandbox", "read_only_live", "live_mutating"].every((mode) => modes.includes(mode as ProviderMode)),
+      "provider live-mode standard must include every canonical provider mode"
+    ),
+    requiredCapabilityFields: z.array(NonEmptyStringSchema).min(1),
+    liveMutationGate: z
+      .object({
+        requiredMode: z.literal("live_mutating"),
+        requiredChecks: z.array(NonEmptyStringSchema).min(1),
+        forbiddenBypassSignals: z.array(NonEmptyStringSchema).min(1),
+        disabledLiveSmoke: NonEmptyStringSchema
+      })
+      .strict(),
+    noSideEffectSmoke: z
+      .object({
+        requiredForModes: z.array(ProviderModeSchema).min(1),
+        commandEvidence: z.array(NonEmptyStringSchema).min(1),
+        secretOutputScan: z.boolean().default(true)
+      })
+      .strict(),
+    credentialPolicy: z
+      .object({
+        acceptedInputs: z.array(z.enum(["credential_ref", "lease_ref"])).min(1),
+        rawSecretInputsAllowed: z.literal(false),
+        missingCredentialBehavior: z.literal("fail_closed"),
+        revocationCheckRequired: z.boolean().default(true)
+      })
+      .strict(),
+    operationCards: z.array(ProviderCapabilityCardSchema).min(1),
+    firstAdoptionTargets: z.array(ProviderLiveModeTargetSchema).min(1),
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const firstTargetApps = new Set(value.firstAdoptionTargets.map((target) => target.appId));
+    const operationApps = new Set(value.operationCards.map((card) => card.appId));
+    for (const appId of firstTargetApps) {
+      if (!operationApps.has(appId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `first adoption target ${appId} requires a provider capability card`,
+          path: ["firstAdoptionTargets"]
+        });
+      }
+    }
+  });
+export type ProviderLiveModeStandard = z.infer<typeof ProviderLiveModeStandardSchema>;
 
 export const ContextPackItemSchema = z
   .object({
@@ -1718,6 +1930,7 @@ export const ContractSchemaRegistry = {
   [SCHEMA_IDS.decisionEnvelope]: DecisionEnvelopeSchema,
   [SCHEMA_IDS.costEstimate]: CostEstimateSchema,
   [SCHEMA_IDS.capabilityCard]: CapabilityCardSchema,
+  [SCHEMA_IDS.providerLiveModeStandard]: ProviderLiveModeStandardSchema,
   [SCHEMA_IDS.contextPack]: ContextPackSchema,
   [SCHEMA_IDS.integrationRef]: IntegrationRefSchema,
   [SCHEMA_IDS.projectManifest]: ProjectManifestSchema,
@@ -1744,6 +1957,7 @@ export type ContractBySchemaId = {
   [SCHEMA_IDS.decisionEnvelope]: DecisionEnvelope;
   [SCHEMA_IDS.costEstimate]: CostEstimate;
   [SCHEMA_IDS.capabilityCard]: CapabilityCard;
+  [SCHEMA_IDS.providerLiveModeStandard]: ProviderLiveModeStandard;
   [SCHEMA_IDS.contextPack]: ContextPack;
   [SCHEMA_IDS.integrationRef]: IntegrationRef;
   [SCHEMA_IDS.projectManifest]: ProjectManifest;
@@ -1767,6 +1981,7 @@ export type WorkRunInput = z.input<typeof WorkRunSchema>;
 export type DecisionEnvelopeInput = z.input<typeof DecisionEnvelopeSchema>;
 export type CostEstimateInput = z.input<typeof CostEstimateSchema>;
 export type CapabilityCardInput = z.input<typeof CapabilityCardSchema>;
+export type ProviderLiveModeStandardInput = z.input<typeof ProviderLiveModeStandardSchema>;
 export type ContextPackInput = z.input<typeof ContextPackSchema>;
 export type IntegrationRefInput = z.input<typeof IntegrationRefSchema>;
 export type ProjectManifestInput = z.input<typeof ProjectManifestSchema>;
@@ -1793,6 +2008,7 @@ export type ContractInputBySchemaId = {
   [SCHEMA_IDS.decisionEnvelope]: DecisionEnvelopeInput;
   [SCHEMA_IDS.costEstimate]: CostEstimateInput;
   [SCHEMA_IDS.capabilityCard]: CapabilityCardInput;
+  [SCHEMA_IDS.providerLiveModeStandard]: ProviderLiveModeStandardInput;
   [SCHEMA_IDS.contextPack]: ContextPackInput;
   [SCHEMA_IDS.integrationRef]: IntegrationRefInput;
   [SCHEMA_IDS.projectManifest]: ProjectManifestInput;

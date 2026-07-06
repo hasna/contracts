@@ -9,6 +9,7 @@ import {
   NoCloudEvidencePackSchema,
   parseEmbeddedContract,
   parseContract,
+  ProviderLiveModeStandardSchema,
   ProjectManifestSchema,
   ProjectPanelSchema,
   ProjectSnapshotSchema,
@@ -21,6 +22,7 @@ import {
   validateContract,
   WorkRunSchema
 } from "../src";
+import providerLiveModeStandard from "../examples/provider-live-mode-standard.valid.json";
 
 const createdAt = "2026-06-27T10:00:00.000Z";
 
@@ -207,6 +209,68 @@ describe("core schemas", () => {
       policyBundleId: "policy_default"
     });
     expect(deniedWithSelected.success).toBe(false);
+  });
+
+  test("validates provider live-mode standard first targets", () => {
+    const parsed = ProviderLiveModeStandardSchema.parse(providerLiveModeStandard);
+    expect(parsed.modes).toEqual(["mock", "fixture", "sandbox", "read_only_live", "live_mutating"]);
+    expect(parsed.credentialPolicy.rawSecretInputsAllowed).toBe(false);
+    expect(parsed.credentialPolicy.missingCredentialBehavior).toBe("fail_closed");
+    expect(parsed.firstAdoptionTargets.map((target) => target.appId).sort()).toEqual([
+      "open-feedback",
+      "open-mailery",
+      "open-telephony"
+    ]);
+  });
+
+  test("rejects live provider mutation without approval, idempotency, sandbox evidence, and rollback", () => {
+    const result = ProviderLiveModeStandardSchema.safeParse({
+      ...providerLiveModeStandard,
+      operationCards: [
+        {
+          providerId: "twilio",
+          appId: "open-telephony",
+          adapterId: "telephony-twilio",
+          ownerPackage: "@hasna/telephony",
+          modes: ["fixture", "live_mutating"],
+          defaultMode: "fixture",
+          credentialRequirements: [],
+          operations: [
+            {
+              operation: "send_sms",
+              supportedModes: ["live_mutating"],
+              sideEffectClass: "read_only",
+              requiresApproval: false,
+              requiresIdempotencyKey: false,
+              requiresSandboxEvidence: false,
+              requiresRollbackOrRevocation: false
+            }
+          ],
+          rateLimitPosture: "none"
+        }
+      ],
+      firstAdoptionTargets: [
+        {
+          appId: "open-telephony",
+          repo: "/home/hasna/workspace/hasna/opensource/open-telephony",
+          priority: "p0",
+          requiredEvidence: ["webhook fixture"],
+          firstOperations: ["send_sms"]
+        }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issuePaths = result.error.issues.map((issue) => issue.path.join("."));
+      expect(issuePaths).toContain("operationCards.0.operations.0.sideEffectClass");
+      expect(issuePaths).toContain("operationCards.0.operations.0.requiresApproval");
+      expect(issuePaths).toContain("operationCards.0.operations.0.requiresIdempotencyKey");
+      expect(issuePaths).toContain("operationCards.0.operations.0.requiresSandboxEvidence");
+      expect(issuePaths).toContain("operationCards.0.operations.0.rollbackOrRevocation");
+      expect(issuePaths).toContain("operationCards.0.operations.0.reconciliation");
+      expect(issuePaths).toContain("operationCards.0.credentialRequirements");
+    }
   });
 
   test("validates a work run with nested evidence", () => {
