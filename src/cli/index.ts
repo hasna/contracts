@@ -11,6 +11,7 @@ import {
 import { scanNoCloudTarget } from "../no-cloud";
 import { runRepoConformance } from "../conformance";
 import { getEmbeddedSchemaId, validateContract } from "../validators";
+import { runVendorKit } from "./kit-runner";
 
 function collectJsonFiles(root: string): string[] {
   const stat = statSync(root);
@@ -63,7 +64,7 @@ function preflightJsonUsageErrors(argv: string[]) {
     return false;
   }
 
-  if (!["schemas", "validate", "conformance", "no-cloud-scan", "repo-conformance"].includes(command)) {
+  if (!["schemas", "validate", "conformance", "no-cloud-scan", "repo-conformance", "vendor-kit"].includes(command)) {
     return reportParserJsonError("commander.unknownCommand", `unknown command '${command}'`);
   }
 
@@ -72,7 +73,8 @@ function preflightJsonUsageErrors(argv: string[]) {
     validate: new Set(["--json", "-j", "--schema"]),
     conformance: new Set(["--json", "-j"]),
     "no-cloud-scan": new Set(["--json", "-j", "--manifest"]),
-    "repo-conformance": new Set(["--json", "-j"])
+    "repo-conformance": new Set(["--json", "-j"]),
+    "vendor-kit": new Set(["--json", "-j", "--check", "--kit-version", "--no-contract"])
   };
   const allowedOptions = allowedOptionsByCommand[command] ?? new Set<string>();
   const positionals: string[] = [];
@@ -323,6 +325,23 @@ export function createContractsProgram() {
       }
       if (!report.ok) {
         process.exitCode = 1;
+      }
+    });
+
+  program
+    .command("vendor-kit")
+    .description("Stamp the canonical Postgres storage kit into a repo at src/generated/storage-kit/")
+    .argument("[path]", "Target repo root", ".")
+    .option("--check", "Verify the vendored kit matches the generator (CI mode); exit 1 if stale/hand-edited")
+    .option("--kit-version <version>", "Override the stamped kit version (defaults to @hasna/contracts version)")
+    .option("--no-contract", "Do not update hasna.contract.json kitVersion")
+    .option("-j, --json", "Output JSON")
+    .action((target: string, options: { check?: boolean; kitVersion?: string; contract?: boolean; json?: boolean }) => {
+      try {
+        runVendorKit(target, options);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        reportCliError(options, `vendor-kit failed for ${target}: ${message}`, { path: target, code: "vendor_kit_error" });
       }
     });
 
