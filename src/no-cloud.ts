@@ -55,9 +55,15 @@ const CONTRACTS_DECLARATION_PATHS = new Set([
   "dist/schemas.js",
   "dist/validators.js",
   "dist/index.js",
+  "dist/mode.js",
+  "dist/service-contract.js",
+  "dist/conformance.js",
   "dist/cli/index.js",
   "dist/no-cloud.d.ts",
-  "dist/schemas.d.ts"
+  "dist/schemas.d.ts",
+  "dist/mode.d.ts",
+  "dist/service-contract.d.ts",
+  "dist/conformance.d.ts"
 ]);
 
 function stableId(input: string) {

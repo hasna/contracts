@@ -1,15 +1,13 @@
 {
   "schema": "hasna.rollout_record.v1",
-  "id": "rollout_freeze_blocked_wrong_result",
+  "id": "rollout_update_empty_verified_by",
   "createdAt": "2026-07-06T10:00:00.000Z",
   "appId": "open-todos",
   "package": "@hasna/todos",
   "version": "0.11.63",
   "machine": "spark01",
-  "action": "freeze-blocked",
+  "action": "update",
   "result": "succeeded",
-  "verifiedBy": {
-    "cliVersion": "0.11.63"
-  },
+  "verifiedBy": {},
   "at": "2026-07-06T10:00:00.000Z"
 }

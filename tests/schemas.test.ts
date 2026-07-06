@@ -578,6 +578,13 @@ describe("core schemas", () => {
     });
     expect(manifest.forbiddenSharedRuntimes).toEqual(["@hasna/cloud", "open-cloud"]);
 
+    const legacyAppId = AppCloudManifestSchema.parse({
+      ...manifest,
+      id: "cloud_manifest_legacy_app_ref",
+      appId: "Open Todos Legacy"
+    });
+    expect(legacyAppId.appId).toBe("Open Todos Legacy");
+
     const extendedForbiddenRuntimes = AppCloudManifestSchema.safeParse({
       ...manifest,
       id: "cloud_manifest_extended_forbidden",
@@ -1077,6 +1084,30 @@ describe("distribution schemas", () => {
     if (!unverifiedSuccess.success) {
       expect(unverifiedSuccess.error.issues.map((issue) => issue.path.join("."))).toContain("verifiedBy");
     }
+
+    const emptyVerificationSuccess = validateContract(SCHEMA_IDS.rolloutRecord, {
+      ...validRollout,
+      verifiedBy: {}
+    });
+    expect(emptyVerificationSuccess.success).toBe(false);
+    if (!emptyVerificationSuccess.success) {
+      expect(emptyVerificationSuccess.error.issues.map((issue) => issue.path.join("."))).toContain("verifiedBy");
+    }
+
+    const notCheckedOnlySuccess = validateContract(SCHEMA_IDS.rolloutRecord, {
+      ...validRollout,
+      verifiedBy: { mcpHealth: "not_checked" }
+    });
+    expect(notCheckedOnlySuccess.success).toBe(false);
+    if (!notCheckedOnlySuccess.success) {
+      expect(notCheckedOnlySuccess.error.issues.map((issue) => issue.path.join("."))).toContain("verifiedBy");
+    }
+
+    const notCheckedWithCliVersion = validateContract(SCHEMA_IDS.rolloutRecord, {
+      ...validRollout,
+      verifiedBy: { cliVersion: "0.11.63", mcpHealth: "not_checked" }
+    });
+    expect(notCheckedWithCliVersion.success).toBe(true);
   });
 
   test("validates announcements with per-channel delivery status", () => {
@@ -1168,7 +1199,7 @@ describe("distribution schemas", () => {
     expect(validateContract(SCHEMA_IDS.audience, { ...base, definition: { predicates: [] } }).success).toBe(false);
   });
 
-  test("app cloud manifests reference canonical hasna.app.v1 identity by appId slug", () => {
+  test("app cloud manifests preserve v1 appId compatibility while app identity stays strict", () => {
     const manifest = {
       schema: SCHEMA_IDS.appCloudManifest,
       id: "cloud_manifest_open_todos",
@@ -1179,6 +1210,7 @@ describe("distribution schemas", () => {
       cloudBoundary: "none"
     } as const;
     expect(validateContract(SCHEMA_IDS.appCloudManifest, manifest).success).toBe(true);
-    expect(validateContract(SCHEMA_IDS.appCloudManifest, { ...manifest, appId: "Open Todos!" }).success).toBe(false);
+    expect(validateContract(SCHEMA_IDS.appCloudManifest, { ...manifest, appId: "Open Todos!" }).success).toBe(true);
+    expect(validateContract(SCHEMA_IDS.app, { ...validApp, appId: "Open Todos!" }).success).toBe(false);
   });
 });

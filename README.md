@@ -279,7 +279,8 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
   package that uses its own cloud resources, local cache, and conflict policy
   without depending on shared `@hasna/cloud` or `open-cloud` runtimes. This is
   NOT an identity schema: canonical app identity lives in `hasna.app.v1`, and
-  this manifest references it by the same stable `appId` slug.
+  this v1 manifest keeps `appId` as a non-empty reference string for
+  compatibility; new manifests should use the stable `hasna.app.v1` slug.
 - `hasna.no_cloud_evidence_pack.v1`: prepublish/CI evidence pack for package
   manifest, lockfile, source/runtime config, packed artifact, published
   metadata, and app-cloud-manifest scans.
@@ -299,8 +300,9 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
   evidence (required unless backfilled).
 - `hasna.rollout_record.v1`: per-machine rollout receipt — `appId`, `package`,
   `version`, `machine`, action (`install|update|rollback|freeze-blocked`),
-  contract-status `result`, optional `verifiedBy` (`cliVersion`, `mcpHealth`),
-  and `at`.
+  contract-status `result`, `verifiedBy` with at least one verifier field for
+  successful install/update records (`cliVersion` or checked `mcpHealth`), and
+  `at`.
 - `hasna.announcement.v1`: release/campaign announcement receipt — `campaignId`,
   optional `appId` and `releaseRef`, per-channel delivery statuses, an
   `audienceRef` (resource kind `audience`), and `sentAt`.

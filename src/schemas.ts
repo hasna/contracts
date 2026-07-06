@@ -1229,7 +1229,15 @@ export const RolloutVerificationSchema = z
     cliVersion: z.string().min(1).optional(),
     mcpHealth: z.enum(["ok", "degraded", "unavailable", "not_checked"]).optional()
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.cliVersion && value.mcpHealth === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Rollout verification requires at least one concrete verifier field"
+      });
+    }
+  });
 export type RolloutVerification = z.infer<typeof RolloutVerificationSchema>;
 
 export const RolloutRecordSchema = contractBaseSchema(SCHEMA_IDS.rolloutRecord)
@@ -1253,10 +1261,18 @@ export const RolloutRecordSchema = contractBaseSchema(SCHEMA_IDS.rolloutRecord)
         path: ["result"]
       });
     }
-    if ((value.action === "install" || value.action === "update") && value.result === "succeeded" && !value.verifiedBy) {
+    const hasConcreteVerification =
+      Boolean(value.verifiedBy?.cliVersion) ||
+      (value.verifiedBy?.mcpHealth !== undefined && value.verifiedBy.mcpHealth !== "not_checked");
+    const hasVerifierFields = value.verifiedBy ? Object.keys(value.verifiedBy).length > 0 : false;
+    if (
+      (value.action === "install" || value.action === "update") &&
+      value.result === "succeeded" &&
+      (!value.verifiedBy || (hasVerifierFields && !hasConcreteVerification))
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Succeeded install/update rollout records require verifiedBy",
+        message: "Succeeded install/update rollout records require concrete verification",
         path: ["verifiedBy"]
       });
     }
@@ -1450,14 +1466,14 @@ export const AppCloudResourceSchema = z
 export type AppCloudResource = z.infer<typeof AppCloudResourceSchema>;
 
 // `hasna.app_cloud_manifest.v1` is NOT an identity schema. Canonical app
-// identity lives in `hasna.app.v1`; this manifest references that document by
-// its stable `appId` slug and only declares the app's cloud storage boundary.
+// identity lives in `hasna.app.v1`; this v1 field remains a compatible
+// non-empty reference string instead of adopting the stricter AppIdSchema.
 export const AppCloudManifestSchema = contractBaseSchema(SCHEMA_IDS.appCloudManifest)
   .extend({
     packageName: z.string().min(1),
     packageVersion: z.string().min(1).optional(),
-    /** Stable app identity slug; references the app's `hasna.app.v1` document. */
-    appId: AppIdSchema,
+    /** App identity reference; prefer AppIdSchema-compatible slugs for new manifests. */
+    appId: z.string().min(1),
     repository: ResourcePointerSchema.optional(),
     storageMode: z.enum(["local_only", "app_owned_cloud", "hybrid_local_cache", "external_service"]),
     cloudBoundary: z.enum(["none", "app_owned", "external_service", "local_cache"]),

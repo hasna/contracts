@@ -11,7 +11,7 @@ const expectedInvalidIssuePaths: Record<string, string[]> = {
   "audience.invalid.json": ["definition.predicates.0.key"],
   "integration-ref.invalid.json": ["uri"],
   "release.invalid.json": ["evidenceRefs"],
-  "rollout-record.invalid.json": ["result"],
+  "rollout-record.invalid.json": ["verifiedBy"],
   "no-cloud-evidence-pack.invalid.json": ["checks", "checks", "findings"],
   "project-manifest.invalid.json": ["slug"],
   "project-panel.invalid.json": ["stateReason"],
