@@ -124,6 +124,16 @@ dashboard, worker, or externally documented API follow the shared
 OpenAPI/schema export, cross-surface parity, package smoke checks, auth-negative
 tests, worker/provider readiness, and readiness evidence bundles.
 
+## Durable Storage Readiness
+
+Repos that claim shared, self-hosted, cloud, provider-live, finance, or
+production readiness must also follow the
+[Durable Storage Readiness Standard](docs/STORAGE_READINESS_STANDARD.md). The
+standard covers source-of-truth declarations, Postgres migrations and drift
+checks, RLS or equivalent boundary enforcement, backup/restore, retention,
+delete/tombstones, conflict handling, TLS and credential posture, and readiness
+evidence.
+
 ## API-Key Auth (`@hasna/contracts/auth`)
 
 Stateless, verifiable API keys for the `<app>-serve` HTTP services. A key is an
