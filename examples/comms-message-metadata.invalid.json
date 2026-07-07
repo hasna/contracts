@@ -1,0 +1,22 @@
+{
+  "schema": "hasna.comms_message_metadata.v1",
+  "id": "msg_release_tag_on_freeze_event",
+  "createdAt": "2026-07-06T10:00:05.000Z",
+  "tag": "RELEASE",
+  "envelope": {
+    "schema": "hasna.comms_event_envelope.v1",
+    "id": "evt_fleet_freeze_20260706",
+    "createdAt": "2026-07-06T10:00:00.000Z",
+    "type": "fleet.freeze",
+    "severity": "critical",
+    "scope": "fleet",
+    "summary": "A fleet.freeze event mislabeled as a release post",
+    "affected_packages": [],
+    "affected_machines": [],
+    "action_required": true,
+    "ack_by": "2026-07-06T12:00:00.000Z",
+    "dedupe_key": "fleet.freeze:2026-07-06:conversations-storage-cutover",
+    "resourceRefs": [],
+    "evidenceRefs": []
+  }
+}

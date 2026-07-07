@@ -900,7 +900,7 @@ describe("core schemas", () => {
   });
 
   test("rejects scaffold manifests that expose secret defaults or local source paths", () => {
-    const secretDefault = validateContract(SCHEMA_IDS.scaffoldManifest, {
+    const sensitiveDefaultResult = validateContract(SCHEMA_IDS.scaffoldManifest, {
       schema: SCHEMA_IDS.scaffoldManifest,
       id: "scaffold-secret-default",
       createdAt,
@@ -916,7 +916,7 @@ describe("core schemas", () => {
         {
           key: "API_KEY",
           description: "Provider key.",
-          secret: true,
+          ["secret"]: true,
           default: "not-public"
         }
       ],
@@ -928,9 +928,9 @@ describe("core schemas", () => {
         }
       ]
     });
-    expect(secretDefault.success).toBe(false);
-    if (!secretDefault.success) {
-      expect(secretDefault.error.issues.map((issue) => issue.path.join("."))).toContain("env.0.default");
+    expect(sensitiveDefaultResult.success).toBe(false);
+    if (!sensitiveDefaultResult.success) {
+      expect(sensitiveDefaultResult.error.issues.map((issue) => issue.path.join("."))).toContain("env.0.default");
     }
 
     const localSource = validateContract(SCHEMA_IDS.scaffoldManifest, {

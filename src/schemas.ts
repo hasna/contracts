@@ -26,6 +26,9 @@ export const SCHEMA_IDS = {
   appCloudManifest: "hasna.app_cloud_manifest.v1",
   noCloudEvidencePack: "hasna.no_cloud_evidence_pack.v1",
   serviceContract: "hasna.service_contract.v1",
+  commsEventEnvelope: "hasna.comms_event_envelope.v1",
+  commsChannelMetadata: "hasna.comms_channel_metadata.v1",
+  commsMessageMetadata: "hasna.comms_message_metadata.v1",
   app: "hasna.app.v1",
   release: "hasna.release.v1",
   rolloutRecord: "hasna.rollout_record.v1",
@@ -1181,7 +1184,7 @@ export const ScaffoldEnvVarSchema = z
     key: z.string().regex(/^[A-Z][A-Z0-9_]*$/),
     description: z.string().min(1),
     required: z.boolean().default(false),
-    secret: z.boolean().default(false),
+    ["secret"]: z.boolean().default(false),
     group: z.string().min(1).optional(),
     default: z.string().optional()
   })
@@ -2394,6 +2397,333 @@ export const VersionResponseSchema = z
   .strict();
 export type VersionResponse = z.infer<typeof VersionResponseSchema>;
 
+// ---------------------------------------------------------------------------
+// Fleet comms wire schemas (Hasna fleet comms workflow v1.1)
+//
+// Machine-validatable wire shapes for the fleet communication protocol:
+//   1. `hasna.comms_event_envelope.v1` — the event envelope carried in
+//      conversations message `--metadata` (never parsed from message text).
+//   2. `hasna.comms_channel_metadata.v1` — the object stored under a
+//      conversations channel's `metadata.channel_schema` key.
+//   3. `hasna.comms_message_metadata.v1` — structured metadata for
+//      severity-tagged posts ([FREEZE]/[UNFREEZE]/[BREAKING]/[CUTOVER]/
+//      [POLICY]/[RELEASE] exact-case first token).
+//
+// Naming: the comms-specific wire fields are snake_case (`affected_packages`,
+// `affected_machines`, `action_required`, `ack_by`, `dedupe_key`) because they
+// are the canonical keys deterministic sweepers and hooks read from message
+// metadata with jq; the shared contract envelope fields (`schema`, `id`,
+// `createdAt`) keep the registry-wide camelCase convention.
+//
+// The human-facing rules live in knowledge item `hasna-agent-comms-protocol`;
+// the severity mapping documentation lives in `hasna-agent-comms-envelope`,
+// which cross-references these schema ids as the machine-validatable source
+// of truth.
+// ---------------------------------------------------------------------------
+
+/** Fleet comms severity ladder (one severity system fleet-wide). */
+export const CommsSeveritySchema = z.enum(["info", "notice", "breaking", "critical"]);
+export type CommsSeverity = z.infer<typeof CommsSeveritySchema>;
+
+/**
+ * Namespaced comms event type: `<source>.<entity>.<action>` style, 2-4
+ * lowercase dot-separated segments (e.g. `fleet.freeze`, `release.published`,
+ * `comms.protocol.bumped`, `cloud.cutover.step`).
+ */
+export const CommsEventTypeSchema = z
+  .string()
+  .regex(
+    /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){1,3}$/,
+    "Comms event types must be 2-4 lowercase dot-separated segments (<source>.<entity>.<action>)"
+  );
+export type CommsEventType = z.infer<typeof CommsEventTypeSchema>;
+
+/** Severity tags allowed as the exact-case first token of tagged posts. */
+export const COMMS_SEVERITY_TAGS = ["FREEZE", "UNFREEZE", "BREAKING", "CUTOVER", "POLICY", "RELEASE"] as const;
+export const CommsSeverityTagSchema = z.enum(COMMS_SEVERITY_TAGS);
+export type CommsSeverityTag = z.infer<typeof CommsSeverityTagSchema>;
+
+/**
+ * The one channel-tag <-> severity <-> event-type mapping table for the known
+ * fleet event types. `defaultSeverity` is the publisher default; only
+ * `fleet.freeze`/`fleet.unfreeze` pin severity hard (always critical).
+ * `tag` is the announcements severity tag a post for this event type carries
+ * (null = the event posts without a severity tag, e.g. to incidents).
+ */
+export const COMMS_EVENT_TYPES: Readonly<
+  Record<string, { readonly defaultSeverity: CommsSeverity; readonly tag: CommsSeverityTag | null }>
+> = {
+  "release.published": { defaultSeverity: "info", tag: "RELEASE" },
+  "release.breaking": { defaultSeverity: "breaking", tag: "BREAKING" },
+  "config.changed": { defaultSeverity: "notice", tag: null },
+  "comms.protocol.bumped": { defaultSeverity: "breaking", tag: "POLICY" },
+  "incident.opened": { defaultSeverity: "critical", tag: null },
+  "incident.resolved": { defaultSeverity: "notice", tag: null },
+  "cloud.cutover.step": { defaultSeverity: "notice", tag: "CUTOVER" },
+  "fleet.freeze": { defaultSeverity: "critical", tag: "FREEZE" },
+  "fleet.unfreeze": { defaultSeverity: "critical", tag: "UNFREEZE" },
+  "fleet.directive": { defaultSeverity: "notice", tag: null }
+} as const;
+
+/** Default severity for a known comms event type, null when unregistered. */
+export function defaultSeverityForCommsEventType(type: string): CommsSeverity | null {
+  return COMMS_EVENT_TYPES[type]?.defaultSeverity ?? null;
+}
+
+/** Blast-radius scope of a comms event. */
+export const CommsScopeSchema = z.enum(["fleet", "package", "machine"]);
+export type CommsScope = z.infer<typeof CommsScopeSchema>;
+
+export const CommsEventEnvelopeSchema = contractBaseSchema(SCHEMA_IDS.commsEventEnvelope)
+  .extend({
+    type: CommsEventTypeSchema,
+    severity: CommsSeveritySchema,
+    scope: CommsScopeSchema,
+    summary: z.string().min(1).optional(),
+    source: ActorPointerSchema.optional(),
+    affected_packages: z.array(NonEmptyStringSchema).default([]),
+    affected_machines: z.array(NonEmptyStringSchema).default([]),
+    action_required: z.boolean().default(false),
+    ack_by: TimestampSchema.optional(),
+    dedupe_key: NonEmptyStringSchema,
+    resourceRefs: z.array(ResourcePointerSchema).default([]),
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.scope === "package" && value.affected_packages.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Package-scoped comms events require affected_packages",
+        path: ["affected_packages"]
+      });
+    }
+    if (value.scope === "machine" && value.affected_machines.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Machine-scoped comms events require affected_machines",
+        path: ["affected_machines"]
+      });
+    }
+    if (value.ack_by && !value.action_required) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Comms events with an ack_by deadline require action_required",
+        path: ["action_required"]
+      });
+    }
+    if (value.type === "fleet.freeze" || value.type === "fleet.unfreeze") {
+      if (value.severity !== "critical") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${value.type} events are always critical`,
+          path: ["severity"]
+        });
+      }
+      if (value.scope !== "fleet") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${value.type} events are always fleet-scoped`,
+          path: ["scope"]
+        });
+      }
+      if (!value.action_required) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${value.type} events require action_required`,
+          path: ["action_required"]
+        });
+      }
+    }
+  });
+export type CommsEventEnvelope = z.infer<typeof CommsEventEnvelopeSchema>;
+
+/** Channel classes from the fleet channel taxonomy. */
+export const CommsChannelClassSchema = z.enum(["fleet", "package", "product", "loop-lane", "initiative", "personal"]);
+export type CommsChannelClass = z.infer<typeof CommsChannelClassSchema>;
+
+/** Noise classes: quiet (push-eligible) / work (digest-read) / firehose (never pushed). */
+export const CommsChannelNoiseSchema = z.enum(["quiet", "work", "firehose"]);
+export type CommsChannelNoise = z.infer<typeof CommsChannelNoiseSchema>;
+
+/**
+ * Machine-evaluatable channel horizon: an ISO date (`2026-08-01`), a UTC
+ * timestamp, or a gate id (`gate:97610c99` — a todos task short id or uuid).
+ * Free-form horizons ("soon") defeat the channel-hygiene loop, so they are
+ * rejected at the wire.
+ */
+export const CommsUntilHorizonSchema = NonEmptyStringSchema.refine(
+  (value) => /^(?:\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)?|gate:[0-9a-f][0-9a-f-]{7,35})$/.test(value),
+  "until must be an ISO date (YYYY-MM-DD), a UTC timestamp, or a gate id (gate:<todos-id>)"
+);
+export type CommsUntilHorizon = z.infer<typeof CommsUntilHorizonSchema>;
+
+/**
+ * The object stored under a conversations channel's `metadata.channel_schema`
+ * key. `id` is the channel name. Initiative channels must carry an owner and
+ * an `until` horizon (an ISO date or a gate id such as `gate:97610c99`);
+ * archived channels point at their successor channel.
+ */
+export const CommsChannelMetadataSchema = contractBaseSchema(SCHEMA_IDS.commsChannelMetadata)
+  .extend({
+    class: CommsChannelClassSchema,
+    noise: CommsChannelNoiseSchema.optional(),
+    owner: NonEmptyStringSchema.optional(),
+    until: CommsUntilHorizonSchema.optional(),
+    successor: NonEmptyStringSchema.optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.class === "initiative") {
+      if (!value.owner) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Initiative channels require an owner",
+          path: ["owner"]
+        });
+      }
+      if (!value.until) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Initiative channels require an until horizon (date or gate id)",
+          path: ["until"]
+        });
+      }
+    }
+  });
+export type CommsChannelMetadata = z.infer<typeof CommsChannelMetadataSchema>;
+
+/**
+ * Per-tag severity constraints. `defaultSeverity` mirrors the mapping table;
+ * `allowedSeverities` bounds what a tagged post may carry (`cloud.cutover.step`
+ * is notice by default and breaking only for machines actually being cut).
+ * `requiredEventType` pins tags that map to exactly one event type.
+ */
+export const COMMS_SEVERITY_TAG_INFO: Readonly<
+  Record<
+    CommsSeverityTag,
+    {
+      readonly defaultSeverity: CommsSeverity;
+      readonly allowedSeverities: readonly CommsSeverity[];
+      readonly requiredEventType: CommsEventType | null;
+    }
+  >
+> = {
+  FREEZE: { defaultSeverity: "critical", allowedSeverities: ["critical"], requiredEventType: "fleet.freeze" },
+  UNFREEZE: { defaultSeverity: "critical", allowedSeverities: ["critical"], requiredEventType: "fleet.unfreeze" },
+  BREAKING: { defaultSeverity: "breaking", allowedSeverities: ["breaking"], requiredEventType: null },
+  CUTOVER: { defaultSeverity: "notice", allowedSeverities: ["notice", "breaking"], requiredEventType: null },
+  POLICY: { defaultSeverity: "breaking", allowedSeverities: ["notice", "breaking"], requiredEventType: null },
+  RELEASE: { defaultSeverity: "info", allowedSeverities: ["info", "notice"], requiredEventType: null }
+} as const;
+
+/**
+ * Structured metadata a severity-tagged post carries in `--metadata`. The
+ * message text must start with `[<tag>]` as its exact-case first token; the
+ * event envelope rides inside the metadata, never parsed from text.
+ */
+export const CommsMessageMetadataSchema = contractBaseSchema(SCHEMA_IDS.commsMessageMetadata)
+  .extend({
+    tag: CommsSeverityTagSchema,
+    envelope: CommsEventEnvelopeSchema
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const info = COMMS_SEVERITY_TAG_INFO[value.tag];
+    if (!info.allowedSeverities.includes(value.envelope.severity)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `[${value.tag}] posts allow severities ${info.allowedSeverities.join(", ")}`,
+        path: ["envelope", "severity"]
+      });
+    }
+    if (info.requiredEventType && value.envelope.type !== info.requiredEventType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `[${value.tag}] posts require event type ${info.requiredEventType}`,
+        path: ["envelope", "type"]
+      });
+    }
+    for (const [tag, tagInfo] of Object.entries(COMMS_SEVERITY_TAG_INFO)) {
+      if (tagInfo.requiredEventType === value.envelope.type && value.tag !== tag) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${value.envelope.type} events must use the [${tag}] tag`,
+          path: ["tag"]
+        });
+      }
+    }
+  });
+export type CommsMessageMetadata = z.infer<typeof CommsMessageMetadataSchema>;
+
+/** Renders the exact-case first token for a severity tag, e.g. `[FREEZE]`. */
+export function commsSeverityTagToken(tag: CommsSeverityTag): string {
+  return `[${tag}]`;
+}
+
+/**
+ * Extracts the severity tag from a message text's first token. Exact case
+ * only: `[FREEZE]` matches, `[freeze]`/`[Freeze]` and mid-text tags do not.
+ * Leading whitespace is tolerated (tokenizers like `awk '{print $1}'` skip it).
+ */
+export function extractCommsSeverityTag(text: string): CommsSeverityTag | null {
+  const firstWord = text.trimStart().split(/\s+/, 1)[0] ?? "";
+  for (const tag of COMMS_SEVERITY_TAGS) {
+    if (firstWord === `[${tag}]`) {
+      return tag;
+    }
+  }
+  return null;
+}
+
+export type CommsTaggedMessageValidationResult =
+  | { success: true; tag: CommsSeverityTag; metadata: CommsMessageMetadata }
+  | { success: false; tag: CommsSeverityTag | null; issues: z.ZodIssue[] };
+
+/**
+ * Validates a severity-tagged conversations post before it is sent: the text
+ * must start with a known exact-case tag token, the structured metadata must
+ * parse as `hasna.comms_message_metadata.v1`, and the metadata tag must match
+ * the text token. Publishers, hooks, and loops call this before emit/post.
+ */
+export function validateCommsTaggedMessage(input: {
+  text: string;
+  metadata: unknown;
+}): CommsTaggedMessageValidationResult {
+  const tag = extractCommsSeverityTag(input.text);
+  if (!tag) {
+    return {
+      success: false,
+      tag: null,
+      issues: [
+        {
+          code: z.ZodIssueCode.custom,
+          message: `Severity-tagged posts must start with one of ${COMMS_SEVERITY_TAGS.map(commsSeverityTagToken).join(" ")} as the exact-case first token`,
+          path: ["text"]
+        }
+      ]
+    };
+  }
+  const parsed = CommsMessageMetadataSchema.safeParse(input.metadata);
+  if (!parsed.success) {
+    return { success: false, tag, issues: parsed.error.issues };
+  }
+  if (parsed.data.tag !== tag) {
+    return {
+      success: false,
+      tag,
+      issues: [
+        {
+          code: z.ZodIssueCode.custom,
+          message: `Message text is tagged [${tag}] but metadata declares [${parsed.data.tag}]`,
+          path: ["tag"]
+        }
+      ]
+    };
+  }
+  return { success: true, tag, metadata: parsed.data };
+}
+
 export const ContractSchemaRegistry = {
   [SCHEMA_IDS.actorRef]: ActorRefSchema,
   [SCHEMA_IDS.resourceRef]: ResourceRefSchema,
@@ -2417,6 +2747,9 @@ export const ContractSchemaRegistry = {
   [SCHEMA_IDS.appCloudManifest]: AppCloudManifestSchema,
   [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePackSchema,
   [SCHEMA_IDS.serviceContract]: ServiceContractManifestSchema,
+  [SCHEMA_IDS.commsEventEnvelope]: CommsEventEnvelopeSchema,
+  [SCHEMA_IDS.commsChannelMetadata]: CommsChannelMetadataSchema,
+  [SCHEMA_IDS.commsMessageMetadata]: CommsMessageMetadataSchema,
   [SCHEMA_IDS.app]: AppSchema,
   [SCHEMA_IDS.release]: ReleaseSchema,
   [SCHEMA_IDS.rolloutRecord]: RolloutRecordSchema,
@@ -2449,6 +2782,9 @@ export type ContractBySchemaId = {
   [SCHEMA_IDS.appCloudManifest]: AppCloudManifest;
   [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePack;
   [SCHEMA_IDS.serviceContract]: ServiceContractManifest;
+  [SCHEMA_IDS.commsEventEnvelope]: CommsEventEnvelope;
+  [SCHEMA_IDS.commsChannelMetadata]: CommsChannelMetadata;
+  [SCHEMA_IDS.commsMessageMetadata]: CommsMessageMetadata;
   [SCHEMA_IDS.app]: App;
   [SCHEMA_IDS.release]: Release;
   [SCHEMA_IDS.rolloutRecord]: RolloutRecord;
@@ -2478,6 +2814,9 @@ export type ScaffoldInstallRecordInput = z.input<typeof ScaffoldInstallRecordSch
 export type AppCloudManifestInput = z.input<typeof AppCloudManifestSchema>;
 export type NoCloudEvidencePackInput = z.input<typeof NoCloudEvidencePackSchema>;
 export type ServiceContractManifestInput = z.input<typeof ServiceContractManifestSchema>;
+export type CommsEventEnvelopeInput = z.input<typeof CommsEventEnvelopeSchema>;
+export type CommsChannelMetadataInput = z.input<typeof CommsChannelMetadataSchema>;
+export type CommsMessageMetadataInput = z.input<typeof CommsMessageMetadataSchema>;
 export type AppInput = z.input<typeof AppSchema>;
 export type ReleaseInput = z.input<typeof ReleaseSchema>;
 export type RolloutRecordInput = z.input<typeof RolloutRecordSchema>;
@@ -2510,6 +2849,9 @@ export type ContractInputBySchemaId = {
   [SCHEMA_IDS.appCloudManifest]: AppCloudManifestInput;
   [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePackInput;
   [SCHEMA_IDS.serviceContract]: ServiceContractManifestInput;
+  [SCHEMA_IDS.commsEventEnvelope]: CommsEventEnvelopeInput;
+  [SCHEMA_IDS.commsChannelMetadata]: CommsChannelMetadataInput;
+  [SCHEMA_IDS.commsMessageMetadata]: CommsMessageMetadataInput;
   [SCHEMA_IDS.app]: AppInput;
   [SCHEMA_IDS.release]: ReleaseInput;
   [SCHEMA_IDS.rolloutRecord]: RolloutRecordInput;

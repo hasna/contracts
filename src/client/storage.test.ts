@@ -33,9 +33,11 @@ describe("appendQuery", () => {
 });
 
 describe("HasnaStorageClient CRUD mapping", () => {
+  const sampleApiKey = "hasna_sample_key";
+
   function client(handler: Parameters<typeof makeFetch>[0]) {
     const { fetchImpl, calls } = makeFetch(handler);
-    const transport = createHasnaHttpTransport({ name: "knowledge", baseUrl: "https://knowledge.hasna.xyz/v1", apiKey: "hasna_knowledge_secret", fetchImpl, retry: false });
+    const transport = createHasnaHttpTransport({ name: "knowledge", baseUrl: "https://knowledge.hasna.xyz/v1", apiKey: sampleApiKey, fetchImpl, retry: false });
     return { store: createHasnaStorageClient("knowledge", transport), calls };
   }
 
@@ -63,8 +65,8 @@ describe("HasnaStorageClient CRUD mapping", () => {
     const c = calls[0]!;
     expect(c.method).toBe("POST");
     expect(c.headers["idempotency-key"]).toBeTruthy();
-    expect(c.headers["authorization"]).toBe("Bearer hasna_knowledge_secret");
-    expect(c.headers["x-api-key"]).toBe("hasna_knowledge_secret");
+    expect(c.headers["authorization"]).toBe(`Bearer ${sampleApiKey}`);
+    expect(c.headers["x-api-key"]).toBe(sampleApiKey);
     expect(c.body).toEqual({ title: "t" });
   });
 

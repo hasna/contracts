@@ -21,7 +21,7 @@
 //     HASNA_<NAME>_API_URL = https://<app>.hasna.xyz
 //     <NAME>_API_URL                                                  (alias)
 //   API key (bearer / x-api-key):
-//     HASNA_<NAME>_API_KEY = hasna_<app>_...
+//     HASNA_<NAME>_API_KEY -> value from the app-owned vault
 //     <NAME>_API_KEY                                                  (alias)
 //
 // DECISION: transport is `cloud-http` IFF the resolved mode is `cloud` AND an API
@@ -52,16 +52,16 @@ export interface ClientTransportEnvKeys {
 
 /** Resolve the canonical client-flip env-key spec for an app. */
 export function clientTransportEnvKeys(name: string): ClientTransportEnvKeys {
-  const token = envToken(name);
+  const envSegment = envToken(name);
   return {
     modeKeys: [
-      `HASNA_${token}_STORAGE_MODE`,
-      `HASNA_${token}_MODE`,
-      `${token}_STORAGE_MODE`,
-      `${token}_MODE`,
+      `HASNA_${envSegment}_STORAGE_MODE`,
+      `HASNA_${envSegment}_MODE`,
+      `${envSegment}_STORAGE_MODE`,
+      `${envSegment}_MODE`,
     ],
-    apiUrlKeys: [`HASNA_${token}_API_URL`, `${token}_API_URL`],
-    apiKeyKeys: [`HASNA_${token}_API_KEY`, `${token}_API_KEY`],
+    apiUrlKeys: [`HASNA_${envSegment}_API_URL`, `${envSegment}_API_URL`],
+    apiKeyKeys: [`HASNA_${envSegment}_API_KEY`, `${envSegment}_API_KEY`],
   };
 }
 

@@ -1,0 +1,14 @@
+{
+  "schema": "hasna.comms_event_envelope.v1",
+  "id": "evt_release_breaking_bad_scope",
+  "createdAt": "2026-07-06T10:00:00.000Z",
+  "type": "release.breaking",
+  "severity": "breaking",
+  "scope": "package",
+  "summary": "Package-scoped breaking event without target packages and with an ack deadline but no action_required",
+  "affected_packages": [],
+  "affected_machines": [],
+  "action_required": false,
+  "ack_by": "2026-07-07T10:00:00.000Z",
+  "dedupe_key": "release.breaking:@hasna/loops@0.4.0"
+}

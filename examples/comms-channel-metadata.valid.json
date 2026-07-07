@@ -1,0 +1,9 @@
+{
+  "schema": "hasna.comms_channel_metadata.v1",
+  "id": "oss-cloud-runtime",
+  "createdAt": "2026-07-06T10:00:00.000Z",
+  "class": "initiative",
+  "noise": "work",
+  "owner": "chief",
+  "until": "gate:97610c99"
+}
