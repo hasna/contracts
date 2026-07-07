@@ -58,6 +58,8 @@ const CONTRACTS_DECLARATION_PATHS = new Set([
   "dist/mode.js",
   "dist/service-contract.js",
   "dist/conformance.js",
+  "dist/client/transport.js",
+  "dist/client/storage.js",
   "dist/cli/index.js",
   "dist/no-cloud.d.ts",
   "dist/schemas.d.ts",

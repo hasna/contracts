@@ -8,3 +8,4 @@ export * from "./kit/generate";
 export * from "./auth/index";
 export * from "./sdk/generate";
 export * from "./client/transport";
+export * from "./client/storage";

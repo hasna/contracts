@@ -234,6 +234,47 @@ export class HasnaHttpError extends Error {
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
+/** Query params for a request. Nullish values are dropped; arrays repeat the key. */
+export type QueryParams =
+  | URLSearchParams
+  | Record<string, string | number | boolean | null | undefined | ReadonlyArray<string | number | boolean>>;
+
+/** Retry policy for transient failures (network errors, timeouts, 5xx, 429). */
+export interface HasnaRetryOptions {
+  /** Max RETRY attempts after the first try. Default 2 (=> up to 3 total tries). */
+  retries?: number;
+  /** Base backoff in ms for exponential backoff. Default 200. */
+  baseDelayMs?: number;
+  /** Backoff ceiling in ms. Default 2000. */
+  maxDelayMs?: number;
+  /** HTTP statuses that trigger a retry. Default 408, 425, 429, 500, 502, 503, 504. */
+  retryStatuses?: number[];
+}
+
+/** Per-call request options: query, idempotency, timeout, retry, extra headers. */
+export interface HasnaRequestOptions {
+  /** Query string params appended to the URL. */
+  query?: QueryParams;
+  /**
+   * Idempotency key sent as `Idempotency-Key`. When set, unsafe methods (POST)
+   * become safe to retry: the server dedupes replays. Auto-generated for
+   * `create()` in the storage client.
+   */
+  idempotencyKey?: string;
+  /** Override the transport timeout for this call (ms). */
+  timeoutMs?: number;
+  /** Extra headers merged into this call (override transport headers). */
+  headers?: Record<string, string>;
+  /** Override or disable retry for this call. `false` disables retries. */
+  retry?: HasnaRetryOptions | false;
+  /** Caller abort signal, combined with the internal timeout. */
+  signal?: AbortSignal;
+}
+
+const DEFAULT_RETRY_STATUSES = [408, 425, 429, 500, 502, 503, 504] as const;
+/** Methods that are idempotent by definition and always safe to retry. */
+const IDEMPOTENT_METHODS = new Set(["GET", "HEAD", "PUT", "DELETE", "OPTIONS"]);
+
 export interface HasnaHttpTransportOptions {
   /** App slug (for error context / default host). */
   name: string;
@@ -247,50 +288,113 @@ export interface HasnaHttpTransportOptions {
   headers?: Record<string, string>;
   /** Per-request timeout in ms. Default 30000. */
   timeoutMs?: number;
+  /** Default retry policy for all requests. Pass `false` to disable. */
+  retry?: HasnaRetryOptions | false;
+  /** Injectable sleep (tests). Defaults to a real timer. */
+  sleepImpl?: (ms: number) => Promise<void>;
 }
 
 export interface HasnaHttpTransport {
   readonly baseUrl: string;
-  request<T = unknown>(method: string, path: string, body?: unknown): Promise<T>;
-  get<T = unknown>(path: string): Promise<T>;
-  post<T = unknown>(path: string, body?: unknown): Promise<T>;
-  put<T = unknown>(path: string, body?: unknown): Promise<T>;
-  patch<T = unknown>(path: string, body?: unknown): Promise<T>;
-  del<T = unknown>(path: string, body?: unknown): Promise<T>;
+  request<T = unknown>(method: string, path: string, body?: unknown, opts?: HasnaRequestOptions): Promise<T>;
+  get<T = unknown>(path: string, opts?: HasnaRequestOptions): Promise<T>;
+  post<T = unknown>(path: string, body?: unknown, opts?: HasnaRequestOptions): Promise<T>;
+  put<T = unknown>(path: string, body?: unknown, opts?: HasnaRequestOptions): Promise<T>;
+  patch<T = unknown>(path: string, body?: unknown, opts?: HasnaRequestOptions): Promise<T>;
+  del<T = unknown>(path: string, body?: unknown, opts?: HasnaRequestOptions): Promise<T>;
 }
+
+/** Append query params to a `/v1`-relative path (no-op when empty). */
+export function appendQuery(path: string, query?: QueryParams): string {
+  if (!query) return path;
+  const params = query instanceof URLSearchParams ? query : new URLSearchParams();
+  if (!(query instanceof URLSearchParams)) {
+    for (const [key, value] of Object.entries(query)) {
+      if (value === null || value === undefined) continue;
+      if (Array.isArray(value)) {
+        for (const v of value) params.append(key, String(v));
+      } else {
+        params.append(key, String(value));
+      }
+    }
+  }
+  const qs = params.toString();
+  if (!qs) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}${qs}`;
+}
+
+const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
  * Build an authenticated HTTP transport for an app's cloud `/v1` API. Sends the
  * API key on every request as BOTH `x-api-key` and `Authorization: Bearer`
- * (serve apps accept either), and returns parsed JSON. Never logs the key.
+ * (serve apps accept either), returns parsed JSON, times out, and retries
+ * transient failures with exponential backoff + jitter. Never logs the key.
+ *
+ * Retry safety: idempotent methods (GET/HEAD/PUT/DELETE/OPTIONS) are always
+ * retried on transient failure; POST/PATCH are retried ONLY when an
+ * `Idempotency-Key` is supplied, so replays can't create duplicates.
  */
 export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): HasnaHttpTransport {
   const fetchImpl: FetchLike = options.fetchImpl ?? ((input, init) => fetch(input, init));
   const base = options.baseUrl.replace(/\/+$/, "");
   const timeoutMs = options.timeoutMs ?? 30_000;
+  const sleep = options.sleepImpl ?? defaultSleep;
+  const defaultRetry = options.retry;
 
-  async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const rel = path.startsWith("/") ? path : `/${path}`;
-    const url = `${base}${rel}`;
+  function resolveRetry(callRetry: HasnaRequestOptions["retry"]): Required<HasnaRetryOptions> | null {
+    const chosen = callRetry !== undefined ? callRetry : defaultRetry;
+    if (chosen === false) return null;
+    const r = chosen ?? {};
+    return {
+      retries: r.retries ?? 2,
+      baseDelayMs: r.baseDelayMs ?? 200,
+      maxDelayMs: r.maxDelayMs ?? 2_000,
+      retryStatuses: r.retryStatuses ?? [...DEFAULT_RETRY_STATUSES],
+    };
+  }
+
+  async function once<T>(
+    method: string,
+    rel: string,
+    url: string,
+    body: unknown,
+    opts: HasnaRequestOptions,
+  ): Promise<{ ok: true; value: T } | { ok: false; retryable: boolean; error: Error }> {
     const headers: Record<string, string> = {
       "x-api-key": options.apiKey,
       Authorization: `Bearer ${options.apiKey}`,
       Accept: "application/json",
       ...(options.headers ?? {}),
+      ...(opts.headers ?? {}),
     };
+    if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
     const init: RequestInit = { method, headers };
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(body);
     }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const onAbort = () => controller.abort();
+    if (opts.signal) {
+      if (opts.signal.aborted) controller.abort();
+      else opts.signal.addEventListener("abort", onAbort, { once: true });
+    }
+    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? timeoutMs);
     init.signal = controller.signal;
     let response: Response;
     try {
       response = await fetchImpl(url, init);
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      // A caller-initiated abort is a cancellation, not a transient failure —
+      // propagate it immediately instead of retrying. Our own timeout abort and
+      // ordinary network errors ARE transient and retryable.
+      if (opts.signal?.aborted) return { ok: false, retryable: false, error: err };
+      return { ok: false, retryable: true, error: err };
     } finally {
       clearTimeout(timer);
+      if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
     }
     const text = await response.text();
     let parsed: unknown = undefined;
@@ -302,19 +406,43 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
       }
     }
     if (!response.ok) {
-      throw new HasnaHttpError(method, rel, response.status, parsed);
+      const retry = resolveRetry(opts.retry);
+      const retryable = retry ? retry.retryStatuses.includes(response.status) : false;
+      return { ok: false, retryable, error: new HasnaHttpError(method, rel, response.status, parsed) };
     }
-    return parsed as T;
+    return { ok: true, value: parsed as T };
+  }
+
+  async function request<T>(method: string, path: string, body?: unknown, opts: HasnaRequestOptions = {}): Promise<T> {
+    const upper = method.toUpperCase();
+    const rel = appendQuery(path.startsWith("/") ? path : `/${path}`, opts.query);
+    const url = `${base}${rel}`;
+    const retry = resolveRetry(opts.retry);
+    const methodRetryable = IDEMPOTENT_METHODS.has(upper) || Boolean(opts.idempotencyKey);
+    const maxAttempts = retry && methodRetryable ? retry.retries + 1 : 1;
+
+    let last: { retryable: boolean; error: Error } | null = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const result = await once<T>(upper, rel, url, body, opts);
+      if (result.ok) return result.value;
+      last = result;
+      const canRetry = retry !== null && methodRetryable && result.retryable && attempt < maxAttempts;
+      if (!canRetry) break;
+      const backoff = Math.min(retry!.maxDelayMs, retry!.baseDelayMs * 2 ** (attempt - 1));
+      const jitter = Math.floor(Math.random() * (backoff / 2 + 1));
+      await sleep(backoff + jitter);
+    }
+    throw last!.error;
   }
 
   return {
     baseUrl: base,
     request,
-    get: (path) => request("GET", path),
-    post: (path, body) => request("POST", path, body),
-    put: (path, body) => request("PUT", path, body),
-    patch: (path, body) => request("PATCH", path, body),
-    del: (path, body) => request("DELETE", path, body),
+    get: (path, opts) => request("GET", path, undefined, opts),
+    post: (path, body, opts) => request("POST", path, body, opts),
+    put: (path, body, opts) => request("PUT", path, body, opts),
+    patch: (path, body, opts) => request("PATCH", path, body, opts),
+    del: (path, body, opts) => request("DELETE", path, body, opts),
   };
 }
 
@@ -328,7 +456,7 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
 export function createClientTransport(
   name: string,
   env: Env = process.env,
-  overrides?: Partial<Pick<HasnaHttpTransportOptions, "fetchImpl" | "headers" | "timeoutMs">>,
+  overrides?: Partial<Pick<HasnaHttpTransportOptions, "fetchImpl" | "headers" | "timeoutMs" | "retry" | "sleepImpl">>,
 ):
   | { transport: "local"; client: null; resolution: ClientTransportResolution }
   | { transport: "cloud-http"; client: HasnaHttpTransport; resolution: ClientTransportResolution } {
@@ -354,6 +482,8 @@ export function createClientTransport(
       ...(overrides?.fetchImpl ? { fetchImpl: overrides.fetchImpl } : {}),
       ...(overrides?.headers ? { headers: overrides.headers } : {}),
       ...(overrides?.timeoutMs ? { timeoutMs: overrides.timeoutMs } : {}),
+      ...(overrides?.retry !== undefined ? { retry: overrides.retry } : {}),
+      ...(overrides?.sleepImpl ? { sleepImpl: overrides.sleepImpl } : {}),
     }),
     resolution,
   };

@@ -65,6 +65,10 @@
       "types": "./dist/client/transport.d.ts",
       "import": "./dist/client/transport.js"
     },
+    "./client/storage": {
+      "types": "./dist/client/storage.d.ts",
+      "import": "./dist/client/storage.js"
+    },
     "./hasna.contract.schema.json": "./dist/hasna.contract.schema.json"
   },
   "files": [
@@ -79,7 +83,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "rm -rf dist && bun build src/index.ts src/schemas.ts src/validators.ts src/no-cloud.ts src/mode.ts src/service-contract.ts src/conformance.ts src/kit/generate.ts src/auth/index.ts src/sdk/generate.ts src/client/transport.ts --root src --outdir dist --target bun && bun build src/cli/index.ts --outdir dist/cli --target bun && cp src/hasna.contract.schema.json dist/hasna.contract.schema.json && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
+    "build": "rm -rf dist && bun build src/index.ts src/schemas.ts src/validators.ts src/no-cloud.ts src/mode.ts src/service-contract.ts src/conformance.ts src/kit/generate.ts src/auth/index.ts src/sdk/generate.ts src/client/transport.ts src/client/storage.ts --root src --outdir dist --target bun && bun build src/cli/index.ts --outdir dist/cli --target bun && cp src/hasna.contract.schema.json dist/hasna.contract.schema.json && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "lint": "tsc --noEmit",
