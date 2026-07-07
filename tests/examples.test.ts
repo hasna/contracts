@@ -5,8 +5,13 @@ import { ContractSchemaRegistry, SCHEMA_IDS, type KnownSchemaId, validateContrac
 
 const examplesDir = join(import.meta.dir, "..", "examples");
 const expectedInvalidIssuePaths: Record<string, string[]> = {
+  "announcement.invalid.json": ["audienceRef.kind"],
+  "app.invalid.json": ["surfaces.bins.1"],
   "app-cloud-manifest.invalid.json": ["cloudResources.0.ownerPackage", "dependencies", "forbiddenSharedRuntimes", "packageName"],
+  "audience.invalid.json": ["definition.predicates.0.key"],
   "integration-ref.invalid.json": ["uri"],
+  "release.invalid.json": ["evidenceRefs"],
+  "rollout-record.invalid.json": ["verifiedBy"],
   "no-cloud-evidence-pack.invalid.json": ["checks", "checks", "findings"],
   "provider-live-mode-standard.invalid.json": [
     "modes",

@@ -1,0 +1,13 @@
+{
+  "schema": "hasna.rollout_record.v1",
+  "id": "rollout_update_empty_verified_by",
+  "createdAt": "2026-07-06T10:00:00.000Z",
+  "appId": "open-todos",
+  "package": "@hasna/todos",
+  "version": "0.11.63",
+  "machine": "spark01",
+  "action": "update",
+  "result": "succeeded",
+  "verifiedBy": {},
+  "at": "2026-07-06T10:00:00.000Z"
+}

@@ -25,7 +25,12 @@ export const SCHEMA_IDS = {
   scaffoldInstallRecord: "hasna.scaffold_install_record.v1",
   appCloudManifest: "hasna.app_cloud_manifest.v1",
   noCloudEvidencePack: "hasna.no_cloud_evidence_pack.v1",
-  serviceContract: "hasna.service_contract.v1"
+  serviceContract: "hasna.service_contract.v1",
+  app: "hasna.app.v1",
+  release: "hasna.release.v1",
+  rolloutRecord: "hasna.rollout_record.v1",
+  announcement: "hasna.announcement.v1",
+  audience: "hasna.audience.v1"
 } as const;
 
 export const SchemaIdSchema = z
@@ -172,6 +177,12 @@ export const ResourceKindSchema = z.enum([
   "cost",
   "alert",
   "incident",
+  "app",
+  "release",
+  "rollout",
+  "announcement",
+  "audience",
+  "feedback",
   "unknown"
 ]);
 export type ResourceKind = z.infer<typeof ResourceKindSchema>;
@@ -1294,6 +1305,335 @@ export const ScaffoldInstallRecordSchema = contractBaseSchema(SCHEMA_IDS.scaffol
   });
 export type ScaffoldInstallRecord = z.infer<typeof ScaffoldInstallRecordSchema>;
 
+// ---------------------------------------------------------------------------
+// Distribution contracts (Hasna distribution apps plan)
+//
+// `hasna.app.v1` is the SINGLE canonical app-identity contract. Every other
+// distribution document (releases, rollout records, announcements) and the
+// pre-existing `hasna.app_cloud_manifest.v1` reference an app by its stable
+// `appId` slug instead of re-declaring identity fields.
+// ---------------------------------------------------------------------------
+
+/** Stable lowercase dashed app identity slug, e.g. `open-todos`. */
+export const AppIdSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "App ids must be lowercase dashed identifiers");
+export type AppId = z.infer<typeof AppIdSchema>;
+
+/** npm package name, scoped or unscoped, e.g. `@hasna/todos`. */
+export const NpmPackageNameSchema = z
+  .string()
+  .regex(/^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/, "Must be a valid npm package name");
+export type NpmPackageName = z.infer<typeof NpmPackageNameSchema>;
+
+/** Semver version string, e.g. `1.2.3`, `1.2.3-beta.1`. */
+export const SemverSchema = z
+  .string()
+  .regex(
+    /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+    "Must be a semver version"
+  );
+export type Semver = z.infer<typeof SemverSchema>;
+
+/** Lowercase git commit sha, abbreviated (>=7) or full (40). */
+export const GitShaSchema = z.string().regex(/^[0-9a-f]{7,40}$/, "Must be a lowercase git sha (7-40 hex chars)");
+export type GitSha = z.infer<typeof GitShaSchema>;
+
+export const GithubUrlSchema = NonEmptyStringSchema.refine(
+  (value) => value.startsWith("https://github.com/") || value.startsWith("git+https://github.com/"),
+  "GitHub URLs must start with https://github.com/ or git+https://github.com/"
+);
+
+export const AppLifecycleSchema = z.enum(["active", "stub", "deprecated", "archived"]);
+export type AppLifecycle = z.infer<typeof AppLifecycleSchema>;
+
+export const ReleaseChannelSchema = z.enum(["stable", "beta", "canary", "internal"]);
+export type ReleaseChannel = z.infer<typeof ReleaseChannelSchema>;
+
+export const AppMcpSurfaceSchema = z
+  .object({
+    transport: z.enum(["http", "stdio"]).default("http"),
+    bin: z.string().min(1).optional(),
+    url: UriSchema.optional()
+  })
+  .strict();
+export type AppMcpSurface = z.infer<typeof AppMcpSurfaceSchema>;
+
+export const AppHttpSurfaceSchema = z
+  .object({
+    healthPath: z.string().min(1).default("/health"),
+    port: z.number().int().positive().optional(),
+    baseUrl: UriSchema.optional()
+  })
+  .strict();
+export type AppHttpSurface = z.infer<typeof AppHttpSurfaceSchema>;
+
+export const AppSurfacesSchema = z
+  .object({
+    bins: z.array(z.string().min(1)).default([]),
+    mcp: AppMcpSurfaceSchema.optional(),
+    http: AppHttpSurfaceSchema.optional()
+  })
+  .strict();
+export type AppSurfaces = z.infer<typeof AppSurfacesSchema>;
+
+export const AppSchema = contractBaseSchema(SCHEMA_IDS.app)
+  .extend({
+    appId: AppIdSchema,
+    npmName: NpmPackageNameSchema,
+    repoFolder: AppIdSchema,
+    githubUrl: GithubUrlSchema,
+    projectSlug: ProjectSlugSchema,
+    surfaces: AppSurfacesSchema.default({}),
+    lifecycle: AppLifecycleSchema,
+    releaseChannel: ReleaseChannelSchema.default("stable"),
+    summary: z.string().min(1).optional(),
+    tags: TagsSchema
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const seenBins = new Set<string>();
+    for (const [index, bin] of value.surfaces.bins.entries()) {
+      if (seenBins.has(bin)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "App surface bins must be unique",
+          path: ["surfaces", "bins", index]
+        });
+      }
+      seenBins.add(bin);
+    }
+  });
+export type App = z.infer<typeof AppSchema>;
+
+export const PublishPathSchema = z.enum(["skill", "ci", "backfilled"]);
+export type PublishPath = z.infer<typeof PublishPathSchema>;
+
+export const ReleaseSchema = contractBaseSchema(SCHEMA_IDS.release)
+  .extend({
+    appId: AppIdSchema,
+    package: NpmPackageNameSchema,
+    version: SemverSchema,
+    gitSha: GitShaSchema,
+    publishedAt: TimestampSchema,
+    publishPath: PublishPathSchema,
+    /** Deferred changelog refs are legal: omit until the changelog entry exists. */
+    changelogRef: ResourcePointerSchema.optional(),
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.publishPath !== "backfilled" && value.evidenceRefs.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "skill and ci releases require publish evidence; only backfilled releases may omit it",
+        path: ["evidenceRefs"]
+      });
+    }
+  });
+export type Release = z.infer<typeof ReleaseSchema>;
+
+export const RolloutActionSchema = z.enum(["install", "update", "rollback", "freeze-blocked"]);
+export type RolloutAction = z.infer<typeof RolloutActionSchema>;
+
+export const RolloutVerificationSchema = z
+  .object({
+    cliVersion: z.string().min(1).optional(),
+    mcpHealth: z.enum(["ok", "degraded", "unavailable", "not_checked"]).optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.cliVersion && value.mcpHealth === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Rollout verification requires at least one concrete verifier field"
+      });
+    }
+  });
+export type RolloutVerification = z.infer<typeof RolloutVerificationSchema>;
+
+export const RolloutRecordSchema = contractBaseSchema(SCHEMA_IDS.rolloutRecord)
+  .extend({
+    appId: AppIdSchema,
+    package: NpmPackageNameSchema,
+    version: SemverSchema,
+    machine: NonEmptyStringSchema,
+    action: RolloutActionSchema,
+    result: ContractStatusSchema,
+    verifiedBy: RolloutVerificationSchema.optional(),
+    at: TimestampSchema,
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.action === "freeze-blocked" && value.result !== "blocked" && value.result !== "skipped") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "freeze-blocked rollout records must report result blocked or skipped",
+        path: ["result"]
+      });
+    }
+    const hasConcreteVerification =
+      Boolean(value.verifiedBy?.cliVersion) ||
+      (value.verifiedBy?.mcpHealth !== undefined && value.verifiedBy.mcpHealth !== "not_checked");
+    const hasVerifierFields = value.verifiedBy ? Object.keys(value.verifiedBy).length > 0 : false;
+    if (
+      (value.action === "install" || value.action === "update") &&
+      value.result === "succeeded" &&
+      (!value.verifiedBy || (hasVerifierFields && !hasConcreteVerification))
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Succeeded install/update rollout records require concrete verification",
+        path: ["verifiedBy"]
+      });
+    }
+  });
+export type RolloutRecord = z.infer<typeof RolloutRecordSchema>;
+
+export const AnnouncementChannelKindSchema = z.enum([
+  "email",
+  "telegram",
+  "slack",
+  "discord",
+  "x",
+  "blog",
+  "rss",
+  "webhook",
+  "github",
+  "other"
+]);
+export type AnnouncementChannelKind = z.infer<typeof AnnouncementChannelKindSchema>;
+
+export const AnnouncementDeliveryStatusSchema = z.enum([
+  "pending",
+  "queued",
+  "sent",
+  "failed",
+  "skipped",
+  "suppressed"
+]);
+export type AnnouncementDeliveryStatus = z.infer<typeof AnnouncementDeliveryStatusSchema>;
+
+export const AnnouncementChannelSchema = z
+  .object({
+    channel: AnnouncementChannelKindSchema,
+    status: AnnouncementDeliveryStatusSchema,
+    deliveredAt: TimestampSchema.optional(),
+    detail: z.string().min(1).optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.status === "sent" && !value.deliveredAt) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Sent announcement channels require deliveredAt",
+        path: ["deliveredAt"]
+      });
+    }
+    if (value.status === "failed" && !value.detail) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Failed announcement channels require detail",
+        path: ["detail"]
+      });
+    }
+  });
+export type AnnouncementChannel = z.infer<typeof AnnouncementChannelSchema>;
+
+export const AnnouncementSchema = contractBaseSchema(SCHEMA_IDS.announcement)
+  .extend({
+    campaignId: NonEmptyStringSchema,
+    appId: AppIdSchema.optional(),
+    releaseRef: ResourcePointerSchema.optional(),
+    channels: z.array(AnnouncementChannelSchema).min(1),
+    audienceRef: ResourcePointerSchema,
+    sentAt: TimestampSchema
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.releaseRef && value.releaseRef.kind !== "release") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Announcement releaseRef must use resource kind release",
+        path: ["releaseRef", "kind"]
+      });
+    }
+    if (value.audienceRef.kind !== "audience") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Announcement audienceRef must use resource kind audience",
+        path: ["audienceRef", "kind"]
+      });
+    }
+  });
+export type Announcement = z.infer<typeof AnnouncementSchema>;
+
+export const AudiencePredicateKindSchema = z.enum(["tag", "attribute", "group"]);
+export type AudiencePredicateKind = z.infer<typeof AudiencePredicateKindSchema>;
+
+export const AudiencePredicateOpSchema = z.enum(["eq", "neq", "in", "not_in", "exists", "not_exists"]);
+export type AudiencePredicateOp = z.infer<typeof AudiencePredicateOpSchema>;
+
+const AudiencePredicateValueSchema = z.union([z.string(), z.number(), z.boolean()]);
+
+export const AudiencePredicateSchema = z
+  .object({
+    kind: AudiencePredicateKindSchema,
+    /** Attribute key (required for attribute predicates), e.g. `machine`. */
+    key: z.string().min(1).optional(),
+    op: AudiencePredicateOpSchema.default("eq"),
+    value: AudiencePredicateValueSchema.optional(),
+    values: z.array(AudiencePredicateValueSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.kind === "attribute" && !value.key) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Attribute predicates require key",
+        path: ["key"]
+      });
+    }
+    if ((value.op === "eq" || value.op === "neq") && value.value === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "eq/neq predicates require value",
+        path: ["value"]
+      });
+    }
+    if ((value.op === "in" || value.op === "not_in") && value.values.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "in/not_in predicates require values",
+        path: ["values"]
+      });
+    }
+  });
+export type AudiencePredicate = z.infer<typeof AudiencePredicateSchema>;
+
+export const AudienceDefinitionSchema = z
+  .object({
+    match: z.enum(["all", "any"]).default("all"),
+    predicates: z.array(AudiencePredicateSchema).min(1)
+  })
+  .strict();
+export type AudienceDefinition = z.infer<typeof AudienceDefinitionSchema>;
+
+export const ConsentPolicySchema = z.enum(["opt_in", "opt_out", "transactional", "none"]);
+export type ConsentPolicy = z.infer<typeof ConsentPolicySchema>;
+
+export const AudienceSchema = contractBaseSchema(SCHEMA_IDS.audience)
+  .extend({
+    audienceId: AppIdSchema,
+    name: NonEmptyStringSchema,
+    definition: AudienceDefinitionSchema,
+    consentPolicy: ConsentPolicySchema,
+    suppressionSyncedAt: OptionalTimestampSchema
+  })
+  .strict();
+export type Audience = z.infer<typeof AudienceSchema>;
+
 export const FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud", "open-cloud"] as const;
 
 export const AppCloudProviderSchema = z.enum([
@@ -1337,10 +1677,14 @@ export const AppCloudResourceSchema = z
   .strict();
 export type AppCloudResource = z.infer<typeof AppCloudResourceSchema>;
 
+// `hasna.app_cloud_manifest.v1` is NOT an identity schema. Canonical app
+// identity lives in `hasna.app.v1`; this v1 field remains a compatible
+// non-empty reference string instead of adopting the stricter AppIdSchema.
 export const AppCloudManifestSchema = contractBaseSchema(SCHEMA_IDS.appCloudManifest)
   .extend({
     packageName: z.string().min(1),
     packageVersion: z.string().min(1).optional(),
+    /** App identity reference; prefer AppIdSchema-compatible slugs for new manifests. */
     appId: z.string().min(1),
     repository: ResourcePointerSchema.optional(),
     storageMode: z.enum(["local_only", "app_owned_cloud", "hybrid_local_cache", "external_service"]),
@@ -2072,7 +2416,12 @@ export const ContractSchemaRegistry = {
   [SCHEMA_IDS.scaffoldInstallRecord]: ScaffoldInstallRecordSchema,
   [SCHEMA_IDS.appCloudManifest]: AppCloudManifestSchema,
   [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePackSchema,
-  [SCHEMA_IDS.serviceContract]: ServiceContractManifestSchema
+  [SCHEMA_IDS.serviceContract]: ServiceContractManifestSchema,
+  [SCHEMA_IDS.app]: AppSchema,
+  [SCHEMA_IDS.release]: ReleaseSchema,
+  [SCHEMA_IDS.rolloutRecord]: RolloutRecordSchema,
+  [SCHEMA_IDS.announcement]: AnnouncementSchema,
+  [SCHEMA_IDS.audience]: AudienceSchema
 } as const;
 
 export type KnownSchemaId = keyof typeof ContractSchemaRegistry;
@@ -2100,6 +2449,11 @@ export type ContractBySchemaId = {
   [SCHEMA_IDS.appCloudManifest]: AppCloudManifest;
   [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePack;
   [SCHEMA_IDS.serviceContract]: ServiceContractManifest;
+  [SCHEMA_IDS.app]: App;
+  [SCHEMA_IDS.release]: Release;
+  [SCHEMA_IDS.rolloutRecord]: RolloutRecord;
+  [SCHEMA_IDS.announcement]: Announcement;
+  [SCHEMA_IDS.audience]: Audience;
 };
 
 export type ActorRefInput = z.input<typeof ActorRefSchema>;
@@ -2124,6 +2478,11 @@ export type ScaffoldInstallRecordInput = z.input<typeof ScaffoldInstallRecordSch
 export type AppCloudManifestInput = z.input<typeof AppCloudManifestSchema>;
 export type NoCloudEvidencePackInput = z.input<typeof NoCloudEvidencePackSchema>;
 export type ServiceContractManifestInput = z.input<typeof ServiceContractManifestSchema>;
+export type AppInput = z.input<typeof AppSchema>;
+export type ReleaseInput = z.input<typeof ReleaseSchema>;
+export type RolloutRecordInput = z.input<typeof RolloutRecordSchema>;
+export type AnnouncementInput = z.input<typeof AnnouncementSchema>;
+export type AudienceInput = z.input<typeof AudienceSchema>;
 export type ActorPointerInput = z.input<typeof ActorPointerSchema>;
 export type ResourcePointerInput = z.input<typeof ResourcePointerSchema>;
 export type EvidencePointerInput = z.input<typeof EvidencePointerSchema>;
@@ -2151,4 +2510,9 @@ export type ContractInputBySchemaId = {
   [SCHEMA_IDS.appCloudManifest]: AppCloudManifestInput;
   [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePackInput;
   [SCHEMA_IDS.serviceContract]: ServiceContractManifestInput;
+  [SCHEMA_IDS.app]: AppInput;
+  [SCHEMA_IDS.release]: ReleaseInput;
+  [SCHEMA_IDS.rolloutRecord]: RolloutRecordInput;
+  [SCHEMA_IDS.announcement]: AnnouncementInput;
+  [SCHEMA_IDS.audience]: AudienceInput;
 };
