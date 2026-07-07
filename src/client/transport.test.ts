@@ -41,6 +41,27 @@ describe("resolveClientTransport — the client-flip contract", () => {
     expect(JSON.stringify(r)).not.toContain("hasna_todos_abc");
   });
 
+  test("FLIP: url+key with NO mode env => inferred cloud-http (fleet-flip contract)", () => {
+    const r = resolveClientTransport("todos", {
+      HASNA_TODOS_API_URL: "https://todos.hasna.xyz",
+      HASNA_TODOS_API_KEY: "hasna_todos_flip",
+    });
+    expect(r.transport).toBe("cloud-http");
+    expect(r.mode).toBe("cloud");
+    expect(r.baseUrl).toBe("https://todos.hasna.xyz/v1");
+    expect(r.modeSource).toBe("HASNA_TODOS_API_URL+HASNA_TODOS_API_KEY");
+    expect(JSON.stringify(r)).not.toContain("hasna_todos_flip");
+  });
+
+  test("FLIP revert: url present but key removed => back to local (not misconfigured)", () => {
+    const r = resolveClientTransport("todos", {
+      HASNA_TODOS_API_URL: "https://todos.hasna.xyz",
+    });
+    expect(r.transport).toBe("local");
+    expect(r.mode).toBe("local");
+    expect(r.misconfigured).toBe(false);
+  });
+
   test("self_hosted alias normalizes to cloud and defaults the host", () => {
     const r = resolveClientTransport("knowledge", {
       HASNA_KNOWLEDGE_MODE: "self_hosted",

@@ -25,10 +25,14 @@
 //     <NAME>_API_KEY                                                  (alias)
 //
 // DECISION: transport is `cloud-http` IFF the resolved mode is `cloud` AND an API
-// key is present. The base URL defaults to `https://<app>.hasna.xyz` when a key is
-// present but no URL is set. If mode is `cloud` but the API key is MISSING, we do
-// NOT silently serve wrong local data — we return `local` with a loud `warning`
-// and `misconfigured: true` so the caller can hard-fail instead of drifting.
+// key is present. The mode is `cloud` when either (a) an explicit mode env resolves
+// to cloud, OR (b) no mode env is set but BOTH the API URL and API key are present —
+// the fleet env-flip writes exactly those two vars (no STORAGE_MODE), so their joint
+// presence is inferred as self_hosted intent. The base URL defaults to
+// `https://<app>.hasna.xyz` when a key is present but no URL is set. If mode is
+// `cloud` but the API key is MISSING, we do NOT silently serve wrong local data — we
+// return `local` with a loud `warning` and `misconfigured: true` so the caller can
+// hard-fail instead of drifting.
 //
 // SAFETY: this module never returns, logs, or embeds the API key value. Callers
 // receive only presence flags and env-key names.
@@ -143,6 +147,14 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
         `Deprecated mode '${deprecatedAlias}' from ${modeHit.key} is treated as 'cloud'. Prefer ${keys.modeKeys[0]}=cloud.`,
       );
     }
+  } else if (urlHit && keyHit) {
+    // Flip signal: the fleet env-flip writes EXACTLY HASNA_<APP>_API_URL +
+    // HASNA_<APP>_API_KEY per app and NO explicit STORAGE_MODE (see machines
+    // FLEET-FLIP.md). Their joint presence IS the self_hosted intent, so infer
+    // `cloud`. Revert removes both vars, so the client falls back to local. Without
+    // this, a flipped client with only url+key silently kept reading its local store.
+    mode = "cloud";
+    modeSource = `${urlHit.key}+${keyHit.key}`;
   }
 
   // Local mode: never route to the network, regardless of URL/key presence.
