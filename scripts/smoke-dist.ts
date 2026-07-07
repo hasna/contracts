@@ -89,4 +89,49 @@ try {
   rmSync(noCloudDir, { recursive: true, force: true });
 }
 
+const vendorKitDir = mkdtempSync(join(tmpdir(), "contracts-vendor-kit-dist-"));
+try {
+  writeFileSync(
+    join(vendorKitDir, "hasna.contract.json"),
+    JSON.stringify(
+      {
+        schema: "hasna.service_contract.v1",
+        name: "dist-smoke",
+        class: "cli-with-store",
+        contractVersion: "v1",
+        kitVersion: "0.0.0"
+      },
+      null,
+      2
+    ) + "\n"
+  );
+  const vendor = run(["vendor-kit", "--json", vendorKitDir]);
+  requireExit(vendor, 0, "vendor-kit --json");
+  if (parseJson(vendor, "vendor-kit --json").ok !== true) {
+    throw new Error("vendor-kit --json did not return ok=true");
+  }
+
+  const check = run(["vendor-kit", "--check", "--json", vendorKitDir]);
+  requireExit(check, 0, "vendor-kit --check --json");
+  if (parseJson(check, "vendor-kit --check --json").ok !== true) {
+    throw new Error("vendor-kit --check --json did not return ok=true");
+  }
+
+  writeFileSync(join(vendorKitDir, "hasna.contract.json"), JSON.stringify({ kitVersion: "0.0.0" }, null, 2) + "\n");
+  const staleCheck = run(["vendor-kit", "--check", "--json", vendorKitDir]);
+  requireExit(staleCheck, 1, "stale vendor-kit --check --json");
+  const stalePayload = parseJson(staleCheck, "stale vendor-kit --check --json");
+  if (stalePayload.ok !== false || stalePayload.contractStaleVersion !== "0.0.0") {
+    throw new Error("stale vendor-kit check did not report contractStaleVersion");
+  }
+
+  const noContractCheck = run(["vendor-kit", "--check", "--no-contract", "--json", vendorKitDir]);
+  requireExit(noContractCheck, 0, "vendor-kit --check --no-contract --json");
+  if (parseJson(noContractCheck, "vendor-kit --check --no-contract --json").ok !== true) {
+    throw new Error("vendor-kit --check --no-contract --json did not ignore the stale contract stamp");
+  }
+} finally {
+  rmSync(vendorKitDir, { recursive: true, force: true });
+}
+
 console.log("dist smoke passed");
