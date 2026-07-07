@@ -11,6 +11,7 @@ export const SCHEMA_IDS = {
   decisionEnvelope: "hasna.decision_envelope.v1",
   costEstimate: "hasna.cost_estimate.v1",
   capabilityCard: "hasna.capability_card.v1",
+  providerLiveModeStandard: "hasna.provider_live_mode_standard.v1",
   contextPack: "hasna.context_pack.v1",
   integrationRef: "hasna.integration_ref.v1",
   projectManifest: "hasna.project_manifest.v1",
@@ -27,7 +28,12 @@ export const SCHEMA_IDS = {
   serviceContract: "hasna.service_contract.v1",
   commsEventEnvelope: "hasna.comms_event_envelope.v1",
   commsChannelMetadata: "hasna.comms_channel_metadata.v1",
-  commsMessageMetadata: "hasna.comms_message_metadata.v1"
+  commsMessageMetadata: "hasna.comms_message_metadata.v1",
+  app: "hasna.app.v1",
+  release: "hasna.release.v1",
+  rolloutRecord: "hasna.rollout_record.v1",
+  announcement: "hasna.announcement.v1",
+  audience: "hasna.audience.v1"
 } as const;
 
 export const SchemaIdSchema = z
@@ -174,6 +180,12 @@ export const ResourceKindSchema = z.enum([
   "cost",
   "alert",
   "incident",
+  "app",
+  "release",
+  "rollout",
+  "announcement",
+  "audience",
+  "feedback",
   "unknown"
 ]);
 export type ResourceKind = z.infer<typeof ResourceKindSchema>;
@@ -379,6 +391,217 @@ export const CapabilityCardSchema = contractBaseSchema(SCHEMA_IDS.capabilityCard
   })
   .strict();
 export type CapabilityCard = z.infer<typeof CapabilityCardSchema>;
+
+export const ProviderModeSchema = z.enum(["mock", "fixture", "sandbox", "read_only_live", "live_mutating"]);
+export type ProviderMode = z.infer<typeof ProviderModeSchema>;
+
+export const ProviderSideEffectClassSchema = z.enum([
+  "none",
+  "read_only",
+  "external_notification",
+  "external_mutation",
+  "money_movement",
+  "dns_or_domain_change",
+  "bulk_message_or_call",
+  "legal_or_filing",
+  "compute_or_infra_mutation",
+  "irreversible"
+]);
+export type ProviderSideEffectClass = z.infer<typeof ProviderSideEffectClassSchema>;
+
+export const CredentialRequirementSchema = z
+  .object({
+    refName: NonEmptyStringSchema,
+    requiredForModes: z.array(ProviderModeSchema).min(1),
+    allowedSecretInputs: z.array(z.enum(["credential_ref", "lease_ref"])).min(1).default(["credential_ref"]),
+    failClosedDiagnostic: NonEmptyStringSchema,
+    revocationCheck: z.boolean().default(true)
+  })
+  .strict();
+export type CredentialRequirement = z.infer<typeof CredentialRequirementSchema>;
+
+export const ProviderOperationCardSchema = z
+  .object({
+    operation: NonEmptyStringSchema,
+    supportedModes: z.array(ProviderModeSchema).min(1),
+    sideEffectClass: ProviderSideEffectClassSchema,
+    requiresApproval: z.boolean().default(false),
+    requiresIdempotencyKey: z.boolean().default(false),
+    requiresSandboxEvidence: z.boolean().default(false),
+    requiresRollbackOrRevocation: z.boolean().default(false),
+    rollbackOrRevocation: NonEmptyStringSchema.optional(),
+    noSideEffectSmoke: NonEmptyStringSchema.optional(),
+    reconciliation: NonEmptyStringSchema.optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.supportedModes.includes("live_mutating")) {
+      if (value.sideEffectClass === "none" || value.sideEffectClass === "read_only") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating operations must declare a side-effecting class",
+          path: ["sideEffectClass"]
+        });
+      }
+      if (!value.requiresApproval) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating operations require approval",
+          path: ["requiresApproval"]
+        });
+      }
+      if (!value.requiresIdempotencyKey) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating operations require idempotency keys",
+          path: ["requiresIdempotencyKey"]
+        });
+      }
+      if (!value.requiresSandboxEvidence) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating operations require sandbox evidence before live proof",
+          path: ["requiresSandboxEvidence"]
+        });
+      }
+      if (!value.requiresRollbackOrRevocation || !value.rollbackOrRevocation) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating operations require rollback or revocation instructions",
+          path: ["rollbackOrRevocation"]
+        });
+      }
+      if (!value.reconciliation) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating operations require reconciliation behavior",
+          path: ["reconciliation"]
+        });
+      }
+    }
+  });
+export type ProviderOperationCard = z.infer<typeof ProviderOperationCardSchema>;
+
+export const ProviderCapabilityCardSchema = z
+  .object({
+    providerId: NonEmptyStringSchema,
+    appId: NonEmptyStringSchema,
+    adapterId: NonEmptyStringSchema,
+    ownerPackage: NonEmptyStringSchema,
+    modes: z.array(ProviderModeSchema).min(1),
+    defaultMode: ProviderModeSchema,
+    credentialRequirements: z.array(CredentialRequirementSchema).default([]),
+    operations: z.array(ProviderOperationCardSchema).min(1),
+    rateLimitPosture: NonEmptyStringSchema,
+    costPosture: NonEmptyStringSchema.optional(),
+    auditEvents: z.array(NonEmptyStringSchema).default([]),
+    redactionRules: z.array(NonEmptyStringSchema).default([]),
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.modes.includes(value.defaultMode)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "defaultMode must be one of modes",
+        path: ["defaultMode"]
+      });
+    }
+
+    const operationModes = new Set(value.operations.flatMap((operation) => operation.supportedModes));
+    for (const mode of operationModes) {
+      if (!value.modes.includes(mode)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `operation mode ${mode} is not declared in provider modes`,
+          path: ["operations"]
+        });
+      }
+    }
+
+    if (operationModes.has("live_mutating")) {
+      const liveCredential = value.credentialRequirements.some((credential) => credential.requiredForModes.includes("live_mutating"));
+      if (!liveCredential) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating providers require at least one live credential reference requirement",
+          path: ["credentialRequirements"]
+        });
+      }
+      if (value.auditEvents.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "live_mutating providers require audit events",
+          path: ["auditEvents"]
+        });
+      }
+    }
+  });
+export type ProviderCapabilityCard = z.infer<typeof ProviderCapabilityCardSchema>;
+
+export const ProviderLiveModeTargetSchema = z
+  .object({
+    appId: NonEmptyStringSchema,
+    repo: NonEmptyStringSchema,
+    priority: z.enum(["p0", "p1", "p2"]).default("p1"),
+    requiredEvidence: z.array(NonEmptyStringSchema).min(1),
+    firstOperations: z.array(NonEmptyStringSchema).min(1),
+    blockedUntil: z.array(NonEmptyStringSchema).default([])
+  })
+  .strict();
+export type ProviderLiveModeTarget = z.infer<typeof ProviderLiveModeTargetSchema>;
+
+export const ProviderLiveModeStandardSchema = contractBaseSchema(SCHEMA_IDS.providerLiveModeStandard)
+  .extend({
+    name: NonEmptyStringSchema,
+    version: NonEmptyStringSchema,
+    modes: z.array(ProviderModeSchema).refine(
+      (modes) => ["mock", "fixture", "sandbox", "read_only_live", "live_mutating"].every((mode) => modes.includes(mode as ProviderMode)),
+      "provider live-mode standard must include every canonical provider mode"
+    ),
+    requiredCapabilityFields: z.array(NonEmptyStringSchema).min(1),
+    liveMutationGate: z
+      .object({
+        requiredMode: z.literal("live_mutating"),
+        requiredChecks: z.array(NonEmptyStringSchema).min(1),
+        forbiddenBypassSignals: z.array(NonEmptyStringSchema).min(1),
+        disabledLiveSmoke: NonEmptyStringSchema
+      })
+      .strict(),
+    noSideEffectSmoke: z
+      .object({
+        requiredForModes: z.array(ProviderModeSchema).min(1),
+        commandEvidence: z.array(NonEmptyStringSchema).min(1),
+        secretOutputScan: z.boolean().default(true)
+      })
+      .strict(),
+    credentialPolicy: z
+      .object({
+        acceptedInputs: z.array(z.enum(["credential_ref", "lease_ref"])).min(1),
+        rawSecretInputsAllowed: z.literal(false),
+        missingCredentialBehavior: z.literal("fail_closed"),
+        revocationCheckRequired: z.boolean().default(true)
+      })
+      .strict(),
+    operationCards: z.array(ProviderCapabilityCardSchema).min(1),
+    firstAdoptionTargets: z.array(ProviderLiveModeTargetSchema).min(1),
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const firstTargetApps = new Set(value.firstAdoptionTargets.map((target) => target.appId));
+    const operationApps = new Set(value.operationCards.map((card) => card.appId));
+    for (const appId of firstTargetApps) {
+      if (!operationApps.has(appId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `first adoption target ${appId} requires a provider capability card`,
+          path: ["firstAdoptionTargets"]
+        });
+      }
+    }
+  });
+export type ProviderLiveModeStandard = z.infer<typeof ProviderLiveModeStandardSchema>;
 
 export const ContextPackItemSchema = z
   .object({
@@ -961,7 +1184,7 @@ export const ScaffoldEnvVarSchema = z
     key: z.string().regex(/^[A-Z][A-Z0-9_]*$/),
     description: z.string().min(1),
     required: z.boolean().default(false),
-    secret: z.boolean().default(false),
+    ["secret"]: z.boolean().default(false),
     group: z.string().min(1).optional(),
     default: z.string().optional()
   })
@@ -1085,6 +1308,335 @@ export const ScaffoldInstallRecordSchema = contractBaseSchema(SCHEMA_IDS.scaffol
   });
 export type ScaffoldInstallRecord = z.infer<typeof ScaffoldInstallRecordSchema>;
 
+// ---------------------------------------------------------------------------
+// Distribution contracts (Hasna distribution apps plan)
+//
+// `hasna.app.v1` is the SINGLE canonical app-identity contract. Every other
+// distribution document (releases, rollout records, announcements) and the
+// pre-existing `hasna.app_cloud_manifest.v1` reference an app by its stable
+// `appId` slug instead of re-declaring identity fields.
+// ---------------------------------------------------------------------------
+
+/** Stable lowercase dashed app identity slug, e.g. `open-todos`. */
+export const AppIdSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "App ids must be lowercase dashed identifiers");
+export type AppId = z.infer<typeof AppIdSchema>;
+
+/** npm package name, scoped or unscoped, e.g. `@hasna/todos`. */
+export const NpmPackageNameSchema = z
+  .string()
+  .regex(/^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/, "Must be a valid npm package name");
+export type NpmPackageName = z.infer<typeof NpmPackageNameSchema>;
+
+/** Semver version string, e.g. `1.2.3`, `1.2.3-beta.1`. */
+export const SemverSchema = z
+  .string()
+  .regex(
+    /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+    "Must be a semver version"
+  );
+export type Semver = z.infer<typeof SemverSchema>;
+
+/** Lowercase git commit sha, abbreviated (>=7) or full (40). */
+export const GitShaSchema = z.string().regex(/^[0-9a-f]{7,40}$/, "Must be a lowercase git sha (7-40 hex chars)");
+export type GitSha = z.infer<typeof GitShaSchema>;
+
+export const GithubUrlSchema = NonEmptyStringSchema.refine(
+  (value) => value.startsWith("https://github.com/") || value.startsWith("git+https://github.com/"),
+  "GitHub URLs must start with https://github.com/ or git+https://github.com/"
+);
+
+export const AppLifecycleSchema = z.enum(["active", "stub", "deprecated", "archived"]);
+export type AppLifecycle = z.infer<typeof AppLifecycleSchema>;
+
+export const ReleaseChannelSchema = z.enum(["stable", "beta", "canary", "internal"]);
+export type ReleaseChannel = z.infer<typeof ReleaseChannelSchema>;
+
+export const AppMcpSurfaceSchema = z
+  .object({
+    transport: z.enum(["http", "stdio"]).default("http"),
+    bin: z.string().min(1).optional(),
+    url: UriSchema.optional()
+  })
+  .strict();
+export type AppMcpSurface = z.infer<typeof AppMcpSurfaceSchema>;
+
+export const AppHttpSurfaceSchema = z
+  .object({
+    healthPath: z.string().min(1).default("/health"),
+    port: z.number().int().positive().optional(),
+    baseUrl: UriSchema.optional()
+  })
+  .strict();
+export type AppHttpSurface = z.infer<typeof AppHttpSurfaceSchema>;
+
+export const AppSurfacesSchema = z
+  .object({
+    bins: z.array(z.string().min(1)).default([]),
+    mcp: AppMcpSurfaceSchema.optional(),
+    http: AppHttpSurfaceSchema.optional()
+  })
+  .strict();
+export type AppSurfaces = z.infer<typeof AppSurfacesSchema>;
+
+export const AppSchema = contractBaseSchema(SCHEMA_IDS.app)
+  .extend({
+    appId: AppIdSchema,
+    npmName: NpmPackageNameSchema,
+    repoFolder: AppIdSchema,
+    githubUrl: GithubUrlSchema,
+    projectSlug: ProjectSlugSchema,
+    surfaces: AppSurfacesSchema.default({}),
+    lifecycle: AppLifecycleSchema,
+    releaseChannel: ReleaseChannelSchema.default("stable"),
+    summary: z.string().min(1).optional(),
+    tags: TagsSchema
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const seenBins = new Set<string>();
+    for (const [index, bin] of value.surfaces.bins.entries()) {
+      if (seenBins.has(bin)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "App surface bins must be unique",
+          path: ["surfaces", "bins", index]
+        });
+      }
+      seenBins.add(bin);
+    }
+  });
+export type App = z.infer<typeof AppSchema>;
+
+export const PublishPathSchema = z.enum(["skill", "ci", "backfilled"]);
+export type PublishPath = z.infer<typeof PublishPathSchema>;
+
+export const ReleaseSchema = contractBaseSchema(SCHEMA_IDS.release)
+  .extend({
+    appId: AppIdSchema,
+    package: NpmPackageNameSchema,
+    version: SemverSchema,
+    gitSha: GitShaSchema,
+    publishedAt: TimestampSchema,
+    publishPath: PublishPathSchema,
+    /** Deferred changelog refs are legal: omit until the changelog entry exists. */
+    changelogRef: ResourcePointerSchema.optional(),
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.publishPath !== "backfilled" && value.evidenceRefs.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "skill and ci releases require publish evidence; only backfilled releases may omit it",
+        path: ["evidenceRefs"]
+      });
+    }
+  });
+export type Release = z.infer<typeof ReleaseSchema>;
+
+export const RolloutActionSchema = z.enum(["install", "update", "rollback", "freeze-blocked"]);
+export type RolloutAction = z.infer<typeof RolloutActionSchema>;
+
+export const RolloutVerificationSchema = z
+  .object({
+    cliVersion: z.string().min(1).optional(),
+    mcpHealth: z.enum(["ok", "degraded", "unavailable", "not_checked"]).optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.cliVersion && value.mcpHealth === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Rollout verification requires at least one concrete verifier field"
+      });
+    }
+  });
+export type RolloutVerification = z.infer<typeof RolloutVerificationSchema>;
+
+export const RolloutRecordSchema = contractBaseSchema(SCHEMA_IDS.rolloutRecord)
+  .extend({
+    appId: AppIdSchema,
+    package: NpmPackageNameSchema,
+    version: SemverSchema,
+    machine: NonEmptyStringSchema,
+    action: RolloutActionSchema,
+    result: ContractStatusSchema,
+    verifiedBy: RolloutVerificationSchema.optional(),
+    at: TimestampSchema,
+    evidenceRefs: z.array(EvidencePointerSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.action === "freeze-blocked" && value.result !== "blocked" && value.result !== "skipped") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "freeze-blocked rollout records must report result blocked or skipped",
+        path: ["result"]
+      });
+    }
+    const hasConcreteVerification =
+      Boolean(value.verifiedBy?.cliVersion) ||
+      (value.verifiedBy?.mcpHealth !== undefined && value.verifiedBy.mcpHealth !== "not_checked");
+    const hasVerifierFields = value.verifiedBy ? Object.keys(value.verifiedBy).length > 0 : false;
+    if (
+      (value.action === "install" || value.action === "update") &&
+      value.result === "succeeded" &&
+      (!value.verifiedBy || (hasVerifierFields && !hasConcreteVerification))
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Succeeded install/update rollout records require concrete verification",
+        path: ["verifiedBy"]
+      });
+    }
+  });
+export type RolloutRecord = z.infer<typeof RolloutRecordSchema>;
+
+export const AnnouncementChannelKindSchema = z.enum([
+  "email",
+  "telegram",
+  "slack",
+  "discord",
+  "x",
+  "blog",
+  "rss",
+  "webhook",
+  "github",
+  "other"
+]);
+export type AnnouncementChannelKind = z.infer<typeof AnnouncementChannelKindSchema>;
+
+export const AnnouncementDeliveryStatusSchema = z.enum([
+  "pending",
+  "queued",
+  "sent",
+  "failed",
+  "skipped",
+  "suppressed"
+]);
+export type AnnouncementDeliveryStatus = z.infer<typeof AnnouncementDeliveryStatusSchema>;
+
+export const AnnouncementChannelSchema = z
+  .object({
+    channel: AnnouncementChannelKindSchema,
+    status: AnnouncementDeliveryStatusSchema,
+    deliveredAt: TimestampSchema.optional(),
+    detail: z.string().min(1).optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.status === "sent" && !value.deliveredAt) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Sent announcement channels require deliveredAt",
+        path: ["deliveredAt"]
+      });
+    }
+    if (value.status === "failed" && !value.detail) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Failed announcement channels require detail",
+        path: ["detail"]
+      });
+    }
+  });
+export type AnnouncementChannel = z.infer<typeof AnnouncementChannelSchema>;
+
+export const AnnouncementSchema = contractBaseSchema(SCHEMA_IDS.announcement)
+  .extend({
+    campaignId: NonEmptyStringSchema,
+    appId: AppIdSchema.optional(),
+    releaseRef: ResourcePointerSchema.optional(),
+    channels: z.array(AnnouncementChannelSchema).min(1),
+    audienceRef: ResourcePointerSchema,
+    sentAt: TimestampSchema
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.releaseRef && value.releaseRef.kind !== "release") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Announcement releaseRef must use resource kind release",
+        path: ["releaseRef", "kind"]
+      });
+    }
+    if (value.audienceRef.kind !== "audience") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Announcement audienceRef must use resource kind audience",
+        path: ["audienceRef", "kind"]
+      });
+    }
+  });
+export type Announcement = z.infer<typeof AnnouncementSchema>;
+
+export const AudiencePredicateKindSchema = z.enum(["tag", "attribute", "group"]);
+export type AudiencePredicateKind = z.infer<typeof AudiencePredicateKindSchema>;
+
+export const AudiencePredicateOpSchema = z.enum(["eq", "neq", "in", "not_in", "exists", "not_exists"]);
+export type AudiencePredicateOp = z.infer<typeof AudiencePredicateOpSchema>;
+
+const AudiencePredicateValueSchema = z.union([z.string(), z.number(), z.boolean()]);
+
+export const AudiencePredicateSchema = z
+  .object({
+    kind: AudiencePredicateKindSchema,
+    /** Attribute key (required for attribute predicates), e.g. `machine`. */
+    key: z.string().min(1).optional(),
+    op: AudiencePredicateOpSchema.default("eq"),
+    value: AudiencePredicateValueSchema.optional(),
+    values: z.array(AudiencePredicateValueSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.kind === "attribute" && !value.key) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Attribute predicates require key",
+        path: ["key"]
+      });
+    }
+    if ((value.op === "eq" || value.op === "neq") && value.value === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "eq/neq predicates require value",
+        path: ["value"]
+      });
+    }
+    if ((value.op === "in" || value.op === "not_in") && value.values.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "in/not_in predicates require values",
+        path: ["values"]
+      });
+    }
+  });
+export type AudiencePredicate = z.infer<typeof AudiencePredicateSchema>;
+
+export const AudienceDefinitionSchema = z
+  .object({
+    match: z.enum(["all", "any"]).default("all"),
+    predicates: z.array(AudiencePredicateSchema).min(1)
+  })
+  .strict();
+export type AudienceDefinition = z.infer<typeof AudienceDefinitionSchema>;
+
+export const ConsentPolicySchema = z.enum(["opt_in", "opt_out", "transactional", "none"]);
+export type ConsentPolicy = z.infer<typeof ConsentPolicySchema>;
+
+export const AudienceSchema = contractBaseSchema(SCHEMA_IDS.audience)
+  .extend({
+    audienceId: AppIdSchema,
+    name: NonEmptyStringSchema,
+    definition: AudienceDefinitionSchema,
+    consentPolicy: ConsentPolicySchema,
+    suppressionSyncedAt: OptionalTimestampSchema
+  })
+  .strict();
+export type Audience = z.infer<typeof AudienceSchema>;
+
 export const FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud", "open-cloud"] as const;
 
 export const AppCloudProviderSchema = z.enum([
@@ -1128,10 +1680,14 @@ export const AppCloudResourceSchema = z
   .strict();
 export type AppCloudResource = z.infer<typeof AppCloudResourceSchema>;
 
+// `hasna.app_cloud_manifest.v1` is NOT an identity schema. Canonical app
+// identity lives in `hasna.app.v1`; this v1 field remains a compatible
+// non-empty reference string instead of adopting the stricter AppIdSchema.
 export const AppCloudManifestSchema = contractBaseSchema(SCHEMA_IDS.appCloudManifest)
   .extend({
     packageName: z.string().min(1),
     packageVersion: z.string().min(1).optional(),
+    /** App identity reference; prefer AppIdSchema-compatible slugs for new manifests. */
     appId: z.string().min(1),
     repository: ResourcePointerSchema.optional(),
     storageMode: z.enum(["local_only", "app_owned_cloud", "hybrid_local_cache", "external_service"]),
@@ -1515,6 +2071,96 @@ export const SERVICE_CONTRACT_VERSION = "v1";
 export const RepoClassSchema = z.enum(["library", "cli-with-store", "service", "saas"]);
 export type RepoClass = z.infer<typeof RepoClassSchema>;
 
+export const DEPLOYMENT_MODES = ["local", "self-hosted", "cloud"] as const;
+export const DeploymentModeSchema = z.enum(DEPLOYMENT_MODES);
+export type DeploymentMode = z.infer<typeof DeploymentModeSchema>;
+
+export const ServiceSurfaceStatusSchema = z.enum(["supported", "deferred", "unsupported"]);
+export type ServiceSurfaceStatus = z.infer<typeof ServiceSurfaceStatusSchema>;
+
+export const ServiceAuthModeSchema = z.enum(["none", "local-only", "api-key", "session", "service-token", "custom"]);
+export type ServiceAuthMode = z.infer<typeof ServiceAuthModeSchema>;
+
+export const ServiceEndpointSchema = z
+  .object({
+    method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+    path: z.string().regex(/^\/[A-Za-z0-9_./:*-]*$/, "Endpoint paths must be absolute HTTP paths"),
+    public: z.boolean().default(false),
+    description: z.string().min(1).optional()
+  })
+  .strict();
+export type ServiceEndpoint = z.infer<typeof ServiceEndpointSchema>;
+
+export const DeploymentReadinessGateSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: z.enum(["auth", "storage", "secret-ref", "migration", "health", "readiness", "redaction", "smoke", "operator", "other"]),
+    required: z.boolean().default(true),
+    command: z.string().min(1).optional(),
+    evidenceRef: EvidencePointerSchema.optional(),
+    status: z.enum(["pending", "passed", "failed", "blocked", "deferred"]).default("pending"),
+    summary: z.string().min(1).optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if ((value.status === "passed" || value.status === "failed" || value.status === "blocked") && !value.command && !value.evidenceRef && !value.summary) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Terminal readiness gates require command, evidenceRef, or summary",
+        path: ["status"]
+      });
+    }
+  });
+export type DeploymentReadinessGate = z.infer<typeof DeploymentReadinessGateSchema>;
+
+export const ServiceSurfaceSchema = z
+  .object({
+    name: z.string().min(1),
+    status: ServiceSurfaceStatusSchema,
+    bin: z.string().min(1).optional(),
+    mcpBin: z.string().min(1).optional(),
+    authMode: ServiceAuthModeSchema,
+    deploymentModes: z.array(DeploymentModeSchema).min(1),
+    health: ServiceEndpointSchema.optional(),
+    readiness: ServiceEndpointSchema.optional(),
+    version: ServiceEndpointSchema.optional(),
+    apiBasePath: z.string().regex(/^\/v[0-9]+$/, "Stable API base path must be /vN").optional(),
+    openApiPath: z.string().regex(/^\/[A-Za-z0-9_./:-]*$/).optional(),
+    deferReason: z.string().min(1).optional(),
+    readinessGates: z.array(DeploymentReadinessGateSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.status === "supported") {
+      if (!value.bin) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported service surfaces require a serve bin", path: ["bin"] });
+      }
+      if (!value.health) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported service surfaces require a health endpoint", path: ["health"] });
+      }
+      if (!value.version) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported service surfaces require a version endpoint", path: ["version"] });
+      }
+    }
+    if ((value.status === "deferred" || value.status === "unsupported") && !value.deferReason) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Deferred or unsupported service surfaces require a deferReason",
+        path: ["deferReason"]
+      });
+    }
+    if (value.health && value.health.path !== "/health") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Health endpoint must be /health", path: ["health", "path"] });
+    }
+    if (value.readiness && value.readiness.path !== "/ready") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Readiness endpoint must be /ready", path: ["readiness", "path"] });
+    }
+    if (value.version && value.version.path !== "/version") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Version endpoint must be /version", path: ["version", "path"] });
+    }
+  });
+export type ServiceSurface = z.infer<typeof ServiceSurfaceSchema>;
+
 /** Runtime storage enum. `local | cloud` ONLY (Amendment A1: PURE REMOTE). */
 export const STORAGE_MODES = ["local", "cloud"] as const;
 export const StorageModeSchema = z.enum(STORAGE_MODES);
@@ -1589,6 +2235,8 @@ export const ServiceContractManifestSchema = z
     description: z.string().min(1).optional(),
     bins: z.array(z.string().min(1)).default([]),
     storage: StorageContractSchema.optional(),
+    deploymentModes: z.array(DeploymentModeSchema).default(["local"]),
+    serviceSurfaces: z.array(ServiceSurfaceSchema).default([]),
     metadata: MetadataSchema.optional()
   })
   .strict()
@@ -1671,6 +2319,13 @@ export const ServiceContractManifestSchema = z
       if (!hasBin("-serve")) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `service repos must ship the "${value.name}-serve" bin`, path: ["bins"] });
       }
+      if (value.serviceSurfaces.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "service repos must declare at least one service surface",
+          path: ["serviceSurfaces"]
+        });
+      }
     }
 
     if (value.class === "saas") {
@@ -1681,6 +2336,35 @@ export const ServiceContractManifestSchema = z
       }
       if (!hasBin("-serve")) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `saas repos must ship the "${value.name}-serve" bin`, path: ["bins"] });
+      }
+      if (value.serviceSurfaces.length === 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "saas repos must declare at least one service surface", path: ["serviceSurfaces"] });
+      }
+    }
+
+    for (const [index, surface] of value.serviceSurfaces.entries()) {
+      if (surface.bin && !seenBins.has(surface.bin)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Service surface bin "${surface.bin}" must be declared in bins`,
+          path: ["serviceSurfaces", index, "bin"]
+        });
+      }
+      if (surface.mcpBin && !seenBins.has(surface.mcpBin)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Service surface MCP bin "${surface.mcpBin}" must be declared in bins`,
+          path: ["serviceSurfaces", index, "mcpBin"]
+        });
+      }
+      for (const [modeIndex, deploymentMode] of surface.deploymentModes.entries()) {
+        if (!value.deploymentModes.includes(deploymentMode)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Service surface deployment mode "${deploymentMode}" must be declared in deploymentModes`,
+            path: ["serviceSurfaces", index, "deploymentModes", modeIndex]
+          });
+        }
       }
     }
   });
@@ -1983,9 +2667,9 @@ export function commsSeverityTagToken(tag: CommsSeverityTag): string {
  * Leading whitespace is tolerated (tokenizers like `awk '{print $1}'` skip it).
  */
 export function extractCommsSeverityTag(text: string): CommsSeverityTag | null {
-  const firstToken = text.trimStart().split(/\s+/, 1)[0] ?? "";
+  const firstWord = text.trimStart().split(/\s+/, 1)[0] ?? "";
   for (const tag of COMMS_SEVERITY_TAGS) {
-    if (firstToken === `[${tag}]`) {
+    if (firstWord === `[${tag}]`) {
       return tag;
     }
   }
@@ -2048,6 +2732,7 @@ export const ContractSchemaRegistry = {
   [SCHEMA_IDS.decisionEnvelope]: DecisionEnvelopeSchema,
   [SCHEMA_IDS.costEstimate]: CostEstimateSchema,
   [SCHEMA_IDS.capabilityCard]: CapabilityCardSchema,
+  [SCHEMA_IDS.providerLiveModeStandard]: ProviderLiveModeStandardSchema,
   [SCHEMA_IDS.contextPack]: ContextPackSchema,
   [SCHEMA_IDS.integrationRef]: IntegrationRefSchema,
   [SCHEMA_IDS.projectManifest]: ProjectManifestSchema,
@@ -2064,7 +2749,12 @@ export const ContractSchemaRegistry = {
   [SCHEMA_IDS.serviceContract]: ServiceContractManifestSchema,
   [SCHEMA_IDS.commsEventEnvelope]: CommsEventEnvelopeSchema,
   [SCHEMA_IDS.commsChannelMetadata]: CommsChannelMetadataSchema,
-  [SCHEMA_IDS.commsMessageMetadata]: CommsMessageMetadataSchema
+  [SCHEMA_IDS.commsMessageMetadata]: CommsMessageMetadataSchema,
+  [SCHEMA_IDS.app]: AppSchema,
+  [SCHEMA_IDS.release]: ReleaseSchema,
+  [SCHEMA_IDS.rolloutRecord]: RolloutRecordSchema,
+  [SCHEMA_IDS.announcement]: AnnouncementSchema,
+  [SCHEMA_IDS.audience]: AudienceSchema
 } as const;
 
 export type KnownSchemaId = keyof typeof ContractSchemaRegistry;
@@ -2077,6 +2767,7 @@ export type ContractBySchemaId = {
   [SCHEMA_IDS.decisionEnvelope]: DecisionEnvelope;
   [SCHEMA_IDS.costEstimate]: CostEstimate;
   [SCHEMA_IDS.capabilityCard]: CapabilityCard;
+  [SCHEMA_IDS.providerLiveModeStandard]: ProviderLiveModeStandard;
   [SCHEMA_IDS.contextPack]: ContextPack;
   [SCHEMA_IDS.integrationRef]: IntegrationRef;
   [SCHEMA_IDS.projectManifest]: ProjectManifest;
@@ -2094,6 +2785,11 @@ export type ContractBySchemaId = {
   [SCHEMA_IDS.commsEventEnvelope]: CommsEventEnvelope;
   [SCHEMA_IDS.commsChannelMetadata]: CommsChannelMetadata;
   [SCHEMA_IDS.commsMessageMetadata]: CommsMessageMetadata;
+  [SCHEMA_IDS.app]: App;
+  [SCHEMA_IDS.release]: Release;
+  [SCHEMA_IDS.rolloutRecord]: RolloutRecord;
+  [SCHEMA_IDS.announcement]: Announcement;
+  [SCHEMA_IDS.audience]: Audience;
 };
 
 export type ActorRefInput = z.input<typeof ActorRefSchema>;
@@ -2103,6 +2799,7 @@ export type WorkRunInput = z.input<typeof WorkRunSchema>;
 export type DecisionEnvelopeInput = z.input<typeof DecisionEnvelopeSchema>;
 export type CostEstimateInput = z.input<typeof CostEstimateSchema>;
 export type CapabilityCardInput = z.input<typeof CapabilityCardSchema>;
+export type ProviderLiveModeStandardInput = z.input<typeof ProviderLiveModeStandardSchema>;
 export type ContextPackInput = z.input<typeof ContextPackSchema>;
 export type IntegrationRefInput = z.input<typeof IntegrationRefSchema>;
 export type ProjectManifestInput = z.input<typeof ProjectManifestSchema>;
@@ -2120,6 +2817,11 @@ export type ServiceContractManifestInput = z.input<typeof ServiceContractManifes
 export type CommsEventEnvelopeInput = z.input<typeof CommsEventEnvelopeSchema>;
 export type CommsChannelMetadataInput = z.input<typeof CommsChannelMetadataSchema>;
 export type CommsMessageMetadataInput = z.input<typeof CommsMessageMetadataSchema>;
+export type AppInput = z.input<typeof AppSchema>;
+export type ReleaseInput = z.input<typeof ReleaseSchema>;
+export type RolloutRecordInput = z.input<typeof RolloutRecordSchema>;
+export type AnnouncementInput = z.input<typeof AnnouncementSchema>;
+export type AudienceInput = z.input<typeof AudienceSchema>;
 export type ActorPointerInput = z.input<typeof ActorPointerSchema>;
 export type ResourcePointerInput = z.input<typeof ResourcePointerSchema>;
 export type EvidencePointerInput = z.input<typeof EvidencePointerSchema>;
@@ -2132,6 +2834,7 @@ export type ContractInputBySchemaId = {
   [SCHEMA_IDS.decisionEnvelope]: DecisionEnvelopeInput;
   [SCHEMA_IDS.costEstimate]: CostEstimateInput;
   [SCHEMA_IDS.capabilityCard]: CapabilityCardInput;
+  [SCHEMA_IDS.providerLiveModeStandard]: ProviderLiveModeStandardInput;
   [SCHEMA_IDS.contextPack]: ContextPackInput;
   [SCHEMA_IDS.integrationRef]: IntegrationRefInput;
   [SCHEMA_IDS.projectManifest]: ProjectManifestInput;
@@ -2149,4 +2852,9 @@ export type ContractInputBySchemaId = {
   [SCHEMA_IDS.commsEventEnvelope]: CommsEventEnvelopeInput;
   [SCHEMA_IDS.commsChannelMetadata]: CommsChannelMetadataInput;
   [SCHEMA_IDS.commsMessageMetadata]: CommsMessageMetadataInput;
+  [SCHEMA_IDS.app]: AppInput;
+  [SCHEMA_IDS.release]: ReleaseInput;
+  [SCHEMA_IDS.rolloutRecord]: RolloutRecordInput;
+  [SCHEMA_IDS.announcement]: AnnouncementInput;
+  [SCHEMA_IDS.audience]: AudienceInput;
 };

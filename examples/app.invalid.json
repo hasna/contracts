@@ -1,0 +1,15 @@
+{
+  "schema": "hasna.app.v1",
+  "id": "app_open_todos_duplicate_bins",
+  "createdAt": "2026-07-06T08:00:00.000Z",
+  "appId": "open-todos",
+  "npmName": "@hasna/todos",
+  "repoFolder": "open-todos",
+  "githubUrl": "https://github.com/hasna/todos",
+  "projectSlug": "open-todos",
+  "surfaces": {
+    "bins": ["todos", "todos"]
+  },
+  "lifecycle": "active",
+  "releaseChannel": "stable"
+}

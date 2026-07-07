@@ -5,12 +5,29 @@ import { ContractSchemaRegistry, SCHEMA_IDS, type KnownSchemaId, validateContrac
 
 const examplesDir = join(import.meta.dir, "..", "examples");
 const expectedInvalidIssuePaths: Record<string, string[]> = {
+  "announcement.invalid.json": ["audienceRef.kind"],
+  "app.invalid.json": ["surfaces.bins.1"],
   "app-cloud-manifest.invalid.json": ["cloudResources.0.ownerPackage", "dependencies", "forbiddenSharedRuntimes", "packageName"],
+  "audience.invalid.json": ["definition.predicates.0.key"],
   "comms-channel-metadata.invalid.json": ["owner", "until"],
   "comms-event-envelope.invalid.json": ["affected_packages", "action_required"],
   "comms-message-metadata.invalid.json": ["envelope.severity", "tag"],
   "integration-ref.invalid.json": ["uri"],
+  "release.invalid.json": ["evidenceRefs"],
+  "rollout-record.invalid.json": ["verifiedBy"],
   "no-cloud-evidence-pack.invalid.json": ["checks", "checks", "findings"],
+  "provider-live-mode-standard.invalid.json": [
+    "modes",
+    "operationCards.0.credentialRequirements",
+    "operationCards.0.operations.0.requiresApproval",
+    "operationCards.0.operations.0.requiresIdempotencyKey",
+    "operationCards.0.operations.0.requiresSandboxEvidence",
+    "operationCards.0.operations.0.rollbackOrRevocation",
+    "operationCards.0.operations.0.reconciliation",
+    "operationCards.0.operations.0.sideEffectClass",
+    "operationCards.0.auditEvents",
+    "firstAdoptionTargets"
+  ],
   "project-manifest.invalid.json": ["slug"],
   "project-panel.invalid.json": ["stateReason"],
   "project-snapshot.invalid.json": ["panels.0.projectId"],

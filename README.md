@@ -115,6 +115,15 @@ The generated files carry a `KIT_VERSION` header and are recorded in
 `src/generated/storage-kit/.storage-kit-manifest.json`. Do not hand-edit them;
 regenerate instead.
 
+## Service/API Baseline
+
+Built `open-*` and `iapp-*` packages that expose a server, MCP server,
+dashboard, worker, or externally documented API follow the shared
+[Service/API Baseline](docs/SERVICE_API_BASELINE.md). The baseline ties
+`hasna.contract.json` to serve binaries, lifecycle endpoints, `/v1` policy,
+OpenAPI/schema export, cross-surface parity, package smoke checks, auth-negative
+tests, worker/provider readiness, and readiness evidence bundles.
+
 ## API-Key Auth (`@hasna/contracts/auth`)
 
 Stateless, verifiable API keys for the `<app>-serve` HTTP services. A key is an
@@ -131,7 +140,7 @@ import { expressApiKey, ApiKeyStore } from "@hasna/contracts/auth";
 import { createCloudPoolFromEnv } from "./generated/storage-kit"; // vendored kit
 
 const APP = "todos";
-const signingSecret = process.env.HASNA_TODOS_API_SIGNING_KEY!; // shared: HASNA_API_SIGNING_KEY
+const signingCredential = process.env.HASNA_TODOS_API_SIGNING_KEY!; // shared: HASNA_API_SIGNING_KEY
 const { client } = createCloudPoolFromEnv(APP);                 // RDS pool (Amendment A1)
 const keys = new ApiKeyStore(client);
 await keys.ensureSchema();                                      // idempotent: api_keys table
@@ -139,7 +148,7 @@ await keys.ensureSchema();                                      // idempotent: a
 app.use(
   expressApiKey({
     app: APP,
-    signingSecret,
+  signingSecret: signingCredential,
     isRevoked: keys.isRevoked,          // per-request revocation check against RDS
     requiredScopes: ["todos:read"],     // optional per-mount scope gate
     audit: (e) => log.info("api_auth", e), // per-request AUDIT hook (allow + deny)
@@ -179,6 +188,13 @@ contracts issue-key --app todos --scopes 'todos:read' --no-store --json
 Signing secret is read from `HASNA_<APP>_API_SIGNING_KEY` (then `HASNA_API_SIGNING_KEY`);
 the record store uses `HASNA_<APP>_DATABASE_URL`. Generate a signing secret with
 `openssl rand -hex 32`. Revoke with `store.revoke(kid)`.
+
+Services that expose API, MCP, CLI-token, dashboard, worker, sync/export, or
+provider webhook surfaces must also follow the shared
+[Auth And RBAC Verifier Contract](docs/AUTH_RBAC_VERIFIER_CONTRACT.md). That
+contract defines the common auth context, token types, scope and role matrix,
+tenant/workspace/entity boundaries, provider webhook rules, audit events, and
+negative-test matrix.
 
 ## SDK from OpenAPI (`@hasna/contracts/sdk`)
 
@@ -247,6 +263,10 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
   account, basis, and resource references.
 - `hasna.capability_card.v1`: machine-readable description of a package command,
   MCP tool, API operation, workflow, or agent skill.
+- `hasna.provider_live_mode_standard.v1`: provider/live-mode standard with
+  canonical modes, capability cards, fail-closed credentials, no-side-effect
+  smokes, approval/idempotency/rollback/reconciliation gates, and first adopter
+  targets.
 - `hasna.context_pack.v1`: bounded context bundle with objective, resources,
   evidence, constraints, and token budget.
 - `hasna.integration_ref.v1`: portable pointer to a project integration provider
@@ -277,7 +297,10 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
   resource refs, evidence, and proof refs.
 - `hasna.app_cloud_manifest.v1`: app-owned cloud boundary declaration for a
   package that uses its own cloud resources, local cache, and conflict policy
-  without depending on shared `@hasna/cloud` or `open-cloud` runtimes.
+  without depending on shared `@hasna/cloud` or `open-cloud` runtimes. This is
+  NOT an identity schema: canonical app identity lives in `hasna.app.v1`, and
+  this v1 manifest keeps `appId` as a non-empty reference string for
+  compatibility; new manifests should use the stable `hasna.app.v1` slug.
 - `hasna.no_cloud_evidence_pack.v1`: prepublish/CI evidence pack for package
   manifest, lockfile, source/runtime config, packed artifact, published
   metadata, and app-cloud-manifest scans.
@@ -308,6 +331,26 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
   human-facing rules live in knowledge items `hasna-agent-comms-protocol` /
   `hasna-agent-comms-envelope`; these schemas are the machine-validatable
   source of truth.
+- `hasna.app.v1`: canonical app identity for the distribution apps plan —
+  stable `appId` slug, `npmName`, `repoFolder`, `githubUrl`, `projectSlug`,
+  surfaces (`bins`, optional `mcp`/`http`), lifecycle
+  (`active|stub|deprecated|archived`), and release channel. All other
+  distribution documents reference apps by `appId` only.
+- `hasna.release.v1`: publish receipt for one app package version — `appId`,
+  `package`, semver `version`, `gitSha`, `publishedAt`, publish path
+  (`skill|ci|backfilled`), optional deferred `changelogRef`, and publish
+  evidence (required unless backfilled).
+- `hasna.rollout_record.v1`: per-machine rollout receipt — `appId`, `package`,
+  `version`, `machine`, action (`install|update|rollback|freeze-blocked`),
+  contract-status `result`, `verifiedBy` with at least one verifier field for
+  successful install/update records (`cliVersion` or checked `mcpHealth`), and
+  `at`.
+- `hasna.announcement.v1`: release/campaign announcement receipt — `campaignId`,
+  optional `appId` and `releaseRef`, per-channel delivery statuses, an
+  `audienceRef` (resource kind `audience`), and `sentAt`.
+- `hasna.audience.v1`: named audience definition — `audienceId`, tag/attribute/
+  group predicates with `all|any` matching, consent policy
+  (`opt_in|opt_out|transactional|none`), and `suppressionSyncedAt`.
 
 Every top-level contract includes a literal `schema` field. Consumers should
 reject objects whose embedded schema does not match the validator being used.
@@ -560,6 +603,13 @@ machine-local paths.
 The conformance command intentionally treats unknown schemas, malformed JSON,
 and empty fixture sets as harness failures. Invalid fixtures must fail because
 the schema rejected them, not because the fixture cannot be parsed.
+
+## Infra Service Entrypoints
+
+Service-capable infra repos should declare supported, deferred, or unsupported
+HTTP/MCP service surfaces in `hasna.contract.json` instead of adding `*-serve`
+bins mechanically. The current Worker 2 baseline matrix is in
+[`docs/infra-service-entrypoint-matrix.md`](docs/infra-service-entrypoint-matrix.md).
 
 ## Verification
 

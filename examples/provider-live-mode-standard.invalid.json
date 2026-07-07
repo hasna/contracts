@@ -1,0 +1,56 @@
+{
+  "schema": "hasna.provider_live_mode_standard.v1",
+  "id": "provider_live_mode_standard_invalid",
+  "createdAt": "2026-07-06T13:12:43.989Z",
+  "name": "Unsafe provider live-mode standard",
+  "version": "invalid",
+  "modes": ["fixture", "live_mutating"],
+  "requiredCapabilityFields": ["providerId"],
+  "liveMutationGate": {
+    "requiredMode": "live_mutating",
+    "requiredChecks": ["env flag is present"],
+    "forbiddenBypassSignals": ["missing approval id"],
+    "disabledLiveSmoke": "Not enough."
+  },
+  "noSideEffectSmoke": {
+    "requiredForModes": ["fixture"],
+    "commandEvidence": ["fixture command"]
+  },
+  "credentialPolicy": {
+    "acceptedInputs": ["credential_ref"],
+    "rawSecretInputsAllowed": false,
+    "missingCredentialBehavior": "fail_closed"
+  },
+  "operationCards": [
+    {
+      "providerId": "twilio",
+      "appId": "open-telephony",
+      "adapterId": "telephony-twilio",
+      "ownerPackage": "@hasna/telephony",
+      "modes": ["fixture", "live_mutating"],
+      "defaultMode": "fixture",
+      "credentialRequirements": [],
+      "operations": [
+        {
+          "operation": "send_sms",
+          "supportedModes": ["live_mutating"],
+          "sideEffectClass": "read_only",
+          "requiresApproval": false,
+          "requiresIdempotencyKey": false,
+          "requiresSandboxEvidence": false,
+          "requiresRollbackOrRevocation": false
+        }
+      ],
+      "rateLimitPosture": "none"
+    }
+  ],
+  "firstAdoptionTargets": [
+    {
+      "appId": "open-mailery",
+      "repo": "/home/hasna/workspace/hasna/opensource/open-mailery",
+      "priority": "p0",
+      "requiredEvidence": ["no-send smoke"],
+      "firstOperations": ["send_email"]
+    }
+  ]
+}

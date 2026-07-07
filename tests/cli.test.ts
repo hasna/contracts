@@ -380,6 +380,33 @@ describe("contracts CLI", () => {
     expect(JSON.stringify(payload)).not.toContain(import.meta.dir);
   });
 
+  test("allows only exact generated contracts declaration bundles to skip runtime edge scanning", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    const declarationText =
+      "const markerA = 'FORBIDDEN_SHARED_CLOUD_RUNTIMES';\n" +
+      "const markerB = 'hasna.no_cloud_evidence_pack.v1';\n" +
+      "const runtime = '@hasna/cloud';\n";
+    try {
+      mkdirSync(join(dir, "dist"));
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/contracts", version: "0.4.1" }));
+      writeFileSync(join(dir, "dist", "mode.js"), declarationText);
+      writeFileSync(join(dir, "dist", "service-contract.js"), declarationText);
+      writeFileSync(join(dir, "dist", "conformance.js"), declarationText);
+
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(0);
+      expect(parseStdoutJson(result).verdict).toBe("passed");
+
+      writeFileSync(join(dir, "dist", "other.js"), declarationText);
+      const invalidResult = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(invalidResult.exitCode).toBe(1);
+      const payload = parseStdoutJson(invalidResult);
+      expect(payload.findings.some((finding: { path: string; pattern: string }) => finding.path === "dist/other.js" && finding.pattern === "@hasna/cloud")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("does not allow downstream files to bypass scanning with declaration markers", () => {
     const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
     try {

@@ -6,6 +6,38 @@
   "kitVersion": "0.3.0",
   "description": "Universal task management for AI coding agents.",
   "bins": ["todos", "todos-mcp", "todos-serve"],
+  "deploymentModes": ["local", "self-hosted"],
+  "serviceSurfaces": [
+    {
+      "name": "http",
+      "status": "supported",
+      "bin": "todos-serve",
+      "mcpBin": "todos-mcp",
+      "authMode": "api-key",
+      "deploymentModes": ["local", "self-hosted"],
+      "health": { "method": "GET", "path": "/health", "public": true },
+      "readiness": { "method": "GET", "path": "/ready", "public": false },
+      "version": { "method": "GET", "path": "/version", "public": true },
+      "apiBasePath": "/v1",
+      "readinessGates": [
+        {
+          "id": "auth-negative-smoke",
+          "kind": "auth",
+          "required": true,
+          "command": "todos serve --port 0 && curl /v1/tasks",
+          "status": "pending",
+          "summary": "Unauthenticated non-health routes must fail closed before self-hosted readiness."
+        },
+        {
+          "id": "redacted-output-scan",
+          "kind": "redaction",
+          "required": true,
+          "status": "pending",
+          "summary": "Health, readiness, logs, and CLI JSON must not expose credential values."
+        }
+      ]
+    }
+  ],
   "storage": {
     "mode": "cloud",
     "envPrefix": "HASNA_TODOS_",

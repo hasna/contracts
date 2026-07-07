@@ -1,0 +1,235 @@
+{
+  "schema": "hasna.provider_live_mode_standard.v1",
+  "id": "provider_live_mode_standard_2026_07",
+  "createdAt": "2026-07-06T13:12:43.989Z",
+  "name": "Hasna provider/live-mode safety standard",
+  "version": "2026-07-06",
+  "modes": ["mock", "fixture", "sandbox", "read_only_live", "live_mutating"],
+  "requiredCapabilityFields": [
+    "providerId",
+    "appId",
+    "adapterId",
+    "ownerPackage",
+    "modes",
+    "defaultMode",
+    "credentialRequirements",
+    "operations",
+    "rateLimitPosture",
+    "auditEvents",
+    "redactionRules"
+  ],
+  "liveMutationGate": {
+    "requiredMode": "live_mutating",
+    "requiredChecks": [
+      "capability card allows the operation",
+      "required credential refs or leases resolve",
+      "operator approval record is approved and unexpired",
+      "idempotency key is present",
+      "sandbox evidence predates live execution",
+      "rollback or revocation path is recorded",
+      "reconciliation target is recorded"
+    ],
+    "forbiddenBypassSignals": [
+      "env flag alone",
+      "raw provider secret",
+      "missing approval id",
+      "missing idempotency key",
+      "implicit fallback from live to fixture"
+    ],
+    "disabledLiveSmoke": "Run a live-disabled smoke proving provider mutation remains blocked even when provider-looking env vars are present."
+  },
+  "noSideEffectSmoke": {
+    "requiredForModes": ["mock", "fixture", "sandbox", "read_only_live"],
+    "commandEvidence": [
+      "CLI JSON output includes providerMode",
+      "MCP/API metadata includes providerMode",
+      "provider fixture proves no outbound send/call/domain/DNS/write happened"
+    ],
+    "secretOutputScan": true
+  },
+  "credentialPolicy": {
+    "acceptedInputs": ["credential_ref", "lease_ref"],
+    "rawSecretInputsAllowed": false,
+    "missingCredentialBehavior": "fail_closed",
+    "revocationCheckRequired": true
+  },
+  "operationCards": [
+    {
+      "providerId": "ses",
+      "appId": "open-mailery",
+      "adapterId": "mailery-ses-outbound",
+      "ownerPackage": "@hasna/mailery",
+      "modes": ["fixture", "sandbox", "read_only_live", "live_mutating"],
+      "defaultMode": "fixture",
+      "credentialRequirements": [
+        {
+          "refName": "mailery.ses.send",
+          "requiredForModes": ["sandbox", "read_only_live", "live_mutating"],
+          "allowedSecretInputs": ["credential_ref", "lease_ref"],
+          "failClosedDiagnostic": "SES credential ref is required for provider health, sandbox, or live send.",
+          "revocationCheck": true
+        }
+      ],
+      "operations": [
+        {
+          "operation": "send_email",
+          "supportedModes": ["fixture", "sandbox", "live_mutating"],
+          "sideEffectClass": "external_notification",
+          "requiresApproval": true,
+          "requiresIdempotencyKey": true,
+          "requiresSandboxEvidence": true,
+          "requiresRollbackOrRevocation": true,
+          "rollbackOrRevocation": "Disable provider credential lease and reconcile bounce/complaint or suppress recipient after send.",
+          "noSideEffectSmoke": "Fixture and sandbox send smokes must prove no production recipient delivery.",
+          "reconciliation": "Delivery event, bounce, complaint, and suppression records reconcile to message id."
+        },
+        {
+          "operation": "domain_readiness_check",
+          "supportedModes": ["fixture", "sandbox", "read_only_live"],
+          "sideEffectClass": "read_only",
+          "requiresApproval": false,
+          "requiresIdempotencyKey": false,
+          "requiresSandboxEvidence": false,
+          "requiresRollbackOrRevocation": false,
+          "noSideEffectSmoke": "DNS/domain readiness command must not change MX, DKIM, SPF, DMARC, route, or purchase state."
+        }
+      ],
+      "rateLimitPosture": "Provider send limits and domain verification limits must be reported before enabling live mutation.",
+      "costPosture": "Live sends can incur provider delivery and storage costs.",
+      "auditEvents": ["provider.preflight", "provider.approval", "provider.execution", "provider.reconciliation"],
+      "redactionRules": ["recipient addresses are redacted in diagnostics", "credential refs are displayed without secret values"]
+    },
+    {
+      "providerId": "twilio",
+      "appId": "open-telephony",
+      "adapterId": "telephony-twilio",
+      "ownerPackage": "@hasna/telephony",
+      "modes": ["fixture", "sandbox", "read_only_live", "live_mutating"],
+      "defaultMode": "fixture",
+      "credentialRequirements": [
+        {
+          "refName": "telephony.twilio.account",
+          "requiredForModes": ["sandbox", "read_only_live", "live_mutating"],
+          "allowedSecretInputs": ["credential_ref", "lease_ref"],
+          "failClosedDiagnostic": "Twilio credential ref is required for webhook validation, sandbox, or live calls/messages.",
+          "revocationCheck": true
+        }
+      ],
+      "operations": [
+        {
+          "operation": "send_sms_or_call",
+          "supportedModes": ["fixture", "sandbox", "live_mutating"],
+          "sideEffectClass": "bulk_message_or_call",
+          "requiresApproval": true,
+          "requiresIdempotencyKey": true,
+          "requiresSandboxEvidence": true,
+          "requiresRollbackOrRevocation": true,
+          "rollbackOrRevocation": "Emergency disable provider lease, block destination, stop queues, and reconcile provider status callbacks.",
+          "noSideEffectSmoke": "Fixture and sandbox smokes must prove no production SMS, WhatsApp, or voice call.",
+          "reconciliation": "Outbound job status reconciles with Twilio message/call/status callback identifiers."
+        },
+        {
+          "operation": "verify_inbound_webhook",
+          "supportedModes": ["fixture", "sandbox", "read_only_live"],
+          "sideEffectClass": "read_only",
+          "requiresApproval": false,
+          "requiresIdempotencyKey": false,
+          "requiresSandboxEvidence": false,
+          "requiresRollbackOrRevocation": false,
+          "noSideEffectSmoke": "Webhook fixture verifies signature, timestamp freshness, replay nonce, and expected URL without placing calls."
+        }
+      ],
+      "rateLimitPosture": "Per-agent quotas, destination allow or deny rules, spend caps, and emergency disable are required.",
+      "costPosture": "Live messages, calls, number provisioning, and media can incur provider costs.",
+      "auditEvents": ["provider.preflight", "provider.approval", "provider.execution", "provider.reconciliation"],
+      "redactionRules": ["phone numbers are masked", "provider SIDs and webhook auth data are redacted"]
+    },
+    {
+      "providerId": "feedback-webhook",
+      "appId": "open-feedback",
+      "adapterId": "feedback-forwarder",
+      "ownerPackage": "@hasna/feedback",
+      "modes": ["mock", "fixture", "sandbox", "live_mutating"],
+      "defaultMode": "fixture",
+      "credentialRequirements": [
+        {
+          "refName": "feedback.webhook.signing",
+          "requiredForModes": ["sandbox", "live_mutating"],
+          "allowedSecretInputs": ["credential_ref", "lease_ref"],
+          "failClosedDiagnostic": "Webhook signing credential ref is required for sandbox or live forwarding.",
+          "revocationCheck": true
+        }
+      ],
+      "operations": [
+        {
+          "operation": "forward_feedback",
+          "supportedModes": ["mock", "fixture", "sandbox", "live_mutating"],
+          "sideEffectClass": "external_notification",
+          "requiresApproval": true,
+          "requiresIdempotencyKey": true,
+          "requiresSandboxEvidence": true,
+          "requiresRollbackOrRevocation": true,
+          "rollbackOrRevocation": "Disable forwarding endpoint, dead-letter unconfirmed jobs, and revoke webhook signing lease.",
+          "noSideEffectSmoke": "Fixture forwarding writes only local delivery evidence and never calls external destinations.",
+          "reconciliation": "Forwarding job status reconciles to delivery receipt, retry, or dead-letter record."
+        }
+      ],
+      "rateLimitPosture": "Submission rate limits, app quotas, retry leases, and dead-letter caps are required.",
+      "auditEvents": ["provider.preflight", "provider.approval", "provider.execution", "provider.reconciliation"],
+      "redactionRules": ["PII fields are classified before export", "webhook signing secrets are never emitted"]
+    }
+  ],
+  "firstAdoptionTargets": [
+    {
+      "appId": "open-mailery",
+      "repo": "/home/hasna/workspace/hasna/opensource/open-mailery",
+      "priority": "p0",
+      "requiredEvidence": [
+        "canonical root and compatibility matrix",
+        "mode-specific health/readiness commands",
+        "no-send and no-domain-change smoke",
+        "signed webhook and replay fixtures"
+      ],
+      "firstOperations": ["send_email", "domain_readiness_check"],
+      "blockedUntil": ["canonical open-mailery/open-emails root decision is recorded"]
+    },
+    {
+      "appId": "open-telephony",
+      "repo": "/home/hasna/workspace/hasna/opensource/open-telephony",
+      "priority": "p0",
+      "requiredEvidence": [
+        "REST auth negative tests",
+        "Twilio signature and replay fixtures",
+        "quota and spend-cap fixtures",
+        "opt-in sandbox smoke"
+      ],
+      "firstOperations": ["send_sms_or_call", "verify_inbound_webhook"]
+    },
+    {
+      "appId": "open-feedback",
+      "repo": "/home/hasna/workspace/hasna/opensource/open-feedback",
+      "priority": "p0",
+      "requiredEvidence": [
+        "public submit versus private read/export auth matrix",
+        "rate-limit and spam fixtures",
+        "durable store and dedupe fixtures",
+        "signed webhook delivery fixture"
+      ],
+      "firstOperations": ["forward_feedback"]
+    }
+  ],
+  "evidenceRefs": [
+    {
+      "id": "reviewer_11_provider_deploy",
+      "kind": "report",
+      "uri": "repo://reports/task-proposals/adversarial-12/reviewer-11-provider-deploy.md",
+      "summary": "Provider/deployment reviewer requirements for capability cards, live modes, approval, and reconciliation."
+    },
+    {
+      "id": "reviewer_01_open_finance_comms",
+      "kind": "report",
+      "uri": "repo://reports/task-proposals/adversarial-12/reviewer-01-open-finance-comms.md",
+      "summary": "OSS finance/comms task proposals for mailery, telephony, and feedback first adopters."
+    }
+  ]
+}

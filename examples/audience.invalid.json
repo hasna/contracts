@@ -1,0 +1,19 @@
+{
+  "schema": "hasna.audience.v1",
+  "id": "audience_missing_attribute_key",
+  "createdAt": "2026-07-06T07:00:00.000Z",
+  "audienceId": "oss-operators",
+  "name": "OSS fleet operators",
+  "definition": {
+    "match": "all",
+    "predicates": [
+      {
+        "kind": "attribute",
+        "op": "eq",
+        "value": "spark01"
+      }
+    ]
+  },
+  "consentPolicy": "opt_in",
+  "suppressionSyncedAt": null
+}
