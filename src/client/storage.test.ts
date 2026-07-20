@@ -37,7 +37,7 @@ describe("HasnaStorageClient CRUD mapping", () => {
 
   function client(handler: Parameters<typeof makeFetch>[0]) {
     const { fetchImpl, calls } = makeFetch(handler);
-    const transport = createHasnaHttpTransport({ name: "knowledge", baseUrl: "https://knowledge.hasna.xyz/v1", apiKey: sampleApiKey, fetchImpl, retry: false });
+    const transport = createHasnaHttpTransport({ name: "knowledge", baseUrl: "https://knowledge.your-deployment.example/v1", apiKey: sampleApiKey, fetchImpl, retry: false });
     return { store: createHasnaStorageClient("knowledge", transport), calls };
   }
 
@@ -47,7 +47,7 @@ describe("HasnaStorageClient CRUD mapping", () => {
     expect(res.items.map((i: any) => i.id)).toEqual(["1", "2"]);
     expect(res.total).toBe(42);
     expect(calls[0]!.method).toBe("GET");
-    expect(calls[0]!.url).toBe("https://knowledge.hasna.xyz/v1/notes?limit=2");
+    expect(calls[0]!.url).toBe("https://knowledge.your-deployment.example/v1/notes?limit=2");
     // key never in URL
     expect(calls[0]!.url).not.toContain("secret");
   });
@@ -81,7 +81,7 @@ describe("HasnaStorageClient CRUD mapping", () => {
     await store.update("notes", "id1", { tags: ["x"] });
     await store.update("notes", "id2", { tags: ["y"] }, { method: "PUT" });
     expect(calls[0]!.method).toBe("PATCH");
-    expect(calls[0]!.url).toBe("https://knowledge.hasna.xyz/v1/notes/id1");
+    expect(calls[0]!.url).toBe("https://knowledge.your-deployment.example/v1/notes/id1");
     expect(calls[1]!.method).toBe("PUT");
   });
 
@@ -107,7 +107,7 @@ describe("HasnaStorageClient CRUD mapping", () => {
   test("id path segments are URL-encoded", async () => {
     const { store, calls } = client(() => ({ status: 200, body: {} }));
     await store.get("notes", "a/b c");
-    expect(calls[0]!.url).toBe("https://knowledge.hasna.xyz/v1/notes/a%2Fb%20c");
+    expect(calls[0]!.url).toBe("https://knowledge.your-deployment.example/v1/notes/a%2Fb%20c");
   });
 });
 

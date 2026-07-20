@@ -22,7 +22,7 @@ describe("resolveClientTransport — the client-flip contract", () => {
   test("explicit local mode never routes to cloud even with url+key", () => {
     const r = resolveClientTransport("todos", {
       HASNA_TODOS_STORAGE_MODE: "local",
-      HASNA_TODOS_API_URL: "https://todos.hasna.xyz",
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
       HASNA_TODOS_API_KEY: "hasna_todos_x",
     });
     expect(r.transport).toBe("local");
@@ -31,11 +31,11 @@ describe("resolveClientTransport — the client-flip contract", () => {
   test("cloud + url + key => cloud-http with /v1 base", () => {
     const r = resolveClientTransport("todos", {
       HASNA_TODOS_STORAGE_MODE: "cloud",
-      HASNA_TODOS_API_URL: "https://todos.hasna.xyz",
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
       HASNA_TODOS_API_KEY: "hasna_todos_abc",
     });
     expect(r.transport).toBe("cloud-http");
-    expect(r.baseUrl).toBe("https://todos.hasna.xyz/v1");
+    expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
     expect(r.apiKeyPresent).toBe(true);
     // secret value is never surfaced
     expect(JSON.stringify(r)).not.toContain("hasna_todos_abc");
@@ -43,19 +43,19 @@ describe("resolveClientTransport — the client-flip contract", () => {
 
   test("FLIP: url+key with NO mode env => inferred cloud-http (fleet-flip contract)", () => {
     const r = resolveClientTransport("todos", {
-      HASNA_TODOS_API_URL: "https://todos.hasna.xyz",
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
       HASNA_TODOS_API_KEY: "hasna_todos_flip",
     });
     expect(r.transport).toBe("cloud-http");
     expect(r.mode).toBe("cloud");
-    expect(r.baseUrl).toBe("https://todos.hasna.xyz/v1");
+    expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
     expect(r.modeSource).toBe("HASNA_TODOS_API_URL+HASNA_TODOS_API_KEY");
     expect(JSON.stringify(r)).not.toContain("hasna_todos_flip");
   });
 
   test("FLIP revert: url present but key removed => back to local (not misconfigured)", () => {
     const r = resolveClientTransport("todos", {
-      HASNA_TODOS_API_URL: "https://todos.hasna.xyz",
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
     });
     expect(r.transport).toBe("local");
     expect(r.mode).toBe("local");
@@ -69,14 +69,14 @@ describe("resolveClientTransport — the client-flip contract", () => {
     });
     expect(r.transport).toBe("cloud-http");
     expect(r.deprecatedAlias).toBe("self_hosted");
-    expect(r.baseUrl).toBe("https://knowledge.hasna.xyz/v1");
+    expect(r.baseUrl).toBe("https://knowledge.your-deployment.example/v1");
     expect(r.apiUrlSource).toBe("default");
   });
 
   test("STORAGE_MODE=cloud (bare alias) is honored", () => {
     const r = resolveClientTransport("todos", {
       TODOS_STORAGE_MODE: "cloud",
-      TODOS_API_URL: "https://todos.hasna.xyz",
+      TODOS_API_URL: "https://todos.your-deployment.example",
       TODOS_API_KEY: "hasna_todos_z",
     });
     expect(r.transport).toBe("cloud-http");
@@ -99,13 +99,13 @@ describe("resolveClientTransport — the client-flip contract", () => {
     expect(keys.modeKeys[0]).toBe("HASNA_AGENT_REGISTRY_STORAGE_MODE");
     expect(keys.apiUrlKeys[0]).toBe("HASNA_AGENT_REGISTRY_API_URL");
     expect(keys.apiKeyKeys[0]).toBe("HASNA_AGENT_REGISTRY_API_KEY");
-    expect(defaultCloudBaseUrl("agent-registry")).toBe("https://agent-registry.hasna.xyz");
+    expect(defaultCloudBaseUrl("agent-registry")).toBe("https://agent-registry.your-deployment.example");
   });
 
   test("toV1BaseUrl is idempotent and strips trailing slash / existing /v1", () => {
-    expect(toV1BaseUrl("https://todos.hasna.xyz")).toBe("https://todos.hasna.xyz/v1");
-    expect(toV1BaseUrl("https://todos.hasna.xyz/")).toBe("https://todos.hasna.xyz/v1");
-    expect(toV1BaseUrl("https://todos.hasna.xyz/v1")).toBe("https://todos.hasna.xyz/v1");
+    expect(toV1BaseUrl("https://todos.your-deployment.example")).toBe("https://todos.your-deployment.example/v1");
+    expect(toV1BaseUrl("https://todos.your-deployment.example/")).toBe("https://todos.your-deployment.example/v1");
+    expect(toV1BaseUrl("https://todos.your-deployment.example/v1")).toBe("https://todos.your-deployment.example/v1");
   });
 });
 

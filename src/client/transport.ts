@@ -7,7 +7,7 @@
 //
 // This module makes the client actually talk to the cloud. Given an app name and
 // the environment it decides whether reads AND writes should be routed to the
-// app's cloud HTTP API (`<API_URL>/v1`, default `https://<app>.hasna.xyz/v1`)
+// app's cloud HTTP API (`<API_URL>/v1`, default `https://<app>.<HASNA_FLEET_API_DOMAIN>/v1`)
 // with the API key, or fall through to the local store.
 //
 // THE CLIENT-FLIP CONTRACT (env vars). For app `<NAME>` = envToken(name):
@@ -18,7 +18,7 @@
 //     <NAME>_STORAGE_MODE                                             (alias)
 //     <NAME>_MODE                                                     (alias)
 //   API base URL (optional; `/v1` is appended automatically):
-//     HASNA_<NAME>_API_URL = https://<app>.hasna.xyz
+//     HASNA_<NAME>_API_URL = https://<app>.your-deployment.example
 //     <NAME>_API_URL                                                  (alias)
 //   API key (bearer / x-api-key):
 //     HASNA_<NAME>_API_KEY -> value from the app-owned vault
@@ -28,11 +28,13 @@
 // key is present. The mode is `cloud` when either (a) an explicit mode env resolves
 // to cloud, OR (b) no mode env is set but BOTH the API URL and API key are present —
 // the fleet env-flip writes exactly those two vars (no STORAGE_MODE), so their joint
-// presence is inferred as self_hosted intent. The base URL defaults to
-// `https://<app>.hasna.xyz` when a key is present but no URL is set. If mode is
-// `cloud` but the API key is MISSING, we do NOT silently serve wrong local data — we
-// return `local` with a loud `warning` and `misconfigured: true` so the caller can
-// hard-fail instead of drifting.
+// presence is inferred as self_hosted intent. When a key is present but no explicit
+// URL is set, the base URL falls back to `https://<app>.<domain>` where `<domain>`
+// comes from `HASNA_FLEET_API_DOMAIN` (REQUIRED for a real deployment) or else a
+// neutral, non-resolving placeholder — this published package never bakes in a real
+// internal hostname. If mode is `cloud` but the API key is MISSING, we do NOT
+// silently serve wrong local data — we return `local` with a loud `warning` and
+// `misconfigured: true` so the caller can hard-fail instead of drifting.
 //
 // SAFETY: this module never returns, logs, or embeds the API key value. Callers
 // receive only presence flags and env-key names.
@@ -40,9 +42,20 @@
 import { normalizeStorageMode, envToken, type Env } from "../mode.js";
 import type { StorageMode } from "../schemas.js";
 
+/**
+ * Fleet API domain suffix. This published package never ships a real internal
+ * hostname: override with `HASNA_FLEET_API_DOMAIN` (REQUIRED in a real
+ * deployment) or set an explicit `HASNA_<NAME>_API_URL` per app. Absent both,
+ * this falls back to a neutral placeholder that intentionally does not
+ * resolve to any service.
+ */
+export function fleetApiDomain(env: Env = process.env as Env): string {
+  return env["HASNA_FLEET_API_DOMAIN"]?.trim() || "your-deployment.example";
+}
+
 /** Default cloud host template. `<app>` is the app slug. */
-export function defaultCloudBaseUrl(name: string): string {
-  return `https://${name}.hasna.xyz`;
+export function defaultCloudBaseUrl(name: string, env: Env = process.env as Env): string {
+  return `https://${name}.${fleetApiDomain(env)}`;
 }
 
 export interface ClientTransportEnvKeys {
@@ -192,7 +205,7 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     };
   }
 
-  const rawUrl = urlHit?.value ?? defaultCloudBaseUrl(name);
+  const rawUrl = urlHit?.value ?? defaultCloudBaseUrl(name, env);
   const apiUrlSource = urlHit ? urlHit.key : "default";
   let baseUrl: string;
   try {
