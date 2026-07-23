@@ -1,0 +1,622 @@
+{
+  "schema": "hasna.task_to_pr_projection.v1",
+  "id": "task_to_pr_projection:opaque-example",
+  "createdAt": "2026-07-23T15:10:00.000Z",
+  "canonicalizationVersion": 1,
+  "identityDigest": "efa1cc954b50628d575d7b353262264ad29926c12b8094580ab058bfb081fb4d",
+  "frozenScopeDigest": "2222222222222222222222222222222222222222222222222222222222222222",
+  "state": "merged",
+  "workRunRef": {
+    "role": "work_run",
+    "authority": "codewith",
+    "id": "work_run:opaque-example",
+    "digest": "0101010101010101010101010101010101010101010101010101010101010101",
+    "redaction": "none"
+  },
+  "rootRequestRef": {
+    "role": "root_request",
+    "authority": "todos",
+    "id": "root_request:opaque-example",
+    "digest": "4444444444444444444444444444444444444444444444444444444444444444",
+    "redaction": "none"
+  },
+  "prGroupRef": {
+    "role": "pr_group",
+    "authority": "todos",
+    "id": "pr_group:opaque-example",
+    "digest": "5555555555555555555555555555555555555555555555555555555555555555",
+    "redaction": "none"
+  },
+  "leafTaskRef": {
+    "role": "leaf_task",
+    "authority": "todos",
+    "id": "leaf_task:opaque-example",
+    "digest": "6666666666666666666666666666666666666666666666666666666666666666",
+    "redaction": "none"
+  },
+  "attempt": {
+    "ref": {
+      "role": "attempt",
+      "authority": "todos",
+      "id": "attempt:opaque-example",
+      "digest": "0202020202020202020202020202020202020202020202020202020202020202",
+      "redaction": "none"
+    },
+    "nonce": "attempt_nonce:opaque-example-0001",
+    "admissionRef": {
+      "role": "admission",
+      "authority": "codewith",
+      "id": "admission:opaque-example",
+      "digest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "redaction": "partial"
+    },
+    "workerRef": {
+      "role": "worker",
+      "authority": "codewith",
+      "id": "worker:opaque-example",
+      "digest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "redaction": "partial"
+    },
+    "runtimeRef": {
+      "role": "runtime",
+      "authority": "codewith",
+      "id": "runtime:opaque-example",
+      "digest": "0303030303030303030303030303030303030303030303030303030303030303",
+      "redaction": "partial"
+    },
+    "writerGenerationRef": {
+      "role": "writer_generation",
+      "authority": "todos",
+      "id": "writer_generation:opaque-example",
+      "digest": "8888888888888888888888888888888888888888888888888888888888888888",
+      "redaction": "none"
+    },
+    "writerLeaseRef": {
+      "role": "writer_lease",
+      "authority": "repos",
+      "id": "writer_lease:opaque-example",
+      "digest": "9999999999999999999999999999999999999999999999999999999999999999",
+      "redaction": "partial"
+    },
+    "writerFenceRef": {
+      "role": "writer_fence",
+      "authority": "repos",
+      "id": "writer_fence:opaque-example",
+      "digest": "0404040404040404040404040404040404040404040404040404040404040404",
+      "redaction": "full"
+    },
+    "providerProfileRef": {
+      "role": "provider_profile",
+      "authority": "codewith",
+      "id": "provider_profile:opaque-example",
+      "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "redaction": "full"
+    },
+    "providerRouteRef": {
+      "role": "provider_route",
+      "authority": "codewith",
+      "id": "provider_route:opaque-example",
+      "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "redaction": "partial"
+    }
+  },
+  "repository": {
+    "repoRef": {
+      "role": "repo",
+      "authority": "repos",
+      "id": "repo:opaque-example",
+      "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "redaction": "none"
+    },
+    "worktreeRef": {
+      "role": "worktree",
+      "authority": "repos",
+      "id": "worktree:opaque-example",
+      "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "redaction": "partial"
+    },
+    "branchRef": {
+      "role": "branch",
+      "authority": "repos",
+      "id": "branch:opaque-example",
+      "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "redaction": "none"
+    },
+    "baseHead": {
+      "algorithm": "sha1",
+      "value": "1111111111111111111111111111111111111111"
+    },
+    "branchHead": {
+      "algorithm": "sha1",
+      "value": "2222222222222222222222222222222222222222"
+    }
+  },
+  "events": {
+    "streamRef": {
+      "role": "event_stream",
+      "authority": "todos",
+      "id": "event_stream:opaque-example",
+      "digest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "redaction": "none"
+    },
+    "replayCursorRef": {
+      "role": "replay_cursor",
+      "authority": "todos",
+      "id": "replay_cursor:opaque-example",
+      "digest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "redaction": "none"
+    },
+    "sequence": 7,
+    "prefixDigest": "3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "pullRequestRef": {
+    "role": "pull_request",
+    "authority": "todos",
+    "id": "pull_request:opaque-example",
+    "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "redaction": "none"
+  },
+  "exactHead": {
+    "pullRequestRef": {
+      "role": "pull_request",
+      "authority": "todos",
+      "id": "pull_request:opaque-example",
+      "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "redaction": "none"
+    },
+    "remoteBranchRef": {
+      "role": "branch",
+      "authority": "repos",
+      "id": "branch:opaque-example",
+      "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "redaction": "none"
+    },
+    "localHead": {
+      "algorithm": "sha1",
+      "value": "2222222222222222222222222222222222222222"
+    },
+    "remoteHead": {
+      "algorithm": "sha1",
+      "value": "2222222222222222222222222222222222222222"
+    },
+    "providerPullRequestHead": {
+      "algorithm": "sha1",
+      "value": "2222222222222222222222222222222222222222"
+    },
+    "equalityProofRef": {
+      "role": "proof_bundle",
+      "authority": "review",
+      "id": "proof_bundle:opaque-head-equality",
+      "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "redaction": "none"
+    },
+    "ciProofBundleRefs": [
+      {
+        "role": "proof_bundle",
+        "authority": "review",
+        "id": "proof_bundle:opaque-ci",
+        "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "redaction": "none"
+      }
+    ],
+    "verifiedAt": "2026-07-23T15:10:00.000Z"
+  },
+  "reviews": [
+    {
+      "ref": {
+        "role": "review",
+        "authority": "review",
+        "id": "review:opaque-example",
+        "digest": "6666666666666666666666666666666666666666666666666666666666666666",
+        "redaction": "none"
+      },
+      "pullRequestRef": {
+        "role": "pull_request",
+        "authority": "todos",
+        "id": "pull_request:opaque-example",
+        "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "redaction": "none"
+      },
+      "head": {
+        "algorithm": "sha1",
+        "value": "2222222222222222222222222222222222222222"
+      },
+      "reviewerRef": {
+        "role": "reviewer",
+        "authority": "review",
+        "id": "reviewer:opaque-example",
+        "digest": "4444444444444444444444444444444444444444444444444444444444444444",
+        "redaction": "none"
+      },
+      "reviewRunRef": {
+        "role": "review_run",
+        "authority": "review",
+        "id": "review_run:opaque-example",
+        "digest": "5555555555555555555555555555555555555555555555555555555555555555",
+        "redaction": "none"
+      },
+      "proofBundleRef": {
+        "role": "proof_bundle",
+        "authority": "review",
+        "id": "proof_bundle:opaque-review",
+        "digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "redaction": "none"
+      },
+      "verdict": "approved",
+      "reviewedAt": "2026-07-23T15:10:00.000Z"
+    }
+  ],
+  "repair": {
+    "ref": {
+      "role": "repair_cycle",
+      "authority": "todos",
+      "id": "repair_cycle:opaque-zero",
+      "digest": "4444444444444444444444444444444444444444444444444444444444444444",
+      "redaction": "none"
+    },
+    "cycle": 0,
+    "cap": 2,
+    "exhausted": false
+  },
+  "merge": {
+    "guard": {
+      "ref": {
+        "role": "merge_guard",
+        "authority": "todos",
+        "id": "merge_guard:opaque-example",
+        "digest": "7777777777777777777777777777777777777777777777777777777777777777",
+        "redaction": "none"
+      },
+      "pullRequestRef": {
+        "role": "pull_request",
+        "authority": "todos",
+        "id": "pull_request:opaque-example",
+        "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "redaction": "none"
+      },
+      "expectedHead": {
+        "algorithm": "sha1",
+        "value": "2222222222222222222222222222222222222222"
+      },
+      "reviewRefs": [
+        {
+          "role": "review",
+          "authority": "review",
+          "id": "review:opaque-example",
+          "digest": "6666666666666666666666666666666666666666666666666666666666666666",
+          "redaction": "none"
+        }
+      ],
+      "proofBundleRefs": [
+        {
+          "role": "proof_bundle",
+          "authority": "review",
+          "id": "proof_bundle:opaque-review",
+          "digest": "1111111111111111111111111111111111111111111111111111111111111111",
+          "redaction": "none"
+        },
+        {
+          "role": "proof_bundle",
+          "authority": "review",
+          "id": "proof_bundle:opaque-head-equality",
+          "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "redaction": "none"
+        },
+        {
+          "role": "proof_bundle",
+          "authority": "review",
+          "id": "proof_bundle:opaque-ci",
+          "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+          "redaction": "none"
+        }
+      ],
+      "operatorRef": {
+        "role": "merge_operator",
+        "authority": "merge_provider",
+        "id": "merge_operator:opaque-example",
+        "digest": "8888888888888888888888888888888888888888888888888888888888888888",
+        "redaction": "partial"
+      },
+      "operatorRunRef": {
+        "role": "merge_operator_run",
+        "authority": "merge_provider",
+        "id": "merge_operator_run:opaque-example",
+        "digest": "9999999999999999999999999999999999999999999999999999999999999999",
+        "redaction": "partial"
+      },
+      "providerGuardReceiptRef": {
+        "role": "merge_guard_receipt",
+        "authority": "merge_provider",
+        "id": "merge_guard_receipt:opaque-example",
+        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "redaction": "full"
+      },
+      "mechanism": "compare_and_swap",
+      "decision": "eligible",
+      "evaluatedAt": "2026-07-23T15:10:00.000Z"
+    },
+    "outcome": {
+      "ref": {
+        "role": "merge_outcome",
+        "authority": "merge_provider",
+        "id": "merge_outcome:opaque-example",
+        "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "redaction": "partial"
+      },
+      "guardRef": {
+        "role": "merge_guard",
+        "authority": "todos",
+        "id": "merge_guard:opaque-example",
+        "digest": "7777777777777777777777777777777777777777777777777777777777777777",
+        "redaction": "none"
+      },
+      "pullRequestRef": {
+        "role": "pull_request",
+        "authority": "todos",
+        "id": "pull_request:opaque-example",
+        "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "redaction": "none"
+      },
+      "expectedHead": {
+        "algorithm": "sha1",
+        "value": "2222222222222222222222222222222222222222"
+      },
+      "observedHead": {
+        "algorithm": "sha1",
+        "value": "2222222222222222222222222222222222222222"
+      },
+      "status": "merged",
+      "mergeCommitRef": {
+        "role": "commit",
+        "authority": "repos",
+        "id": "commit:opaque-example",
+        "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "redaction": "none"
+      },
+      "finishedAt": "2026-07-23T15:10:00.000Z",
+      "evidenceRefs": [
+        {
+          "id": "evidence:opaque-merge-cas",
+          "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "redaction": "full"
+        }
+      ]
+    }
+  },
+  "provenanceLedger": [
+    {
+      "category": "projection_id",
+      "projectionId": "task_to_pr_projection:opaque-example"
+    },
+    {
+      "category": "work_run",
+      "ref": {
+        "role": "work_run",
+        "authority": "codewith",
+        "id": "work_run:opaque-example",
+        "digest": "0101010101010101010101010101010101010101010101010101010101010101",
+        "redaction": "none"
+      }
+    },
+    {
+      "category": "attempt",
+      "ref": {
+        "role": "attempt",
+        "authority": "todos",
+        "id": "attempt:opaque-example",
+        "digest": "0202020202020202020202020202020202020202020202020202020202020202",
+        "redaction": "none"
+      }
+    },
+    {
+      "category": "attempt_nonce",
+      "nonce": "attempt_nonce:opaque-example-0001"
+    },
+    {
+      "category": "runtime",
+      "ref": {
+        "role": "runtime",
+        "authority": "codewith",
+        "id": "runtime:opaque-example",
+        "digest": "0303030303030303030303030303030303030303030303030303030303030303",
+        "redaction": "partial"
+      }
+    },
+    {
+      "category": "writer_generation",
+      "ref": {
+        "role": "writer_generation",
+        "authority": "todos",
+        "id": "writer_generation:opaque-example",
+        "digest": "8888888888888888888888888888888888888888888888888888888888888888",
+        "redaction": "none"
+      }
+    },
+    {
+      "category": "writer_lease",
+      "ref": {
+        "role": "writer_lease",
+        "authority": "repos",
+        "id": "writer_lease:opaque-example",
+        "digest": "9999999999999999999999999999999999999999999999999999999999999999",
+        "redaction": "partial"
+      }
+    },
+    {
+      "category": "writer_fence",
+      "ref": {
+        "role": "writer_fence",
+        "authority": "repos",
+        "id": "writer_fence:opaque-example",
+        "digest": "0404040404040404040404040404040404040404040404040404040404040404",
+        "redaction": "full"
+      }
+    },
+    {
+      "category": "provider_profile",
+      "ref": {
+        "role": "provider_profile",
+        "authority": "codewith",
+        "id": "provider_profile:opaque-example",
+        "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "redaction": "full"
+      }
+    },
+    {
+      "category": "provider_route",
+      "ref": {
+        "role": "provider_route",
+        "authority": "codewith",
+        "id": "provider_route:opaque-example",
+        "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "redaction": "partial"
+      }
+    },
+    {
+      "category": "replay_cursor",
+      "ref": {
+        "role": "replay_cursor",
+        "authority": "todos",
+        "id": "replay_cursor:opaque-example",
+        "digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "redaction": "none"
+      }
+    },
+    {
+      "category": "replay_prefix",
+      "sequence": 7,
+      "prefixDigest": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    {
+      "category": "repair_state",
+      "ref": {
+        "role": "repair_cycle",
+        "authority": "todos",
+        "id": "repair_cycle:opaque-zero",
+        "digest": "4444444444444444444444444444444444444444444444444444444444444444",
+        "redaction": "none"
+      }
+    },
+    {
+      "category": "equality_proof",
+      "ref": {
+        "role": "proof_bundle",
+        "authority": "review",
+        "id": "proof_bundle:opaque-head-equality",
+        "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "redaction": "none"
+      },
+      "head": {
+        "algorithm": "sha1",
+        "value": "2222222222222222222222222222222222222222"
+      }
+    },
+    {
+      "category": "ci_proof",
+      "ref": {
+        "role": "proof_bundle",
+        "authority": "review",
+        "id": "proof_bundle:opaque-ci",
+        "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "redaction": "none"
+      },
+      "head": {
+        "algorithm": "sha1",
+        "value": "2222222222222222222222222222222222222222"
+      }
+    },
+    {
+      "category": "review_proof",
+      "ref": {
+        "role": "proof_bundle",
+        "authority": "review",
+        "id": "proof_bundle:opaque-review",
+        "digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "redaction": "none"
+      },
+      "head": {
+        "algorithm": "sha1",
+        "value": "2222222222222222222222222222222222222222"
+      }
+    },
+    {
+      "category": "review_record",
+      "ref": {
+        "role": "review",
+        "authority": "review",
+        "id": "review:opaque-example",
+        "digest": "6666666666666666666666666666666666666666666666666666666666666666",
+        "redaction": "none"
+      },
+      "head": {
+        "algorithm": "sha1",
+        "value": "2222222222222222222222222222222222222222"
+      }
+    },
+    {
+      "category": "review_run",
+      "ref": {
+        "role": "review_run",
+        "authority": "review",
+        "id": "review_run:opaque-example",
+        "digest": "5555555555555555555555555555555555555555555555555555555555555555",
+        "redaction": "none"
+      },
+      "head": {
+        "algorithm": "sha1",
+        "value": "2222222222222222222222222222222222222222"
+      }
+    },
+    {
+      "category": "merge_guard",
+      "ref": {
+        "role": "merge_guard",
+        "authority": "todos",
+        "id": "merge_guard:opaque-example",
+        "digest": "7777777777777777777777777777777777777777777777777777777777777777",
+        "redaction": "none"
+      }
+    },
+    {
+      "category": "provider_guard_receipt",
+      "ref": {
+        "role": "merge_guard_receipt",
+        "authority": "merge_provider",
+        "id": "merge_guard_receipt:opaque-example",
+        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "redaction": "full"
+      },
+      "head": {
+        "algorithm": "sha1",
+        "value": "2222222222222222222222222222222222222222"
+      }
+    }
+  ],
+  "adapterExtensions": [
+    {
+      "mode": "local",
+      "schema": "hasna.task_to_pr_adapter_extension.v1",
+      "ref": {
+        "role": "adapter_extension",
+        "authority": "adapter",
+        "id": "adapter_extension:opaque-local-example",
+        "digest": "5555555555555555555555555555555555555555555555555555555555555555",
+        "redaction": "partial"
+      },
+      "digest": "6666666666666666666666666666666666666666666666666666666666666666"
+    },
+    {
+      "mode": "cloud",
+      "schema": "hasna.task_to_pr_adapter_extension.v1",
+      "ref": {
+        "role": "adapter_extension",
+        "authority": "adapter",
+        "id": "adapter_extension:opaque-cloud-example",
+        "digest": "7777777777777777777777777777777777777777777777777777777777777777",
+        "redaction": "full"
+      },
+      "digest": "8888888888888888888888888888888888888888888888888888888888888888"
+    }
+  ],
+  "evidenceRefs": []
+}

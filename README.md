@@ -257,6 +257,13 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
   traces, or other evidence.
 - `hasna.work_run.v1`: normalized run receipt for agent, command, workflow, loop,
   eval, test, deploy, or review work.
+- `hasna.task_to_pr_projection.v1`: immutable, provider-neutral identity
+  projection for one task-to-PR attempt. It binds the Todos root/PR-group/leaf
+  and replay cursor, the Codewith run/profile route, the Repos
+  repo/worktree/branch/writer lease, exact-head review and merge-CAS refs,
+  repair/recovery/cancellation preservation, cleanup, rollback, and optional
+  OpenLoops invocation context without becoming a receipt, queue, store, or
+  canonical history.
 - `hasna.decision_envelope.v1`: decision record with selected/skipped
   resources, rationale, actor, costs, obligations, redactions, and evidence.
 - `hasna.cost_estimate.v1`: money and token estimates with provider, model,
@@ -382,13 +389,169 @@ Common resource-kind mappings:
 | `open-economy` | `cost`, `budget`; budget choices are emitted as `DecisionEnvelope` contracts, not resource kinds |
 | `open-monitor` | `alert`, `incident`, `machine`, `report` |
 
+## Task-to-PR projection
+
+`TaskToPrProjection` is a strict reference projection, not a `WorkReceipt`,
+`PRReceipt`, queue, database, event store, or replacement for any owning
+package. `WorkRun` remains the execution receipt. `EvidenceRef` and
+`ProofBundle` remain evidence and verification records; `DecisionEnvelope`
+remains a decision record; `CapabilityCard` remains an admission snapshot;
+`ResourcePointer` remains a generic resource link; and `AgentTrajectory`
+remains a bounded trace. The projection only binds their owner-resolved refs.
+
+Authority is fixed:
+
+- Todos owns the canonical root request, PR group, leaf task, attempt,
+  repair state, and append-only lifecycle history.
+- Codewith owns durable run admission, opaque profile/route selection, and
+  runtime state.
+- Repos owns repository, worktree, branch, writer lease/fence refs, and cleanup.
+- Infinity may execute an admitted attempt but is only an adapter; it does not
+  become an authority or history store.
+- TAI may render the projection read-only; it does not write lifecycle state.
+- OpenLoops may contribute one optional invocation ref as orchestration
+  context. It owns no Codewith goal, Todos task or history, Repos lease,
+  review, merge guard, or merge outcome.
+
+Every `TaskToPrRef` has one role, one authority, one typed opaque owner id
+(`role:opaque-*`), one lowercase SHA-256 identity digest, and an explicit redaction state. Canonical
+objects are dereferenced from their owning packages instead of embedded as
+mutable payloads. Sensitive owner ids are role-prefixed opaque refs and reject
+account-like, fence-like, URL-like, credential-like, and secret-marker values.
+The projection id (`task_to_pr_projection:opaque-*`) and attempt nonce
+(`attempt_nonce:opaque-*`) use the same fail-closed rule; untyped ids and values
+that hide an account, fence, or GitHub PAT marker behind a delimiter are
+rejected.
+`TaskToPrEvidenceRef` is deliberately smaller than `EvidencePointer`: it only
+carries a typed opaque `evidence:opaque-*` id, immutable digest, and
+`partial`/`full` redaction, so a
+projection cannot inline a URI, summary, command output, or secret-adjacent
+payload.
+
+| Projection field | Cardinality | Authority and invariant |
+| --- | --- | --- |
+| `workRunRef` | exactly 1 | Codewith; points to the existing `WorkRun` receipt |
+| `rootRequestRef` / `prGroupRef` / `leafTaskRef` | exactly 1 each | Todos; immutable canonical identities |
+| `attempt.ref` / `attempt.nonce` | exactly 1 each | Todos attempt identity; every retry uses a fresh nonce |
+| admission / worker / runtime refs | exactly 1 each | redacted Codewith owner-record refs for the admitted runtime |
+| writer generation / lease / fence refs | exactly 1 each | generation is Todos-bound; lease/fence are redacted Repos refs, never a fence value |
+| provider profile / route refs | exactly 1 each | redacted opaque Codewith refs; never provider account or credential data |
+| repo / worktree / branch plus base and branch heads | exactly 1 binding | canonical Repos refs with exact Git object ids |
+| event stream / replay cursor / sequence / prefix digest | exactly 1 cursor | Todos append-only history is referenced, never copied |
+| `handoff` | 0 or 1 current transition | Todos ref binding prior/next attempts, prior/next generations, and the prior WorkRun plus stop/revocation evidence; the full record is immutable under one canonical ref, while a later handoff requires both a fresh canonical role/authority/id and a fresh digest; mutually exclusive with recovery |
+| `pullRequestRef` | 0 or 1 | Todos PR-group identity; required by review or merge state |
+| exact-head proof | required before review/merge | local head = remote head = provider PR head, with equality and CI proof refs; once established, the complete exact-head fact (including the equality ref and ordered CI refs) is immutable while the branch head is unchanged; every branch-head change requires fresh canonical identities and digests for all equality and CI proof refs |
+| `reviews` | 0 or more unique exact-head reviews | review ref, reviewer/run, proof bundle, PR, and immutable head; review-record refs are unique by canonical id and digest; same-head history preserves the prior array as an exact immutable prefix and can only append, while a new branch head requires fresh review, review-run, and proof-bundle identities and digests (the reviewer actor may remain stable) |
+| `repair` | exactly 1 state | cumulative Todos cycle `0..2`; never decrements or resets; state/latest refs are disjoint by id and digest, and an advance makes both slots fresh from both prior slots |
+| merge guard / outcome | 0 or 1 each | guard binds reviewed head and proof; a guard is immutable under one canonical ref and any changed guard uses a fresh canonical id and digest; a changed expected head also requires a fresh provider-guard receipt id and digest; terminal outcome requires the exact immutable `guardRef` and is CAS-bound |
+| recovery / cancellation | recovery is mutually exclusive with handoff and cancellation; 0 or 1 each | preserves required root/group/leaf/repo/worktree/branch/event and present PR refs; recovery binds canonically distinct prior attempt/generation/WorkRun refs, is immutable under one canonical recovery ref, and rotates each successor/current or later recovery ref to both a fresh canonical role/authority/id and fresh digest |
+| cleanup eligibility / outcome | 0 or 1 each | Repos-owned; eligibility is immutable under one canonical ref and a changed decision uses a fresh canonical id and digest; both bind the canonical worktree and the outcome binds the eligibility decision |
+| rollback plan / outcome | 0 or 1 each | plan targets a commit or branch, remains immutable under one canonical ref, and uses a fresh canonical id and digest when the plan or target changes; immutable outcome binds the exact plan and target |
+| `provenanceLedger` | exactly 1 append-only identity ledger | immutable exact-prefix tombstones for projection snapshot id, WorkRun, attempt, nonce, runtime, writer generation/lease/fence, provider profile/route, replay cursor/prefix, repair state/latest repair, handoff, recovery, merge guard, cleanup eligibility, rollback plan, equality/CI/review proof, review record/run, and provider guard receipt identities; active identities must be represented exactly, all ref ids/digests share one global uniqueness domain, and projection-id/nonce/prefix values are independently globally unique |
+| OpenLoops invocation | 0 or 1 | optional redacted context only |
+| adapter extensions | 0 or more unique mode/schema pairs | `local` or `cloud` ref plus digest only; separately namespaced, unregistered schema ids cannot equal any canonical `SCHEMA_IDS` contract or redefine canonical fields |
+
+The top-level document deliberately has `createdAt` but no `updatedAt`.
+Producers treat a parsed projection as immutable. A changed lifecycle state is
+emitted as a new projection while the Todos stream/cursor remains the only
+canonical history. `provenanceLedger` is not another event store: it is an
+identity-only index over Todos history containing typed immutable projection
+ids, owner refs/digests, attempt nonces, replay prefix digests bound to their
+sequence, and the Git object id for head-bound refs. Ref equality is exact
+across role, authority, id,
+digest, and redaction. Its exact-prefix tombstones make pairwise validation
+remember all transition-fresh identities across absent phases, preventing
+owner, attempt-lineage, replay, repair, and proof ABA without copying owner
+payloads or lifecycle events. `validateTaskToPrProjectionTransition` parses both snapshots
+before comparing them. It rejects changed canonical identity, replay regression,
+sequence advances without a fresh cursor and prefix digest, repair advances
+without fresh repair refs, partial attempt/generation/WorkRun rotation, recovery
+or handoff that does not bind the immediately prior attempt/generation/WorkRun,
+handoff and recovery in the same current snapshot, reused canonical IDs or
+digests for advancing replay/repair/attempt/generation/WorkRun refs, reused
+attempt-scoped runtime/lease/fence/profile/route refs, mutation, removal, or
+handoff/recovery switching while an attempt identity is unchanged, illegal lifecycle
+edges, any semantic lifecycle drift without replay-sequence advancement,
+provenance-ledger truncation/reordering/mutation (including redaction drift),
+inactive identity reactivation, historical projection-id, attempt-nonce, or
+replay-prefix reuse,
+or appending a tombstone that does not represent a current active fact,
+same-ref mutation or half-rotation of handoff, recovery, merge-guard,
+cleanup-eligibility, or rollback-plan owner records (a changed owner fact must
+rotate both its canonical role/authority/id and digest),
+replacement or removal of an established canonical PR ref, mutation or
+removal of an established same-head exact-head fact, movement, mutation, or
+removal within the immutable same-head review prefix, reuse of any prior equality, CI, or review
+proof identity or digest after a branch-head change (including reordered or
+recategorized proof refs), reuse of prior review or review-run identities or
+digests across heads, active-state re-entry from terminal work states, and mutation or
+disappearance of complete terminal merge, cancellation, cleanup, or rollback
+facts after their owner outcome exists.
+`admitted`, `running`, and `handed_off` snapshots cannot carry direct review
+bindings or hidden merge-guard review refs, including on a denied guard. A
+`reviewing` to `recovering` transition may retain the exact same-head
+`exactHead` and review prefix, but recovery cannot invent them from a pre-review
+snapshot or carry merge-guard review refs. Same-head reviews can only be appended after the exact prior array
+prefix; reordering or prepending invalidates the transition. This v1 schema has no review
+supersession field, so producers must advance the reviewed head before emitting
+a replacement review set. An eligible merge guard is authoritative only from
+`merge_ready` or in a consistent post-review terminal/failed/blocked/cancelled
+history; `reviewing` and `repairing` cannot claim merge eligibility.
+Consumers must reject unknown fields rather than retain unvalidated embedded
+payloads.
+
+`canonicalizationVersion: 1` derives `identityDigest` from the ordered,
+domain-separated tuple of root-request id/digest, PR-group id/digest,
+leaf-task id/digest, repository id/digest, exact base Git object id, and
+frozen-scope digest. The PR-group owner digest is an input, never the derived
+output, so the binding has no circular dependency. Digests on refs mean
+the SHA-256 of the owning package's canonical, redacted record identity bytes;
+they must never hash a credential, raw fence value, mutable payload, or
+provider account record.
+
+Exact-head binding is transitive: `remoteBranchRef` equals the canonical
+repository branch ref; the local, remote, and provider pull-request heads are
+equal and backed by equality plus CI proof refs; equality, every CI proof, and
+every review proof obligation are globally unique by canonical ref id and
+digest, so one proof cannot discharge two obligations; every `reviews[]`
+head equals that canonical branch head; an eligible merge guard references
+the exact canonical set of projected approved review refs with no extras or
+omissions, every review proof, every CI proof, the equality proof, an opaque
+provider guard receipt, and its CAS/expected-head queue mechanism; and a merged
+outcome observes the same expected head. Only the non-merged `head_drift`
+outcome may carry a mismatched observed head. Worker, reviewer, and
+merge-operator identities and run refs are distinct by canonical digest, not
+by incompatible role-prefixed ids. Exact-head verification, reviews, guard
+evaluation, and merge outcome are chronologically ordered. Cleanup and rollback
+are independent post-terminal branches: each is internally chronological and
+cannot precede the terminal merge outcome it references, but one does not imply
+an order relative to the other unless a runtime intentionally imposes one.
+
+Sensitive refs (`writer_lease`, `writer_fence`, `provider_profile`,
+`provider_route`, `worktree`, merge-provider refs, and adapter extensions)
+require `partial` or `full` redaction. Strict objects reject fields such as
+provider account ids, credentials, raw fence tokens, or embedded adapter
+payloads. Local and cloud adapters serialize the same shared projection and
+place provider-specific detail behind separately validated, redacted extension
+refs. An extension schema is unregistered and separately namespaced: it cannot
+equal any canonical id in `SCHEMA_IDS` (including `hasna.work_run.v1`), use any
+`hasna.task_to_pr_projection.*` schema,
+encode account/fence/credential markers in its schema id, or shadow a canonical
+role. `validateTaskToPrAdapterCoreEquivalence` parses both documents, requires
+one or more local-only extensions in its first argument and one or more
+cloud-only extensions in its second, removes only those validated
+`adapterExtensions`, and requires byte-equivalent local and cloud core
+projection data, including the complete cumulative provenance ledger.
+
 ## Package Boundaries
 
 `@hasna/contracts` owns schemas, types, validators, examples, and conformance
 helpers. Owning packages still own storage and behavior.
 
 - `open-todos` owns tasks, task plans, locks, comments, and task evidence.
-- `open-loops` owns loop and workflow execution.
+- `open-loops` owns its own loop and workflow execution. In task-to-PR flows,
+  its invocation is optional reference-only orchestration context and confers
+  no authority over Codewith, Todos, Repos, review, or merge state.
 - `open-events` owns event envelopes, channels, delivery, replay, and
   notification semantics.
 - `open-actions` owns executable action manifests.
@@ -435,11 +598,12 @@ native domain objects immediately.
   `ProofBundle`; task execution receipts as `WorkRun`; review gates as
   `ValidationPlan`; and workflow/run manifest pointers as compact task fields,
   not embedded handoff artifacts.
-- `open-loops`: emit loop/workflow runs as `WorkRun`, audit traces as
+- `open-loops`: emit its own loop/workflow runs as `WorkRun`, audit traces as
   `AgentTrajectory`, logs/artifacts as `EvidenceRef`, and verifier output as
-  `ProofBundle`. OpenLoops owns `WorkflowInvocation`, admission/work-item
-  queues, leases, workflow runs, retries, cancellation, worktrees, and run
-  artifacts.
+  `ProofBundle`. A task-to-PR adapter may add one redacted
+  `openLoopsInvocationRef`, but must not own or mirror the task-to-PR queue,
+  Todos history, Codewith admission/runtime state, Repos leases/worktrees,
+  review, or merge state.
 - `open-events`: emit and replay validated event envelopes to channels.
   OpenEvents delivers notifications only; it does not create workflow
   invocations, own queue state, or retry agent work.
@@ -467,8 +631,8 @@ native domain objects immediately.
   template copying, setup wizards, source paths, and private metadata inside the
   scaffold package.
 - `open-automations`: keep deterministic app/product automation recipes and
-  connector/action recipes. Any agentic task, PR, review, or evaluation flow
-  must hand off to OpenLoops rather than creating a second workflow queue.
+  connector/action recipes. Agentic task, PR, and review flows hand off to the
+  canonical Todos/Codewith/Repos owners rather than creating a second queue.
 - `open-reports`: consume `ProofBundle`, `WorkRun`, `ContextPack`,
   `CostEstimate`, and `EvidenceRef` to render compact Markdown/JSON/HTML proof
   reports.
@@ -479,10 +643,12 @@ native domain objects immediately.
 
 ## WorkflowInvocation And App Storage Boundary
 
-The canonical agent-work root is a `WorkflowInvocation`, not a todo task.
-Only actionable unfinished work needs a todo. OpenTodos remains the
-human-visible intent ledger; OpenLoops owns the durable workflow root,
-admission queue, execution lifecycle, and canonical run artifacts.
+For task-to-PR work, the canonical root is the Todos root request and PR-group
+history referenced by `TaskToPrProjection`; it is not a `WorkflowInvocation`.
+Codewith owns durable admission/profile/runtime state and Repos owns
+repo/worktree/writer-lease/cleanup state. A `WorkflowInvocation` can still be
+useful inside OpenLoops' own workflow domain, but a task-to-PR projection may
+only carry it as optional orchestration context.
 
 A workflow invocation should carry these fields at the boundary:
 
@@ -499,11 +665,10 @@ A workflow invocation should carry these fields at the boundary:
   concurrency group
 - `outputPolicy`: when to write reports and when to create a follow-up task
 
-OpenLoops admission/work items are first-class records with route key,
-idempotency key, source/subject refs, project key/group, priority, status,
-attempts, next-attempt time, lease expiry, loop/workflow/run ids, and last
-reason. Status values should be explicit: `queued`, `deferred`, `admitted`,
-`running`, `succeeded`, `failed`, `dead_letter`, or `cancelled`.
+OpenLoops admission/work items remain first-class records only for OpenLoops'
+own workflow execution. They must not be interpreted as task-to-PR attempts,
+writer leases, repair counters, review records, merge guards, or canonical
+lifecycle history.
 
 Run artifacts live under:
 
@@ -553,7 +718,8 @@ safe auto-route default.
 `WorkflowInvocation` is documented here as the architecture boundary used by
 OpenLoops and neighboring packages. It is not yet a wire schema in the current
 catalog; add a `hasna.workflow_invocation.v1` schema only when at least two
-packages need to validate the object directly at a shared boundary.
+packages need to validate the object directly at a shared boundary. That
+future schema would remain separate from `hasna.task_to_pr_projection.v1`.
 
 ## Enforcement Model
 
@@ -592,6 +758,13 @@ Recommended rollout for a new major schema:
 During dual-version windows, consumers should inspect the embedded `schema` via
 `validateEmbeddedContract`, route accepted ids to version-specific adapters, and
 reject unknown schema ids before writing data or launching work.
+
+`hasna.task_to_pr_projection.v1` is a new strict schema id; it does not widen
+`hasna.work_run.v1` or any other existing v1 validator. The package source line
+advances to `0.6.0` because registry/consumer evidence already showed `0.5.2`
+while the repository still reported `0.5.1`. No package publish is performed
+by this source change. Existing v1 inputs continue to parse unchanged, and
+producers opt into the new projection explicitly by its embedded schema id.
 
 ## Examples
 

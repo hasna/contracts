@@ -1,13 +1,15 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 export const CONTRACTS_PACKAGE_NAME = "@hasna/contracts";
-export const CONTRACTS_PACKAGE_VERSION = "0.5.3";
+export const CONTRACTS_PACKAGE_VERSION = "0.6.0";
 
 export const SCHEMA_IDS = {
   actorRef: "hasna.actor_ref.v1",
   resourceRef: "hasna.resource_ref.v1",
   evidenceRef: "hasna.evidence_ref.v1",
   workRun: "hasna.work_run.v1",
+  taskToPrProjection: "hasna.task_to_pr_projection.v1",
   decisionEnvelope: "hasna.decision_envelope.v1",
   costEstimate: "hasna.cost_estimate.v1",
   capabilityCard: "hasna.capability_card.v1",
@@ -2030,6 +2032,2512 @@ export const WorkRunSchema = contractBaseSchema(SCHEMA_IDS.workRun)
   });
 export type WorkRun = z.infer<typeof WorkRunSchema>;
 
+export const TASK_TO_PR_ROLE_AUTHORITIES = Object.freeze({
+  work_run: Object.freeze(["codewith"] as const),
+  root_request: Object.freeze(["todos"] as const),
+  pr_group: Object.freeze(["todos"] as const),
+  leaf_task: Object.freeze(["todos"] as const),
+  attempt: Object.freeze(["todos"] as const),
+  writer_generation: Object.freeze(["todos"] as const),
+  writer_lease: Object.freeze(["repos"] as const),
+  writer_fence: Object.freeze(["repos"] as const),
+  provider_profile: Object.freeze(["codewith"] as const),
+  provider_route: Object.freeze(["codewith"] as const),
+  admission: Object.freeze(["codewith"] as const),
+  worker: Object.freeze(["codewith"] as const),
+  runtime: Object.freeze(["codewith"] as const),
+  repo: Object.freeze(["repos"] as const),
+  worktree: Object.freeze(["repos"] as const),
+  branch: Object.freeze(["repos"] as const),
+  event_stream: Object.freeze(["todos"] as const),
+  replay_cursor: Object.freeze(["todos"] as const),
+  handoff: Object.freeze(["todos"] as const),
+  pull_request: Object.freeze(["todos"] as const),
+  commit: Object.freeze(["repos"] as const),
+  review: Object.freeze(["review"] as const),
+  reviewer: Object.freeze(["review"] as const),
+  review_run: Object.freeze(["review"] as const),
+  proof_bundle: Object.freeze(["review"] as const),
+  repair_cycle: Object.freeze(["todos"] as const),
+  merge_guard: Object.freeze(["todos"] as const),
+  merge_operator: Object.freeze(["merge_provider"] as const),
+  merge_operator_run: Object.freeze(["merge_provider"] as const),
+  merge_guard_receipt: Object.freeze(["merge_provider"] as const),
+  merge_outcome: Object.freeze(["merge_provider"] as const),
+  recovery: Object.freeze(["todos"] as const),
+  cancellation: Object.freeze(["todos"] as const),
+  cleanup_eligibility: Object.freeze(["repos"] as const),
+  cleanup_outcome: Object.freeze(["repos"] as const),
+  rollback_plan: Object.freeze(["todos"] as const),
+  rollback_outcome: Object.freeze(["repos"] as const),
+  openloops_invocation: Object.freeze(["openloops"] as const),
+  adapter_extension: Object.freeze(["adapter"] as const)
+});
+
+export const TaskToPrRefRoleSchema = z.enum([
+  "work_run",
+  "root_request",
+  "pr_group",
+  "leaf_task",
+  "attempt",
+  "writer_generation",
+  "writer_lease",
+  "writer_fence",
+  "provider_profile",
+  "provider_route",
+  "admission",
+  "worker",
+  "runtime",
+  "repo",
+  "worktree",
+  "branch",
+  "event_stream",
+  "replay_cursor",
+  "handoff",
+  "pull_request",
+  "commit",
+  "review",
+  "reviewer",
+  "review_run",
+  "proof_bundle",
+  "repair_cycle",
+  "merge_guard",
+  "merge_operator",
+  "merge_operator_run",
+  "merge_guard_receipt",
+  "merge_outcome",
+  "recovery",
+  "cancellation",
+  "cleanup_eligibility",
+  "cleanup_outcome",
+  "rollback_plan",
+  "rollback_outcome",
+  "openloops_invocation",
+  "adapter_extension"
+]);
+export type TaskToPrRefRole = z.infer<typeof TaskToPrRefRoleSchema>;
+
+export const TaskToPrAuthoritySchema = z.enum([
+  "todos",
+  "codewith",
+  "repos",
+  "review",
+  "merge_provider",
+  "openloops",
+  "adapter"
+]);
+export type TaskToPrAuthority = z.infer<typeof TaskToPrAuthoritySchema>;
+
+const LowerSha256DigestSchema = z.string().regex(/^[a-f0-9]{64}$/);
+const OpaqueTaskToPrIdSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(256)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/, "Reference ids must be opaque identifiers, never accounts, URLs, paths, or queries");
+const ForbiddenOpaqueOwnerDirectPattern =
+  /(?:@|[/?#=&+]|-----BEGIN|github_pat_|gh[pousr]_|sk-[A-Za-z0-9]|AKIA[0-9A-Z])/i;
+const ForbiddenOpaqueOwnerNormalizedMarkerPattern =
+  /(?:bearer|password|secret|credential|account|fence|token|privatekey|apikey|githubpat)/i;
+const OpaqueOwnerSuffixPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+function containsForbiddenTaskToPrMarker(value: string): boolean {
+  return (
+    ForbiddenOpaqueOwnerDirectPattern.test(value) ||
+    ForbiddenOpaqueOwnerNormalizedMarkerPattern.test(value.replace(/[._:-]+/g, ""))
+  );
+}
+const TaskToPrProjectionIdSchema = OpaqueTaskToPrIdSchema.refine(
+  (value) => {
+    const prefix = "task_to_pr_projection:opaque-";
+    const suffix = value.startsWith(prefix) ? value.slice(prefix.length) : "";
+    return OpaqueOwnerSuffixPattern.test(suffix) && !containsForbiddenTaskToPrMarker(suffix);
+  },
+  "Projection ids must be typed opaque owner-record refs and cannot encode accounts, fences, locators, or credentials"
+);
+const TaskToPrAttemptNonceSchema = OpaqueTaskToPrIdSchema.refine(
+  (value) => {
+    const prefix = "attempt_nonce:opaque-";
+    const suffix = value.startsWith(prefix) ? value.slice(prefix.length) : "";
+    return OpaqueOwnerSuffixPattern.test(suffix) && !containsForbiddenTaskToPrMarker(suffix);
+  },
+  "Attempt nonces must be typed opaque values and cannot encode accounts, fences, locators, or credentials"
+);
+const SensitiveTaskToPrRoles = new Set<TaskToPrRefRole>([
+  "writer_lease",
+  "writer_fence",
+  "provider_profile",
+  "provider_route",
+  "admission",
+  "worker",
+  "runtime",
+  "worktree",
+  "merge_operator",
+  "merge_operator_run",
+  "merge_guard_receipt",
+  "merge_outcome",
+  "openloops_invocation",
+  "adapter_extension"
+]);
+export const TaskToPrRefSchema = z
+  .object({
+    role: TaskToPrRefRoleSchema,
+    authority: TaskToPrAuthoritySchema,
+    id: OpaqueTaskToPrIdSchema,
+    digest: LowerSha256DigestSchema,
+    redaction: z.enum(["none", "partial", "full"])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const allowedAuthorities = TASK_TO_PR_ROLE_AUTHORITIES[value.role] as readonly TaskToPrAuthority[];
+    if (!allowedAuthorities.includes(value.authority)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${value.role} refs must be owned by ${allowedAuthorities.join(" or ")}`,
+        path: ["authority"]
+      });
+    }
+    if (SensitiveTaskToPrRoles.has(value.role) && value.redaction === "none") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${value.role} refs must be redacted and cannot carry a raw locator or credential`,
+        path: ["redaction"]
+      });
+    }
+    if (SensitiveTaskToPrRoles.has(value.role)) {
+      const sensitiveSuffix = value.id.startsWith(`${value.role}:opaque-`)
+        ? value.id.slice(`${value.role}:opaque-`.length)
+        : "";
+      if (!OpaqueOwnerSuffixPattern.test(sensitiveSuffix) || containsForbiddenTaskToPrMarker(sensitiveSuffix)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${value.role} ids must be role-prefixed opaque owner-record refs, never raw account, path, credential, or fence values`,
+          path: ["id"]
+        });
+      }
+    }
+    const expectedPrefix = `${value.role}:opaque-`;
+    const opaqueSuffix = value.id.startsWith(expectedPrefix) ? value.id.slice(expectedPrefix.length) : value.id;
+    if (
+      !value.id.startsWith(expectedPrefix) ||
+      !OpaqueOwnerSuffixPattern.test(opaqueSuffix) ||
+      containsForbiddenTaskToPrMarker(opaqueSuffix)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Reference ids must be typed opaque owner refs and cannot contain account, fence, credential, URL, or secret markers",
+        path: ["id"]
+      });
+    }
+  });
+export type TaskToPrRef = z.infer<typeof TaskToPrRefSchema>;
+
+export const TaskToPrEvidenceRefSchema = z
+  .object({
+    id: OpaqueTaskToPrIdSchema,
+    digest: LowerSha256DigestSchema,
+    redaction: z.enum(["partial", "full"])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const prefix = "evidence:opaque-";
+    const suffix = value.id.startsWith(prefix) ? value.id.slice(prefix.length) : "";
+    if (
+      !OpaqueOwnerSuffixPattern.test(suffix) ||
+      containsForbiddenTaskToPrMarker(suffix)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Evidence ids must be typed opaque refs with no account, fence, URL, credential, or secret markers",
+        path: ["id"]
+      });
+    }
+  });
+export type TaskToPrEvidenceRef = z.infer<typeof TaskToPrEvidenceRefSchema>;
+
+function taskToPrRefFor(role: TaskToPrRefRole) {
+  return TaskToPrRefSchema.refine((value) => value.role === role, {
+    message: `Reference must use role ${role}`,
+    path: ["role"]
+  });
+}
+
+function sameTaskToPrRef(left: TaskToPrRef, right: TaskToPrRef): boolean {
+  return (
+    left.role === right.role &&
+    left.authority === right.authority &&
+    left.id === right.id &&
+    left.digest === right.digest &&
+    left.redaction === right.redaction
+  );
+}
+
+function sameTaskToPrCanonicalRefId(left: TaskToPrRef, right: TaskToPrRef): boolean {
+  return left.role === right.role && left.authority === right.authority && left.id === right.id;
+}
+
+function requireFreshTaskToPrRef(
+  prior: TaskToPrRef,
+  successor: TaskToPrRef,
+  ctx: z.RefinementCtx,
+  path: (string | number)[],
+  label: string
+): void {
+  if (sameTaskToPrCanonicalRefId(prior, successor)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `${label} requires a fresh canonical role/authority/id`,
+      path
+    });
+  }
+  if (prior.digest === successor.digest) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `${label} requires a fresh canonical digest`,
+      path
+    });
+  }
+}
+
+function taskToPrCanonicalRefKey(ref: TaskToPrRef): string {
+  return `${ref.role}\u0000${ref.authority}\u0000${ref.id}`;
+}
+
+function sameGitObjectId(
+  left: z.infer<typeof TaskToPrGitObjectIdSchema>,
+  right: z.infer<typeof TaskToPrGitObjectIdSchema>
+): boolean {
+  return left.algorithm === right.algorithm && left.value === right.value;
+}
+
+export const TaskToPrGitObjectIdSchema = z
+  .object({
+    algorithm: z.enum(["sha1", "sha256"]),
+    value: z.string().regex(/^[a-f0-9]+$/)
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const requiredLength = value.algorithm === "sha1" ? 40 : 64;
+    if (value.value.length !== requiredLength) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${value.algorithm} object ids must contain exactly ${requiredLength} lowercase hex characters`,
+        path: ["value"]
+      });
+    }
+  });
+export type TaskToPrGitObjectId = z.infer<typeof TaskToPrGitObjectIdSchema>;
+
+export interface TaskToPrBindingInput {
+  canonicalizationVersion: 1;
+  rootRequestRef: TaskToPrRef;
+  prGroupRef: TaskToPrRef;
+  leafTaskRef: TaskToPrRef;
+  repoRef: TaskToPrRef;
+  baseHead: TaskToPrGitObjectId;
+  frozenScopeDigest: string;
+}
+
+export function deriveTaskToPrIdentityDigest(input: TaskToPrBindingInput): string {
+  const canonicalBinding = JSON.stringify([
+    "hasna.task_to_pr_projection.binding.v1",
+    input.canonicalizationVersion,
+    input.rootRequestRef.id,
+    input.rootRequestRef.digest,
+    input.prGroupRef.id,
+    input.prGroupRef.digest,
+    input.leafTaskRef.id,
+    input.leafTaskRef.digest,
+    input.repoRef.id,
+    input.repoRef.digest,
+    input.baseHead.algorithm,
+    input.baseHead.value,
+    input.frozenScopeDigest
+  ]);
+  return createHash("sha256").update(canonicalBinding, "utf8").digest("hex");
+}
+
+export const TaskToPrAttemptSchema = z
+  .object({
+    ref: taskToPrRefFor("attempt"),
+    nonce: TaskToPrAttemptNonceSchema,
+    admissionRef: taskToPrRefFor("admission"),
+    workerRef: taskToPrRefFor("worker"),
+    runtimeRef: taskToPrRefFor("runtime"),
+    writerGenerationRef: taskToPrRefFor("writer_generation"),
+    writerLeaseRef: taskToPrRefFor("writer_lease"),
+    writerFenceRef: taskToPrRefFor("writer_fence"),
+    providerProfileRef: taskToPrRefFor("provider_profile"),
+    providerRouteRef: taskToPrRefFor("provider_route")
+  })
+  .strict();
+export type TaskToPrAttempt = z.infer<typeof TaskToPrAttemptSchema>;
+
+export const TaskToPrRepositoryBindingSchema = z
+  .object({
+    repoRef: taskToPrRefFor("repo"),
+    worktreeRef: taskToPrRefFor("worktree"),
+    branchRef: taskToPrRefFor("branch"),
+    baseHead: TaskToPrGitObjectIdSchema,
+    branchHead: TaskToPrGitObjectIdSchema
+  })
+  .strict();
+export type TaskToPrRepositoryBinding = z.infer<typeof TaskToPrRepositoryBindingSchema>;
+
+export const TaskToPrEventCursorSchema = z
+  .object({
+    streamRef: taskToPrRefFor("event_stream"),
+    replayCursorRef: taskToPrRefFor("replay_cursor"),
+    sequence: z.number().int().nonnegative(),
+    prefixDigest: LowerSha256DigestSchema
+  })
+  .strict();
+export type TaskToPrEventCursor = z.infer<typeof TaskToPrEventCursorSchema>;
+
+export const TaskToPrHandoffSchema = z
+  .object({
+    ref: taskToPrRefFor("handoff"),
+    previousAttemptRef: taskToPrRefFor("attempt"),
+    nextAttemptRef: taskToPrRefFor("attempt"),
+    previousWriterGenerationRef: taskToPrRefFor("writer_generation"),
+    nextWriterGenerationRef: taskToPrRefFor("writer_generation"),
+    stoppedWorkRunRef: taskToPrRefFor("work_run"),
+    stopEvidenceRef: TaskToPrEvidenceRefSchema,
+    leaseRevocationEvidenceRef: TaskToPrEvidenceRefSchema
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    requireFreshTaskToPrRef(
+      value.previousAttemptRef,
+      value.nextAttemptRef,
+      ctx,
+      ["nextAttemptRef"],
+      "Handoff attempt rotation"
+    );
+    requireFreshTaskToPrRef(
+      value.previousWriterGenerationRef,
+      value.nextWriterGenerationRef,
+      ctx,
+      ["nextWriterGenerationRef"],
+      "Handoff writer-generation rotation"
+    );
+  });
+export type TaskToPrHandoff = z.infer<typeof TaskToPrHandoffSchema>;
+
+export const TaskToPrReviewBindingSchema = z
+  .object({
+    ref: taskToPrRefFor("review"),
+    pullRequestRef: taskToPrRefFor("pull_request"),
+    head: TaskToPrGitObjectIdSchema,
+    reviewerRef: taskToPrRefFor("reviewer"),
+    reviewRunRef: taskToPrRefFor("review_run"),
+    proofBundleRef: taskToPrRefFor("proof_bundle"),
+    verdict: z.enum(["approved", "changes_requested", "blocked"]),
+    reviewedAt: TimestampSchema
+  })
+  .strict();
+export type TaskToPrReviewBinding = z.infer<typeof TaskToPrReviewBindingSchema>;
+
+export const TaskToPrExactHeadBindingSchema = z
+  .object({
+    pullRequestRef: taskToPrRefFor("pull_request"),
+    remoteBranchRef: taskToPrRefFor("branch"),
+    localHead: TaskToPrGitObjectIdSchema,
+    remoteHead: TaskToPrGitObjectIdSchema,
+    providerPullRequestHead: TaskToPrGitObjectIdSchema,
+    equalityProofRef: taskToPrRefFor("proof_bundle"),
+    ciProofBundleRefs: z.array(taskToPrRefFor("proof_bundle")).min(1),
+    verifiedAt: TimestampSchema
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      !sameGitObjectId(value.localHead, value.remoteHead) ||
+      !sameGitObjectId(value.localHead, value.providerPullRequestHead)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Local, remote, and provider pull-request heads must be exactly equal",
+        path: ["providerPullRequestHead"]
+      });
+    }
+    const proofKeys = value.ciProofBundleRefs.map(taskToPrCanonicalRefKey);
+    if (new Set(proofKeys).size !== proofKeys.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "CI proof bundle refs must have unique canonical identities",
+        path: ["ciProofBundleRefs"]
+      });
+    }
+    const proofDigests = value.ciProofBundleRefs.map((ref) => ref.digest);
+    if (new Set(proofDigests).size !== proofDigests.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "CI proof bundle refs must have unique canonical digests",
+        path: ["ciProofBundleRefs"]
+      });
+    }
+    if (value.ciProofBundleRefs.some((ref) => sameTaskToPrCanonicalRefId(ref, value.equalityProofRef))) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Head-equality and CI proof refs must have distinct canonical identities",
+        path: ["ciProofBundleRefs"]
+      });
+    }
+    if (value.ciProofBundleRefs.some((ref) => ref.digest === value.equalityProofRef.digest)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Head-equality and CI proof refs must have distinct canonical digests",
+        path: ["ciProofBundleRefs"]
+      });
+    }
+  });
+export type TaskToPrExactHeadBinding = z.infer<typeof TaskToPrExactHeadBindingSchema>;
+
+export const TaskToPrRepairStateSchema = z
+  .object({
+    ref: taskToPrRefFor("repair_cycle"),
+    cycle: z.number().int().min(0).max(2),
+    cap: z.literal(2),
+    exhausted: z.boolean(),
+    latestRepairRef: taskToPrRefFor("repair_cycle").optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.exhausted !== (value.cycle === value.cap)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Repair exhaustion must equal the cumulative cycle cap",
+        path: ["exhausted"]
+      });
+    }
+    if (value.cycle === 0 && value.latestRepairRef) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Cycle zero cannot reference a repair",
+        path: ["latestRepairRef"]
+      });
+    }
+    if (value.cycle > 0 && !value.latestRepairRef) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Non-zero repair state requires the latest immutable repair ref",
+        path: ["latestRepairRef"]
+      });
+    }
+    if (value.latestRepairRef && sameTaskToPrCanonicalRefId(value.ref, value.latestRepairRef)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Repair-state and latest-repair refs must be distinct canonical records",
+        path: ["latestRepairRef"]
+      });
+    }
+    if (value.latestRepairRef && value.ref.digest === value.latestRepairRef.digest) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Repair-state and latest-repair refs must have distinct canonical digests",
+        path: ["latestRepairRef"]
+      });
+    }
+  });
+export type TaskToPrRepairState = z.infer<typeof TaskToPrRepairStateSchema>;
+
+export const TaskToPrMergeGuardSchema = z
+  .object({
+    ref: taskToPrRefFor("merge_guard"),
+    pullRequestRef: taskToPrRefFor("pull_request"),
+    expectedHead: TaskToPrGitObjectIdSchema,
+    reviewRefs: z.array(taskToPrRefFor("review")).min(1),
+    proofBundleRefs: z.array(taskToPrRefFor("proof_bundle")).min(1),
+    operatorRef: taskToPrRefFor("merge_operator"),
+    operatorRunRef: taskToPrRefFor("merge_operator_run"),
+    providerGuardReceiptRef: taskToPrRefFor("merge_guard_receipt"),
+    mechanism: z.enum(["compare_and_swap", "queue_expected_head"]),
+    decision: z.enum(["eligible", "denied"]),
+    evaluatedAt: TimestampSchema
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const uniqueReviews = new Set(value.reviewRefs.map((ref) => ref.id));
+    if (uniqueReviews.size !== value.reviewRefs.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Merge guard review refs must be unique",
+        path: ["reviewRefs"]
+      });
+    }
+    const uniqueProofs = new Set(value.proofBundleRefs.map(taskToPrCanonicalRefKey));
+    if (uniqueProofs.size !== value.proofBundleRefs.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Merge guard proof refs must have unique canonical identities",
+        path: ["proofBundleRefs"]
+      });
+    }
+    const uniqueProofDigests = new Set(value.proofBundleRefs.map((ref) => ref.digest));
+    if (uniqueProofDigests.size !== value.proofBundleRefs.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Merge guard proof refs must have unique canonical digests",
+        path: ["proofBundleRefs"]
+      });
+    }
+  });
+export type TaskToPrMergeGuard = z.infer<typeof TaskToPrMergeGuardSchema>;
+
+export const TaskToPrMergeOutcomeSchema = z
+  .object({
+    ref: taskToPrRefFor("merge_outcome"),
+    guardRef: taskToPrRefFor("merge_guard"),
+    pullRequestRef: taskToPrRefFor("pull_request"),
+    expectedHead: TaskToPrGitObjectIdSchema,
+    observedHead: TaskToPrGitObjectIdSchema,
+    status: z.enum(["merged", "closed_unmerged", "refused", "head_drift"]),
+    mergeCommitRef: taskToPrRefFor("commit").optional(),
+    finishedAt: TimestampSchema,
+    evidenceRefs: z.array(TaskToPrEvidenceRefSchema).min(1)
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const headMatches = sameGitObjectId(value.expectedHead, value.observedHead);
+    if (value.status === "merged") {
+      if (!headMatches) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Merged outcomes require the observed head to equal the expected head",
+          path: ["observedHead"]
+        });
+      }
+      if (!value.mergeCommitRef) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Merged outcomes require an immutable merge commit ref",
+          path: ["mergeCommitRef"]
+        });
+      }
+    } else if (value.mergeCommitRef) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Unmerged outcomes cannot claim a merge commit",
+        path: ["mergeCommitRef"]
+      });
+    }
+    if (value.status === "head_drift" && headMatches) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Head-drift outcomes require distinct expected and observed heads",
+        path: ["observedHead"]
+      });
+    }
+    if (!headMatches && value.status !== "head_drift") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Only a head_drift outcome may record an observed head that differs from the expected head",
+        path: ["observedHead"]
+      });
+    }
+  });
+export type TaskToPrMergeOutcome = z.infer<typeof TaskToPrMergeOutcomeSchema>;
+
+export const TaskToPrMergeStateSchema = z
+  .object({
+    guard: TaskToPrMergeGuardSchema,
+    outcome: TaskToPrMergeOutcomeSchema.optional()
+  })
+  .strict();
+export type TaskToPrMergeState = z.infer<typeof TaskToPrMergeStateSchema>;
+
+export const TaskToPrRecoverySchema = z
+  .object({
+    ref: taskToPrRefFor("recovery"),
+    priorAttemptRef: taskToPrRefFor("attempt"),
+    priorWriterGenerationRef: taskToPrRefFor("writer_generation"),
+    priorWorkRunRef: taskToPrRefFor("work_run"),
+    successorAttemptNonce: TaskToPrAttemptNonceSchema,
+    successorWriterGenerationRef: taskToPrRefFor("writer_generation"),
+    preservedStateRefs: z.array(TaskToPrRefSchema).min(1),
+    stopEvidenceRef: TaskToPrEvidenceRefSchema,
+    leaseRevocationEvidenceRef: TaskToPrEvidenceRefSchema
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    requireFreshTaskToPrRef(
+      value.priorWriterGenerationRef,
+      value.successorWriterGenerationRef,
+      ctx,
+      ["successorWriterGenerationRef"],
+      "Recovery writer-generation rotation"
+    );
+  });
+export type TaskToPrRecovery = z.infer<typeof TaskToPrRecoverySchema>;
+
+export const TaskToPrCancellationSchema = z
+  .object({
+    ref: taskToPrRefFor("cancellation"),
+    cancelledAttemptRef: taskToPrRefFor("attempt"),
+    preservedStateRefs: z.array(TaskToPrRefSchema).min(1),
+    evidenceRefs: z.array(TaskToPrEvidenceRefSchema).min(1)
+  })
+  .strict();
+export type TaskToPrCancellation = z.infer<typeof TaskToPrCancellationSchema>;
+
+export const TaskToPrCleanupEligibilitySchema = z
+  .object({
+    ref: taskToPrRefFor("cleanup_eligibility"),
+    status: z.enum(["not_ready", "preserved", "blocked", "eligible"]),
+    targetWorktreeRef: taskToPrRefFor("worktree"),
+    eventCursorRef: taskToPrRefFor("replay_cursor"),
+    evaluatedAt: TimestampSchema,
+    evidenceRefs: z.array(TaskToPrEvidenceRefSchema).min(1)
+  })
+  .strict();
+export type TaskToPrCleanupEligibility = z.infer<typeof TaskToPrCleanupEligibilitySchema>;
+
+export const TaskToPrCleanupOutcomeSchema = z
+  .object({
+    ref: taskToPrRefFor("cleanup_outcome"),
+    eligibilityRef: taskToPrRefFor("cleanup_eligibility"),
+    targetWorktreeRef: taskToPrRefFor("worktree"),
+    status: z.enum(["preserved", "deleted", "failed", "skipped"]),
+    finishedAt: TimestampSchema,
+    evidenceRefs: z.array(TaskToPrEvidenceRefSchema).min(1)
+  })
+  .strict();
+export type TaskToPrCleanupOutcome = z.infer<typeof TaskToPrCleanupOutcomeSchema>;
+
+export const TaskToPrCleanupStateSchema = z
+  .object({
+    eligibility: TaskToPrCleanupEligibilitySchema,
+    outcome: TaskToPrCleanupOutcomeSchema.optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      value.outcome &&
+      !sameTaskToPrRef(value.outcome.eligibilityRef, value.eligibility.ref)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Cleanup outcomes must bind the exact eligibility decision",
+        path: ["outcome", "eligibilityRef"]
+      });
+    }
+    if (
+      value.outcome &&
+      !sameTaskToPrRef(value.outcome.targetWorktreeRef, value.eligibility.targetWorktreeRef)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Cleanup eligibility and outcome must bind the same target worktree",
+        path: ["outcome", "targetWorktreeRef"]
+      });
+    }
+    if (value.outcome?.status === "deleted" && value.eligibility.status !== "eligible") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Deletion requires an eligible cleanup decision",
+        path: ["outcome", "status"]
+      });
+    }
+  });
+export type TaskToPrCleanupState = z.infer<typeof TaskToPrCleanupStateSchema>;
+
+export const TaskToPrRollbackSchema = z
+  .object({
+    plan: z
+      .object({
+        ref: taskToPrRefFor("rollback_plan"),
+        targetRef: z.union([taskToPrRefFor("commit"), taskToPrRefFor("branch")]),
+        createdAt: TimestampSchema
+      })
+      .strict(),
+    outcome: z
+      .object({
+        ref: taskToPrRefFor("rollback_outcome"),
+        planRef: taskToPrRefFor("rollback_plan"),
+        targetRef: z.union([taskToPrRefFor("commit"), taskToPrRefFor("branch")]),
+        status: z.enum(["not_run", "succeeded", "failed", "cancelled"]),
+        finishedAt: TimestampSchema,
+        evidenceRefs: z.array(TaskToPrEvidenceRefSchema).min(1)
+      })
+      .strict()
+      .optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.outcome && !sameTaskToPrRef(value.outcome.planRef, value.plan.ref)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Rollback outcomes must bind the exact rollback plan",
+        path: ["outcome", "planRef"]
+      });
+    }
+    if (value.outcome && !sameTaskToPrRef(value.outcome.targetRef, value.plan.targetRef)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Rollback outcomes must bind the exact rollback target",
+        path: ["outcome", "targetRef"]
+      });
+    }
+    if (value.outcome && Date.parse(value.outcome.finishedAt) < Date.parse(value.plan.createdAt)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Rollback outcomes cannot finish before their plan was created",
+        path: ["outcome", "finishedAt"]
+      });
+    }
+  });
+export type TaskToPrRollback = z.infer<typeof TaskToPrRollbackSchema>;
+
+export type TaskToPrProvenanceEntry =
+  | {
+      category:
+        | "work_run"
+        | "attempt"
+        | "runtime"
+        | "writer_generation"
+        | "writer_lease"
+        | "writer_fence"
+        | "provider_profile"
+        | "provider_route"
+        | "replay_cursor"
+        | "repair_state"
+        | "latest_repair"
+        | "handoff"
+        | "recovery"
+        | "merge_guard"
+        | "cleanup_eligibility"
+        | "rollback_plan";
+      ref: TaskToPrRef;
+    }
+  | {
+      category:
+        | "equality_proof"
+        | "ci_proof"
+        | "review_proof"
+        | "review_record"
+        | "review_run"
+        | "provider_guard_receipt";
+      ref: TaskToPrRef;
+      head: TaskToPrGitObjectId;
+    }
+  | {
+      category: "projection_id";
+      projectionId: string;
+    }
+  | {
+      category: "attempt_nonce";
+      nonce: string;
+    }
+  | {
+      category: "replay_prefix";
+      sequence: number;
+      prefixDigest: string;
+    };
+
+export const TaskToPrProvenanceEntrySchema: z.ZodType<TaskToPrProvenanceEntry> = z.discriminatedUnion("category", [
+  z
+    .object({
+      category: z.literal("projection_id"),
+      projectionId: TaskToPrProjectionIdSchema
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("work_run"),
+      ref: taskToPrRefFor("work_run")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("attempt"),
+      ref: taskToPrRefFor("attempt")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("attempt_nonce"),
+      nonce: TaskToPrAttemptNonceSchema
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("runtime"),
+      ref: taskToPrRefFor("runtime")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("writer_generation"),
+      ref: taskToPrRefFor("writer_generation")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("writer_lease"),
+      ref: taskToPrRefFor("writer_lease")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("writer_fence"),
+      ref: taskToPrRefFor("writer_fence")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("provider_profile"),
+      ref: taskToPrRefFor("provider_profile")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("provider_route"),
+      ref: taskToPrRefFor("provider_route")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("replay_cursor"),
+      ref: taskToPrRefFor("replay_cursor")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("replay_prefix"),
+      sequence: z.number().int().nonnegative(),
+      prefixDigest: LowerSha256DigestSchema
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("repair_state"),
+      ref: taskToPrRefFor("repair_cycle")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("latest_repair"),
+      ref: taskToPrRefFor("repair_cycle")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("handoff"),
+      ref: taskToPrRefFor("handoff")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("recovery"),
+      ref: taskToPrRefFor("recovery")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("merge_guard"),
+      ref: taskToPrRefFor("merge_guard")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("cleanup_eligibility"),
+      ref: taskToPrRefFor("cleanup_eligibility")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("rollback_plan"),
+      ref: taskToPrRefFor("rollback_plan")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("equality_proof"),
+      ref: taskToPrRefFor("proof_bundle"),
+      head: TaskToPrGitObjectIdSchema
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("ci_proof"),
+      ref: taskToPrRefFor("proof_bundle"),
+      head: TaskToPrGitObjectIdSchema
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("review_proof"),
+      ref: taskToPrRefFor("proof_bundle"),
+      head: TaskToPrGitObjectIdSchema
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("review_record"),
+      ref: taskToPrRefFor("review"),
+      head: TaskToPrGitObjectIdSchema
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("review_run"),
+      ref: taskToPrRefFor("review_run"),
+      head: TaskToPrGitObjectIdSchema
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("provider_guard_receipt"),
+      ref: taskToPrRefFor("merge_guard_receipt"),
+      head: TaskToPrGitObjectIdSchema
+    })
+    .strict()
+]);
+
+type TaskToPrProvenanceProjectionView = {
+  id: string;
+  workRunRef: TaskToPrRef;
+  attempt: TaskToPrAttempt;
+  events: TaskToPrEventCursor;
+  repair: TaskToPrRepairState;
+  handoff?: TaskToPrHandoff | undefined;
+  recovery?: TaskToPrRecovery | undefined;
+  exactHead?: TaskToPrExactHeadBinding | undefined;
+  reviews: TaskToPrReviewBinding[];
+  merge?: TaskToPrMergeState | undefined;
+  cleanup?: TaskToPrCleanupState | undefined;
+  rollback?: TaskToPrRollback | undefined;
+};
+
+function taskToPrActiveProvenanceEntries(
+  projection: TaskToPrProvenanceProjectionView
+): TaskToPrProvenanceEntry[] {
+  return [
+    {
+      category: "projection_id" as const,
+      projectionId: projection.id
+    },
+    {
+      category: "work_run" as const,
+      ref: projection.workRunRef
+    },
+    {
+      category: "attempt" as const,
+      ref: projection.attempt.ref
+    },
+    {
+      category: "attempt_nonce" as const,
+      nonce: projection.attempt.nonce
+    },
+    {
+      category: "runtime" as const,
+      ref: projection.attempt.runtimeRef
+    },
+    {
+      category: "writer_generation" as const,
+      ref: projection.attempt.writerGenerationRef
+    },
+    {
+      category: "writer_lease" as const,
+      ref: projection.attempt.writerLeaseRef
+    },
+    {
+      category: "writer_fence" as const,
+      ref: projection.attempt.writerFenceRef
+    },
+    {
+      category: "provider_profile" as const,
+      ref: projection.attempt.providerProfileRef
+    },
+    {
+      category: "provider_route" as const,
+      ref: projection.attempt.providerRouteRef
+    },
+    {
+      category: "replay_cursor" as const,
+      ref: projection.events.replayCursorRef
+    },
+    {
+      category: "replay_prefix" as const,
+      sequence: projection.events.sequence,
+      prefixDigest: projection.events.prefixDigest
+    },
+    {
+      category: "repair_state" as const,
+      ref: projection.repair.ref
+    },
+    ...(projection.repair.latestRepairRef
+      ? [
+          {
+            category: "latest_repair" as const,
+            ref: projection.repair.latestRepairRef
+          }
+        ]
+      : []),
+    ...(projection.handoff
+      ? [{ category: "handoff" as const, ref: projection.handoff.ref }]
+      : []),
+    ...(projection.recovery
+      ? [{ category: "recovery" as const, ref: projection.recovery.ref }]
+      : []),
+    ...(projection.exactHead
+      ? [
+          {
+            category: "equality_proof" as const,
+            ref: projection.exactHead.equalityProofRef,
+            head: projection.exactHead.localHead
+          },
+          ...projection.exactHead.ciProofBundleRefs.map((ref) => ({
+            category: "ci_proof" as const,
+            ref,
+            head: projection.exactHead!.localHead
+          }))
+        ]
+      : []),
+    ...projection.reviews.flatMap((review) => [
+      {
+        category: "review_proof" as const,
+        ref: review.proofBundleRef,
+        head: review.head
+      },
+      {
+        category: "review_record" as const,
+        ref: review.ref,
+        head: review.head
+      },
+      {
+        category: "review_run" as const,
+        ref: review.reviewRunRef,
+        head: review.head
+      }
+    ]),
+    ...(projection.merge
+      ? [
+          {
+            category: "merge_guard" as const,
+            ref: projection.merge.guard.ref
+          },
+          {
+            category: "provider_guard_receipt" as const,
+            ref: projection.merge.guard.providerGuardReceiptRef,
+            head: projection.merge.guard.expectedHead
+          }
+        ]
+      : []),
+    ...(projection.cleanup
+      ? [
+          {
+            category: "cleanup_eligibility" as const,
+            ref: projection.cleanup.eligibility.ref
+          }
+        ]
+      : []),
+    ...(projection.rollback
+      ? [
+          {
+            category: "rollback_plan" as const,
+            ref: projection.rollback.plan.ref
+          }
+        ]
+      : [])
+  ];
+}
+
+function sameTaskToPrProvenanceEntry(
+  left: TaskToPrProvenanceEntry,
+  right: TaskToPrProvenanceEntry
+): boolean {
+  if (left.category !== right.category) {
+    return false;
+  }
+  if (left.category === "projection_id" && right.category === "projection_id") {
+    return left.projectionId === right.projectionId;
+  }
+  if (left.category === "attempt_nonce" && right.category === "attempt_nonce") {
+    return left.nonce === right.nonce;
+  }
+  if (left.category === "replay_prefix" && right.category === "replay_prefix") {
+    return left.sequence === right.sequence && left.prefixDigest === right.prefixDigest;
+  }
+  if (!("ref" in left) || !("ref" in right)) {
+    return false;
+  }
+  return (
+    sameTaskToPrRef(left.ref, right.ref) &&
+    (("head" in left && "head" in right && sameGitObjectId(left.head, right.head)) ||
+      (!("head" in left) && !("head" in right)))
+  );
+}
+
+const RegisteredCanonicalSchemaIds = new Set<string>(Object.values(SCHEMA_IDS));
+
+export const TaskToPrAdapterExtensionSchema = z
+  .object({
+    mode: z.enum(["local", "cloud"]),
+    schema: SchemaIdSchema,
+    ref: taskToPrRefFor("adapter_extension"),
+    digest: LowerSha256DigestSchema
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      RegisteredCanonicalSchemaIds.has(value.schema) ||
+      value.schema.startsWith("hasna.task_to_pr_projection.") ||
+      containsForbiddenTaskToPrMarker(value.schema)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Adapter extension schema ids must be separately namespaced and unregistered; they cannot reuse canonical contracts, use the core projection namespace, or encode sensitive owner data",
+        path: ["schema"]
+      });
+    }
+  });
+export type TaskToPrAdapterExtension = z.infer<typeof TaskToPrAdapterExtensionSchema>;
+
+export const TaskToPrProjectionStateSchema = z.enum([
+  "admitted",
+  "running",
+  "handed_off",
+  "reviewing",
+  "repairing",
+  "merge_ready",
+  "merged",
+  "closed_unmerged",
+  "failed",
+  "blocked",
+  "cancelled",
+  "recovering",
+  "cleanup_complete",
+  "rolled_back"
+]);
+export type TaskToPrProjectionState = z.infer<typeof TaskToPrProjectionStateSchema>;
+
+const TaskToPrStatesWithoutReviewAuthority = new Set<TaskToPrProjectionState>([
+  "admitted",
+  "running",
+  "handed_off"
+]);
+const TaskToPrEligibleGuardAuthoritativeStates = new Set<TaskToPrProjectionState>([
+  "merge_ready",
+  "merged",
+  "closed_unmerged",
+  "failed",
+  "blocked",
+  "cancelled",
+  "cleanup_complete",
+  "rolled_back"
+]);
+
+export const TaskToPrProjectionSchema = z
+  .object({
+    schema: z.literal(SCHEMA_IDS.taskToPrProjection),
+    id: TaskToPrProjectionIdSchema,
+    createdAt: TimestampSchema,
+    canonicalizationVersion: z.literal(1),
+    identityDigest: LowerSha256DigestSchema,
+    frozenScopeDigest: LowerSha256DigestSchema,
+    state: TaskToPrProjectionStateSchema,
+    workRunRef: taskToPrRefFor("work_run"),
+    rootRequestRef: taskToPrRefFor("root_request"),
+    prGroupRef: taskToPrRefFor("pr_group"),
+    leafTaskRef: taskToPrRefFor("leaf_task"),
+    attempt: TaskToPrAttemptSchema,
+    repository: TaskToPrRepositoryBindingSchema,
+    events: TaskToPrEventCursorSchema,
+    openLoopsInvocationRef: taskToPrRefFor("openloops_invocation").optional(),
+    pullRequestRef: taskToPrRefFor("pull_request").optional(),
+    exactHead: TaskToPrExactHeadBindingSchema.optional(),
+    handoff: TaskToPrHandoffSchema.optional(),
+    reviews: z.array(TaskToPrReviewBindingSchema).default([]),
+    repair: TaskToPrRepairStateSchema,
+    merge: TaskToPrMergeStateSchema.optional(),
+    recovery: TaskToPrRecoverySchema.optional(),
+    cancellation: TaskToPrCancellationSchema.optional(),
+    cleanup: TaskToPrCleanupStateSchema.optional(),
+    rollback: TaskToPrRollbackSchema.optional(),
+    provenanceLedger: z.array(TaskToPrProvenanceEntrySchema),
+    adapterExtensions: z.array(TaskToPrAdapterExtensionSchema).default([]),
+    evidenceRefs: z.array(TaskToPrEvidenceRefSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const derivedIdentityDigest = deriveTaskToPrIdentityDigest({
+      canonicalizationVersion: value.canonicalizationVersion,
+      rootRequestRef: value.rootRequestRef,
+      prGroupRef: value.prGroupRef,
+      leafTaskRef: value.leafTaskRef,
+      repoRef: value.repository.repoRef,
+      baseHead: value.repository.baseHead,
+      frozenScopeDigest: value.frozenScopeDigest
+    });
+    if (value.identityDigest !== derivedIdentityDigest) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "identityDigest must equal the canonical v1 root/PR-group/leaf/repo/base/scope binding digest",
+        path: ["identityDigest"]
+      });
+    }
+    const provenanceIds = new Set<string>();
+    const provenanceDigests = new Set<string>();
+    const provenanceProjectionIds = new Set<string>();
+    const provenanceAttemptNonces = new Set<string>();
+    const provenanceReplayPrefixes = new Set<string>();
+    const provenanceReplaySequences = new Set<number>();
+    for (const [index, entry] of value.provenanceLedger.entries()) {
+      if ("ref" in entry) {
+        if (provenanceIds.has(entry.ref.id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Provenance entries cannot reuse a canonical owner id across categories or generations",
+            path: ["provenanceLedger", index, "ref", "id"]
+          });
+        }
+        provenanceIds.add(entry.ref.id);
+        if (provenanceDigests.has(entry.ref.digest)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Provenance entries cannot reuse a canonical digest across categories or generations",
+            path: ["provenanceLedger", index, "ref", "digest"]
+          });
+        }
+        provenanceDigests.add(entry.ref.digest);
+        continue;
+      }
+      if (entry.category === "projection_id") {
+        if (provenanceProjectionIds.has(entry.projectionId)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Projection identity provenance tombstones must be globally unique",
+            path: ["provenanceLedger", index, "projectionId"]
+          });
+        }
+        provenanceProjectionIds.add(entry.projectionId);
+        continue;
+      }
+      if (entry.category === "attempt_nonce") {
+        if (provenanceAttemptNonces.has(entry.nonce)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Attempt nonce provenance tombstones must be globally unique",
+            path: ["provenanceLedger", index, "nonce"]
+          });
+        }
+        provenanceAttemptNonces.add(entry.nonce);
+        continue;
+      }
+      if (provenanceReplayPrefixes.has(entry.prefixDigest)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Replay prefix provenance tombstones must be globally unique",
+          path: ["provenanceLedger", index, "prefixDigest"]
+        });
+      }
+      provenanceReplayPrefixes.add(entry.prefixDigest);
+      if (provenanceReplaySequences.has(entry.sequence)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Replay prefix provenance entries must bind globally unique replay sequences",
+          path: ["provenanceLedger", index, "sequence"]
+        });
+      }
+      provenanceReplaySequences.add(entry.sequence);
+    }
+    for (const activeEntry of taskToPrActiveProvenanceEntries(value)) {
+      if (!value.provenanceLedger.some((entry) => sameTaskToPrProvenanceEntry(entry, activeEntry))) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `The active ${activeEntry.category} identity must be represented exactly in the monotonic provenance ledger`,
+          path: ["provenanceLedger"]
+        });
+      }
+    }
+    const requiredCanonicalPreservationRefs = [
+      value.rootRequestRef,
+      value.prGroupRef,
+      value.leafTaskRef,
+      value.repository.repoRef,
+      value.repository.worktreeRef,
+      value.repository.branchRef,
+      value.events.streamRef,
+      ...(value.pullRequestRef ? [value.pullRequestRef] : [])
+    ];
+    const requirePreservedRefs = (
+      preservedStateRefs: TaskToPrRef[],
+      requiredRefs: TaskToPrRef[],
+      path: (string | number)[],
+      label: string
+    ) => {
+      for (const requiredRef of requiredRefs) {
+        if (!preservedStateRefs.some((preservedRef) => sameTaskToPrRef(preservedRef, requiredRef))) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `${label} must preserve ${requiredRef.role}`,
+            path
+          });
+        }
+      }
+    };
+    if (value.handoff && !sameTaskToPrRef(value.handoff.nextWriterGenerationRef, value.attempt.writerGenerationRef)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Handoff next generation must be the current attempt writer generation",
+        path: ["handoff", "nextWriterGenerationRef"]
+      });
+    }
+    if (value.handoff && !sameTaskToPrRef(value.handoff.nextAttemptRef, value.attempt.ref)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Handoff next attempt must be the current attempt",
+        path: ["handoff", "nextAttemptRef"]
+      });
+    }
+    if (value.handoff) {
+      requireFreshTaskToPrRef(
+        value.handoff.stoppedWorkRunRef,
+        value.workRunRef,
+        ctx,
+        ["handoff", "stoppedWorkRunRef"],
+        "Handoff WorkRun rotation"
+      );
+    }
+    if (value.recovery) {
+      if (value.recovery.successorAttemptNonce !== value.attempt.nonce) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Recovery successor nonce must equal the current attempt nonce",
+          path: ["recovery", "successorAttemptNonce"]
+        });
+      }
+      if (!sameTaskToPrRef(value.recovery.successorWriterGenerationRef, value.attempt.writerGenerationRef)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Recovery successor generation must equal the current writer generation",
+          path: ["recovery", "successorWriterGenerationRef"]
+        });
+      }
+      requireFreshTaskToPrRef(
+        value.recovery.priorAttemptRef,
+        value.attempt.ref,
+        ctx,
+        ["recovery", "priorAttemptRef"],
+        "Recovery attempt rotation"
+      );
+      requireFreshTaskToPrRef(
+        value.recovery.priorWorkRunRef,
+        value.workRunRef,
+        ctx,
+        ["recovery", "priorWorkRunRef"],
+        "Recovery WorkRun rotation"
+      );
+      requirePreservedRefs(
+        value.recovery.preservedStateRefs,
+        [value.recovery.priorWorkRunRef, ...requiredCanonicalPreservationRefs],
+        ["recovery", "preservedStateRefs"],
+        "Recovery"
+      );
+    }
+    if (value.cancellation && !sameTaskToPrRef(value.cancellation.cancelledAttemptRef, value.attempt.ref)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Cancellation must bind the current attempt",
+        path: ["cancellation", "cancelledAttemptRef"]
+      });
+    }
+    if (value.cancellation) {
+      requirePreservedRefs(
+        value.cancellation.preservedStateRefs,
+        [value.workRunRef, value.attempt.ref, ...requiredCanonicalPreservationRefs],
+        ["cancellation", "preservedStateRefs"],
+        "Cancellation"
+      );
+    }
+    if (value.cancellation && value.recovery) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A projection cannot be both the cancellation and recovery snapshot",
+        path: ["recovery"]
+      });
+    }
+    if (value.handoff && value.recovery) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A projection cannot be both the handoff and recovery snapshot",
+        path: ["recovery"]
+      });
+    }
+    if (value.cleanup && !sameTaskToPrRef(value.cleanup.eligibility.eventCursorRef, value.events.replayCursorRef)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Cleanup eligibility must bind the current canonical replay cursor",
+        path: ["cleanup", "eligibility", "eventCursorRef"]
+      });
+    }
+    if (
+      value.cleanup &&
+      !sameTaskToPrRef(value.cleanup.eligibility.targetWorktreeRef, value.repository.worktreeRef)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Cleanup eligibility must bind the canonical worktree",
+        path: ["cleanup", "eligibility", "targetWorktreeRef"]
+      });
+    }
+    if (value.pullRequestRef) {
+      if (value.exactHead && !sameTaskToPrRef(value.exactHead.pullRequestRef, value.pullRequestRef)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Exact-head proof must bind the canonical pull request ref",
+          path: ["exactHead", "pullRequestRef"]
+        });
+      }
+      for (const [reviewIndex, review] of value.reviews.entries()) {
+        if (!sameTaskToPrRef(review.pullRequestRef, value.pullRequestRef)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Every review must bind the canonical pull request ref",
+            path: ["reviews", reviewIndex, "pullRequestRef"]
+          });
+        }
+      }
+      if (value.merge && !sameTaskToPrRef(value.merge.guard.pullRequestRef, value.pullRequestRef)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Merge guard must bind the canonical pull request ref",
+          path: ["merge", "guard", "pullRequestRef"]
+        });
+      }
+      if (value.merge?.outcome && !sameTaskToPrRef(value.merge.outcome.pullRequestRef, value.pullRequestRef)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Merge outcome must bind the canonical pull request ref",
+          path: ["merge", "outcome", "pullRequestRef"]
+        });
+      }
+    } else if (value.exactHead || value.reviews.length > 0 || value.merge) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Review and merge state require a canonical pull request ref",
+        path: ["pullRequestRef"]
+      });
+    }
+    if (value.exactHead && !sameGitObjectId(value.exactHead.localHead, value.repository.branchHead)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Exact local head must equal the canonical branch head",
+        path: ["exactHead", "localHead"]
+      });
+    }
+    if (value.exactHead && !sameTaskToPrRef(value.exactHead.remoteBranchRef, value.repository.branchRef)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Exact-head remote branch ref must equal the canonical repository branch ref",
+        path: ["exactHead", "remoteBranchRef"]
+      });
+    }
+    if (value.exactHead && Date.parse(value.exactHead.verifiedAt) < Date.parse(value.createdAt)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Exact-head verification cannot precede the projection timestamp",
+        path: ["exactHead", "verifiedAt"]
+      });
+    }
+    if (value.reviews.length > 0 && !value.exactHead) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Reviews require local/remote/provider exact-head proof",
+        path: ["exactHead"]
+      });
+    }
+    if (value.exactHead) {
+      const proofObligations: Array<{ ref: TaskToPrRef; path: (string | number)[] }> = [
+        { ref: value.exactHead.equalityProofRef, path: ["exactHead", "equalityProofRef"] },
+        ...value.exactHead.ciProofBundleRefs.map((ref, index) => ({
+          ref,
+          path: ["exactHead", "ciProofBundleRefs", index]
+        })),
+        ...value.reviews.map((review, index) => ({
+          ref: review.proofBundleRef,
+          path: ["reviews", index, "proofBundleRef"]
+        }))
+      ];
+      const proofObligationKeys = new Set<string>();
+      const proofObligationDigests = new Set<string>();
+      for (const obligation of proofObligations) {
+        const key = taskToPrCanonicalRefKey(obligation.ref);
+        if (proofObligationKeys.has(key)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Exact-head equality, CI, and review proof obligations require globally unique canonical identities",
+            path: obligation.path
+          });
+        }
+        proofObligationKeys.add(key);
+        if (proofObligationDigests.has(obligation.ref.digest)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Exact-head equality, CI, and review proof obligations require globally unique canonical digests",
+            path: obligation.path
+          });
+        }
+        proofObligationDigests.add(obligation.ref.digest);
+      }
+    }
+    const reviewKeys = new Set<string>();
+    const reviewDigests = new Set<string>();
+    const reviewerKeys = new Set<string>();
+    const reviewerDigests = new Set<string>();
+    const reviewRunKeys = new Set<string>();
+    const reviewRunDigests = new Set<string>();
+    const reviewProofKeys = new Set<string>();
+    const reviewProofDigests = new Set<string>();
+    for (const [reviewIndex, review] of value.reviews.entries()) {
+      if (!sameGitObjectId(review.head, value.repository.branchHead)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Review head must equal the exact canonical branch head",
+          path: ["reviews", reviewIndex, "head"]
+        });
+      }
+      for (const [key, seen, path] of [
+        [review.ref.id, reviewKeys, "ref"],
+        [review.reviewerRef.id, reviewerKeys, "reviewerRef"],
+        [review.reviewRunRef.id, reviewRunKeys, "reviewRunRef"]
+      ] as const) {
+        if (seen.has(key)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Review, reviewer, and review-run refs must each be unique",
+            path: ["reviews", reviewIndex, path]
+          });
+        }
+        seen.add(key);
+      }
+      if (reviewDigests.has(review.ref.digest)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Review refs must resolve to distinct canonical record digests",
+          path: ["reviews", reviewIndex, "ref"]
+        });
+      }
+      reviewDigests.add(review.ref.digest);
+      if (reviewerDigests.has(review.reviewerRef.digest)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Reviewer refs must resolve to distinct canonical actor digests",
+          path: ["reviews", reviewIndex, "reviewerRef"]
+        });
+      }
+      reviewerDigests.add(review.reviewerRef.digest);
+      if (reviewRunDigests.has(review.reviewRunRef.digest)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Review-run refs must resolve to distinct canonical run digests",
+          path: ["reviews", reviewIndex, "reviewRunRef"]
+        });
+      }
+      reviewRunDigests.add(review.reviewRunRef.digest);
+      const reviewProofKey = taskToPrCanonicalRefKey(review.proofBundleRef);
+      if (reviewProofKeys.has(reviewProofKey)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Review proof bundles must have unique canonical identities",
+          path: ["reviews", reviewIndex, "proofBundleRef"]
+        });
+      }
+      reviewProofKeys.add(reviewProofKey);
+      if (reviewProofDigests.has(review.proofBundleRef.digest)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Review proof bundles must have unique canonical digests",
+          path: ["reviews", reviewIndex, "proofBundleRef"]
+        });
+      }
+      reviewProofDigests.add(review.proofBundleRef.digest);
+      if (review.reviewerRef.digest === value.attempt.workerRef.digest) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Worker and reviewer identities must resolve to distinct canonical digests",
+          path: ["reviews", reviewIndex, "reviewerRef"]
+        });
+      }
+      if (review.reviewRunRef.digest === value.attempt.runtimeRef.digest) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Worker runtime and review run must resolve to distinct canonical digests",
+          path: ["reviews", reviewIndex, "reviewRunRef"]
+        });
+      }
+      if (
+        value.exactHead &&
+        Date.parse(review.reviewedAt) < Date.parse(value.exactHead.verifiedAt)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Reviews cannot precede exact-head verification",
+          path: ["reviews", reviewIndex, "reviewedAt"]
+        });
+      }
+    }
+    if (value.merge) {
+      if (!value.exactHead) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Merge state requires local/remote/provider exact-head proof",
+          path: ["exactHead"]
+        });
+      }
+      if (!sameGitObjectId(value.merge.guard.expectedHead, value.repository.branchHead)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Merge guard expected head must equal the exact canonical branch head",
+          path: ["merge", "guard", "expectedHead"]
+        });
+      }
+      if (value.exactHead && Date.parse(value.merge.guard.evaluatedAt) < Date.parse(value.exactHead.verifiedAt)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Merge guards cannot precede exact-head verification",
+          path: ["merge", "guard", "evaluatedAt"]
+        });
+      }
+      if (value.reviews.some((review) => Date.parse(value.merge!.guard.evaluatedAt) < Date.parse(review.reviewedAt))) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Merge guards cannot precede their bound reviews",
+          path: ["merge", "guard", "evaluatedAt"]
+        });
+      }
+      if (value.merge.guard.operatorRef.digest === value.attempt.workerRef.digest) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Worker and merge operator identities must resolve to distinct canonical digests",
+          path: ["merge", "guard", "operatorRef"]
+        });
+      }
+      if (value.merge.guard.operatorRunRef.digest === value.attempt.runtimeRef.digest) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Worker runtime and merge-operator run must resolve to distinct canonical digests",
+          path: ["merge", "guard", "operatorRunRef"]
+        });
+      }
+      for (const [reviewIndex, review] of value.reviews.entries()) {
+        if (value.merge.guard.operatorRef.digest === review.reviewerRef.digest) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Reviewer and merge operator identities must resolve to distinct canonical digests",
+            path: ["reviews", reviewIndex, "reviewerRef"]
+          });
+        }
+        if (value.merge.guard.operatorRunRef.digest === review.reviewRunRef.digest) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Review and merge-operator runs must resolve to distinct canonical digests",
+            path: ["reviews", reviewIndex, "reviewRunRef"]
+          });
+        }
+      }
+      if (value.merge.guard.decision === "eligible") {
+        if (value.reviews.length === 0 || value.reviews.some((review) => review.verdict !== "approved")) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Eligible merge guards require at least one review and all reviews approved",
+            path: ["merge", "guard", "decision"]
+          });
+        }
+        if (
+          value.merge.guard.reviewRefs.length !== value.reviews.length ||
+          value.merge.guard.reviewRefs.some(
+            (reviewRef) => !value.reviews.some((review) => sameTaskToPrRef(reviewRef, review.ref))
+          )
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message:
+              "Eligible merge guard review refs must exactly equal the projected approved review refs as a canonical set",
+            path: ["merge", "guard", "reviewRefs"]
+          });
+        }
+        for (const review of value.reviews) {
+          if (!value.merge.guard.proofBundleRefs.some((proofRef) => sameTaskToPrRef(proofRef, review.proofBundleRef))) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Eligible merge guards must bind every exact review proof bundle",
+              path: ["merge", "guard", "proofBundleRefs"]
+            });
+          }
+        }
+        if (
+          value.exactHead &&
+          !value.merge.guard.proofBundleRefs.some((proofRef) => sameTaskToPrRef(proofRef, value.exactHead!.equalityProofRef))
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Eligible merge guards must bind the exact-head equality proof",
+            path: ["merge", "guard", "proofBundleRefs"]
+          });
+        }
+        if (
+          value.exactHead &&
+          value.exactHead.ciProofBundleRefs.some(
+            (ciProofRef) => !value.merge!.guard.proofBundleRefs.some((proofRef) => sameTaskToPrRef(proofRef, ciProofRef))
+          )
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Eligible merge guards must bind every exact-head CI proof",
+            path: ["merge", "guard", "proofBundleRefs"]
+          });
+        }
+      }
+    }
+    if (value.merge?.outcome) {
+      if (!sameTaskToPrRef(value.merge.outcome.guardRef, value.merge.guard.ref)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Merge outcome must bind the exact immutable merge guard",
+          path: ["merge", "outcome", "guardRef"]
+        });
+      }
+      if (!sameGitObjectId(value.merge.outcome.expectedHead, value.merge.guard.expectedHead)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Merge outcome expected head must equal the guarded expected head",
+          path: ["merge", "outcome", "expectedHead"]
+        });
+      }
+      if (value.merge.outcome.status === "merged" && value.merge.guard.decision !== "eligible") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Merged outcomes require an eligible merge guard",
+          path: ["merge", "outcome", "status"]
+        });
+      }
+      if (Date.parse(value.merge.outcome.finishedAt) < Date.parse(value.merge.guard.evaluatedAt)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Merge outcomes cannot precede guard evaluation",
+          path: ["merge", "outcome", "finishedAt"]
+        });
+      }
+    }
+    if (value.cleanup) {
+      const cleanupFloor = value.merge?.outcome?.finishedAt ?? value.createdAt;
+      if (Date.parse(value.cleanup.eligibility.evaluatedAt) < Date.parse(cleanupFloor)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Cleanup eligibility cannot precede the terminal merge outcome or projection",
+          path: ["cleanup", "eligibility", "evaluatedAt"]
+        });
+      }
+      if (
+        value.cleanup.outcome &&
+        Date.parse(value.cleanup.outcome.finishedAt) < Date.parse(value.cleanup.eligibility.evaluatedAt)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Cleanup outcomes cannot precede cleanup eligibility",
+          path: ["cleanup", "outcome", "finishedAt"]
+        });
+      }
+    }
+    if (
+      value.rollback?.outcome &&
+      value.merge?.outcome &&
+      Date.parse(value.rollback.outcome.finishedAt) < Date.parse(value.merge.outcome.finishedAt)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Rollback outcomes cannot precede the merge outcome they remediate",
+        path: ["rollback", "outcome", "finishedAt"]
+      });
+    }
+    if (value.rollback) {
+      const rollbackFloor = value.merge?.outcome?.finishedAt ?? value.createdAt;
+      if (Date.parse(value.rollback.plan.createdAt) < Date.parse(rollbackFloor)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Rollback plans cannot precede the terminal merge outcome or projection",
+          path: ["rollback", "plan", "createdAt"]
+        });
+      }
+    }
+    if (value.state === "handed_off" && !value.handoff) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Handed-off projections require a handoff ref", path: ["handoff"] });
+    }
+    if (TaskToPrStatesWithoutReviewAuthority.has(value.state) && value.reviews.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${value.state} projections cannot carry review bindings before review authority is active`,
+        path: ["reviews"]
+      });
+    }
+    if (
+      (TaskToPrStatesWithoutReviewAuthority.has(value.state) || value.state === "recovering") &&
+      (value.merge?.guard.reviewRefs.length ?? 0) > 0
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${value.state} projections cannot hide review bindings in a merge guard before review authority is active`,
+        path: ["merge", "guard", "reviewRefs"]
+      });
+    }
+    if (
+      value.merge?.guard.decision === "eligible" &&
+      !TaskToPrEligibleGuardAuthoritativeStates.has(value.state)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Eligible merge guards are not authoritative in the ${value.state} phase`,
+        path: ["merge", "guard", "decision"]
+      });
+    }
+    if (value.state === "reviewing" && value.reviews.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Reviewing projections require review refs", path: ["reviews"] });
+    }
+    if (value.state === "cancelled" && !value.cancellation) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Cancelled projections require preservation state", path: ["cancellation"] });
+    }
+    if (value.cancellation && value.merge?.outcome) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Cancellation cannot coexist with a terminal merge outcome",
+        path: ["cancellation"]
+      });
+    }
+    if (value.state === "recovering" && !value.recovery) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Recovering projections require recovery state", path: ["recovery"] });
+    }
+    if (value.state === "repairing" && value.repair.cycle === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Repairing projections require a non-zero repair cycle", path: ["repair", "cycle"] });
+    }
+    if (value.state === "merge_ready" && value.merge?.guard.decision !== "eligible") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Merge-ready projections require an eligible guard", path: ["merge"] });
+    }
+    if (value.state === "merged" && value.merge?.outcome?.status !== "merged") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Merged projections require a merged immutable outcome", path: ["merge"] });
+    }
+    if (
+      value.state === "closed_unmerged" &&
+      !value.merge?.outcome?.status.match(/^(closed_unmerged|refused|head_drift)$/)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Closed-unmerged projections require a non-merged terminal outcome",
+        path: ["merge"]
+      });
+    }
+    if (
+      value.state === "cleanup_complete" &&
+      (!value.cleanup?.outcome || !["deleted", "preserved", "skipped"].includes(value.cleanup.outcome.status))
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Cleanup-complete projections require an immutable cleanup outcome",
+        path: ["cleanup"]
+      });
+    }
+    if (value.state === "rolled_back" && value.rollback?.outcome?.status !== "succeeded") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Rolled-back projections require a successful rollback outcome",
+        path: ["rollback"]
+      });
+    }
+    if ((value.state === "failed" || value.state === "blocked") && value.evidenceRefs.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Failed and blocked projections require redacted evidence refs",
+        path: ["evidenceRefs"]
+      });
+    }
+    if (
+      ["admitted", "running", "handed_off", "reviewing", "repairing", "merge_ready", "recovering"].includes(value.state) &&
+      (value.merge?.outcome || value.cancellation || value.cleanup?.outcome || value.rollback?.outcome)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Non-terminal projections cannot carry terminal owner outcomes",
+        path: ["state"]
+      });
+    }
+    const extensionKeys = new Set<string>();
+    for (const [index, extension] of value.adapterExtensions.entries()) {
+      if (RegisteredCanonicalSchemaIds.has(extension.schema)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Adapter extensions are non-authoritative and cannot reuse any registered canonical contract schema",
+          path: ["adapterExtensions", index, "schema"]
+        });
+      }
+      const key = `${extension.mode}:${extension.schema}`;
+      if (extensionKeys.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Adapter extensions must be unique per local/cloud mode and schema",
+          path: ["adapterExtensions", index]
+        });
+      }
+      extensionKeys.add(key);
+    }
+  });
+export type TaskToPrProjection = z.infer<typeof TaskToPrProjectionSchema>;
+
+export interface TaskToPrTransitionIssue {
+  path: string;
+  message: string;
+}
+
+export type TaskToPrTransitionResult =
+  | { success: true; issues: [] }
+  | { success: false; issues: TaskToPrTransitionIssue[] };
+
+type TaskToPrHeadBoundEvidenceCategory =
+  | "equality_proof"
+  | "ci_proof"
+  | "review_proof"
+  | "review_record"
+  | "review_run";
+
+interface TaskToPrHeadBoundEvidenceBinding {
+  category: TaskToPrHeadBoundEvidenceCategory;
+  ref: TaskToPrRef;
+  path: string;
+}
+
+function taskToPrHeadBoundEvidenceBindings(
+  projection: TaskToPrProjection
+): TaskToPrHeadBoundEvidenceBinding[] {
+  return [
+    ...(projection.exactHead
+      ? [
+          {
+            category: "equality_proof" as const,
+            ref: projection.exactHead.equalityProofRef,
+            path: "exactHead.equalityProofRef"
+          },
+          ...projection.exactHead.ciProofBundleRefs.map((ref, index) => ({
+            category: "ci_proof" as const,
+            ref,
+            path: `exactHead.ciProofBundleRefs.${index}`
+          }))
+        ]
+      : []),
+    ...projection.reviews.flatMap((review, index) => [
+      {
+        category: "review_proof" as const,
+        ref: review.proofBundleRef,
+        path: `reviews.${index}.proofBundleRef`
+      },
+      {
+        category: "review_record" as const,
+        ref: review.ref,
+        path: `reviews.${index}.ref`
+      },
+      {
+        category: "review_run" as const,
+        ref: review.reviewRunRef,
+        path: `reviews.${index}.reviewRunRef`
+      }
+    ])
+  ];
+}
+
+const TASK_TO_PR_CHANGED_HEAD_EVIDENCE_IDENTITY_MESSAGE =
+  "A changed branch head requires every head-bound evidence ref to use a fresh canonical identity";
+const TASK_TO_PR_CHANGED_HEAD_EVIDENCE_DIGEST_MESSAGE =
+  "A changed branch head requires every head-bound evidence ref to use a fresh digest";
+
+const TASK_TO_PR_LEGAL_STATE_TRANSITIONS: Record<TaskToPrProjectionState, readonly TaskToPrProjectionState[]> = {
+  admitted: ["admitted", "running", "failed", "blocked", "cancelled", "recovering"],
+  running: [
+    "running",
+    "handed_off",
+    "reviewing",
+    "repairing",
+    "merge_ready",
+    "failed",
+    "blocked",
+    "cancelled",
+    "recovering",
+    "cleanup_complete"
+  ],
+  handed_off: ["handed_off", "running", "reviewing", "repairing", "failed", "blocked", "cancelled", "recovering"],
+  reviewing: ["reviewing", "repairing", "merge_ready", "failed", "blocked", "cancelled", "recovering", "closed_unmerged"],
+  repairing: ["repairing", "running", "reviewing", "merge_ready", "failed", "blocked", "cancelled", "recovering", "closed_unmerged"],
+  merge_ready: ["merge_ready", "repairing", "merged", "closed_unmerged", "failed", "blocked", "cancelled", "recovering"],
+  merged: ["merged", "cleanup_complete", "rolled_back"],
+  closed_unmerged: ["closed_unmerged", "cleanup_complete"],
+  failed: ["failed", "recovering", "cleanup_complete", "rolled_back"],
+  blocked: ["blocked", "recovering", "cancelled", "cleanup_complete"],
+  cancelled: ["cancelled", "cleanup_complete"],
+  recovering: ["recovering", "running", "handed_off", "failed", "blocked", "cancelled"],
+  cleanup_complete: ["cleanup_complete"],
+  rolled_back: ["rolled_back"]
+};
+
+function taskToPrParseIssues(
+  prefix: "previous" | "current" | "local" | "cloud",
+  issues: z.ZodIssue[]
+): TaskToPrTransitionIssue[] {
+  return issues.map((issue) => ({
+    path: [prefix, ...issue.path].join("."),
+    message: issue.message
+  }));
+}
+
+export function validateTaskToPrProjectionTransition(
+  previousInput: unknown,
+  currentInput: unknown
+): TaskToPrTransitionResult {
+  const issues: TaskToPrTransitionIssue[] = [];
+  const addIssue = (path: string, message: string) => issues.push({ path, message });
+  const parsedPrevious = TaskToPrProjectionSchema.safeParse(previousInput);
+  const parsedCurrent = TaskToPrProjectionSchema.safeParse(currentInput);
+  if (!parsedPrevious.success) {
+    issues.push(...taskToPrParseIssues("previous", parsedPrevious.error.issues));
+  }
+  if (!parsedCurrent.success) {
+    issues.push(...taskToPrParseIssues("current", parsedCurrent.error.issues));
+  }
+  if (!parsedPrevious.success || !parsedCurrent.success) {
+    return { success: false, issues };
+  }
+  const previous = parsedPrevious.data;
+  const current = parsedCurrent.data;
+  const previousActiveProvenance = taskToPrActiveProvenanceEntries(previous);
+  const currentActiveProvenance = taskToPrActiveProvenanceEntries(current);
+  if (
+    current.provenanceLedger.length < previous.provenanceLedger.length ||
+    previous.provenanceLedger.some(
+      (entry, index) =>
+        !current.provenanceLedger[index] ||
+        !sameTaskToPrProvenanceEntry(entry, current.provenanceLedger[index]!)
+    )
+  ) {
+    addIssue(
+      "provenanceLedger",
+      "The provenance ledger is append-only and must retain the previous ledger as an exact immutable prefix"
+    );
+  }
+  const appendedProvenance = current.provenanceLedger.slice(previous.provenanceLedger.length);
+  for (const [index, entry] of appendedProvenance.entries()) {
+    if (!currentActiveProvenance.some((activeEntry) => sameTaskToPrProvenanceEntry(activeEntry, entry))) {
+      addIssue(
+        `provenanceLedger.${previous.provenanceLedger.length + index}`,
+        "A newly appended provenance entry must represent an active identity in the current snapshot"
+      );
+    }
+  }
+  for (const activeEntry of currentActiveProvenance) {
+    const existedBefore = previous.provenanceLedger.some((entry) =>
+      sameTaskToPrProvenanceEntry(entry, activeEntry)
+    );
+    const wasActiveBefore = previousActiveProvenance.some((entry) =>
+      sameTaskToPrProvenanceEntry(entry, activeEntry)
+    );
+    if (existedBefore && !wasActiveBefore) {
+      addIssue(
+        "provenanceLedger",
+        `The ${activeEntry.category} identity cannot reactivate after becoming inactive`
+      );
+    }
+  }
+  const validateOwnerRecordTransition = (
+    path: string,
+    previousRecord: { ref: TaskToPrRef } | undefined,
+    currentRecord: { ref: TaskToPrRef } | undefined
+  ): void => {
+    if (
+      !previousRecord ||
+      !currentRecord ||
+      JSON.stringify(previousRecord) === JSON.stringify(currentRecord)
+    ) {
+      return;
+    }
+    if (sameTaskToPrCanonicalRefId(previousRecord.ref, currentRecord.ref)) {
+      addIssue(
+        path,
+        "An owner record must remain exactly immutable while its canonical ref identity is unchanged"
+      );
+      return;
+    }
+    if (previousRecord.ref.digest === currentRecord.ref.digest) {
+      addIssue(path, "A rotated owner record requires both a fresh canonical ref identity and a fresh digest");
+    }
+  };
+
+  if (previous.id === current.id) {
+    addIssue("id", "A changed lifecycle snapshot requires a fresh immutable projection id");
+  }
+  if (Date.parse(current.createdAt) < Date.parse(previous.createdAt)) {
+    addIssue("createdAt", "Projection timestamps cannot move backwards");
+  }
+  const {
+    id: _previousId,
+    createdAt: _previousCreatedAt,
+    events: _previousEvents,
+    provenanceLedger: _previousProvenanceLedger,
+    ...previousSemanticState
+  } = previous;
+  const {
+    id: _currentId,
+    createdAt: _currentCreatedAt,
+    events: _currentEvents,
+    provenanceLedger: _currentProvenanceLedger,
+    ...currentSemanticState
+  } = current;
+  if (
+    JSON.stringify(previousSemanticState) !== JSON.stringify(currentSemanticState) &&
+    current.events.sequence <= previous.events.sequence
+  ) {
+    addIssue("events.sequence", "Semantic lifecycle drift requires replay sequence and cursor advancement");
+  }
+  for (const [path, left, right] of [
+    ["identityDigest", previous.identityDigest, current.identityDigest],
+    ["frozenScopeDigest", previous.frozenScopeDigest, current.frozenScopeDigest],
+    ["rootRequestRef", JSON.stringify(previous.rootRequestRef), JSON.stringify(current.rootRequestRef)],
+    ["prGroupRef", JSON.stringify(previous.prGroupRef), JSON.stringify(current.prGroupRef)],
+    ["leafTaskRef", JSON.stringify(previous.leafTaskRef), JSON.stringify(current.leafTaskRef)],
+    ["repository.repoRef", JSON.stringify(previous.repository.repoRef), JSON.stringify(current.repository.repoRef)],
+    ["repository.worktreeRef", JSON.stringify(previous.repository.worktreeRef), JSON.stringify(current.repository.worktreeRef)],
+    ["repository.branchRef", JSON.stringify(previous.repository.branchRef), JSON.stringify(current.repository.branchRef)],
+    ["repository.baseHead", JSON.stringify(previous.repository.baseHead), JSON.stringify(current.repository.baseHead)],
+    ["events.streamRef", JSON.stringify(previous.events.streamRef), JSON.stringify(current.events.streamRef)]
+  ] as const) {
+    if (left !== right) {
+      addIssue(path, "Canonical task-to-PR identity cannot change between projections");
+    }
+  }
+
+  if (
+    previous.pullRequestRef &&
+    (!current.pullRequestRef || !sameTaskToPrRef(previous.pullRequestRef, current.pullRequestRef))
+  ) {
+    addIssue("pullRequestRef", "An established canonical pull-request identity cannot change or disappear");
+  }
+
+  if (sameGitObjectId(previous.repository.branchHead, current.repository.branchHead)) {
+    if (
+      previous.exactHead &&
+      JSON.stringify(current.exactHead) !== JSON.stringify(previous.exactHead)
+    ) {
+      addIssue(
+        "exactHead",
+        "An established same-head exact-head fact is immutable and cannot change or disappear"
+      );
+    }
+    if (
+      current.reviews.length < previous.reviews.length ||
+      previous.reviews.some(
+        (previousReview, index) =>
+          JSON.stringify(current.reviews[index]) !== JSON.stringify(previousReview)
+      )
+    ) {
+      addIssue(
+        "reviews",
+        "Same-head review history is an exact immutable prefix; existing review bindings cannot move, change, or disappear"
+      );
+    }
+  } else {
+    const previousHeadBoundEvidence = taskToPrHeadBoundEvidenceBindings(previous);
+    const currentHeadBoundEvidence = taskToPrHeadBoundEvidenceBindings(current);
+    const previousHeadBoundEvidenceKeys = new Set(
+      previousHeadBoundEvidence.map(({ ref }) => taskToPrCanonicalRefKey(ref))
+    );
+    const previousHeadBoundEvidenceDigests = new Set(
+      previousHeadBoundEvidence.map(({ ref }) => ref.digest)
+    );
+    for (const { ref, path } of currentHeadBoundEvidence) {
+      if (previousHeadBoundEvidenceKeys.has(taskToPrCanonicalRefKey(ref))) {
+        addIssue(path, TASK_TO_PR_CHANGED_HEAD_EVIDENCE_IDENTITY_MESSAGE);
+      }
+      if (previousHeadBoundEvidenceDigests.has(ref.digest)) {
+        addIssue(path, TASK_TO_PR_CHANGED_HEAD_EVIDENCE_DIGEST_MESSAGE);
+      }
+    }
+  }
+  if (current.state === "recovering" && (current.exactHead || current.reviews.length > 0)) {
+    if (
+      !sameGitObjectId(previous.repository.branchHead, current.repository.branchHead) ||
+      JSON.stringify(previous.exactHead) !== JSON.stringify(current.exactHead) ||
+      JSON.stringify(previous.reviews) !== JSON.stringify(current.reviews)
+    ) {
+      addIssue(
+        "recovery",
+        "Recovery may retain exact-head and review facts only unchanged from the immediately prior same-head snapshot"
+      );
+    }
+  }
+
+  if (current.events.sequence < previous.events.sequence) {
+    addIssue("events.sequence", "Replay sequence cannot decrease");
+  } else if (current.events.sequence === previous.events.sequence) {
+    if (
+      current.events.prefixDigest !== previous.events.prefixDigest ||
+      !sameTaskToPrRef(current.events.replayCursorRef, previous.events.replayCursorRef)
+    ) {
+      addIssue("events", "An unchanged replay sequence must retain the same cursor and prefix digest");
+    }
+  } else {
+    if (sameTaskToPrCanonicalRefId(current.events.replayCursorRef, previous.events.replayCursorRef)) {
+      addIssue("events.replayCursorRef", "An advanced replay sequence requires a fresh canonical replay cursor ref");
+    }
+    if (current.events.replayCursorRef.digest === previous.events.replayCursorRef.digest) {
+      addIssue("events.replayCursorRef", "An advanced replay sequence requires a fresh replay cursor digest");
+    }
+    if (current.events.prefixDigest === previous.events.prefixDigest) {
+      addIssue("events.prefixDigest", "An advanced replay sequence requires a fresh prefix digest");
+    }
+  }
+
+  if (current.repair.cycle < previous.repair.cycle || current.repair.cycle > previous.repair.cycle + 1) {
+    addIssue("repair.cycle", "Repair cycles are cumulative, monotonic, and append at most one cycle per transition");
+  }
+  if (current.repair.cycle === previous.repair.cycle + 1) {
+    const previousRepairRefs = [
+      previous.repair.ref,
+      ...(previous.repair.latestRepairRef ? [previous.repair.latestRepairRef] : [])
+    ];
+    for (const previousRepairRef of previousRepairRefs) {
+      if (sameTaskToPrCanonicalRefId(current.repair.ref, previousRepairRef)) {
+        addIssue("repair.ref", "An advanced repair cycle requires a repair-state ref fresh from both prior repair slots");
+      }
+      if (current.repair.ref.digest === previousRepairRef.digest) {
+        addIssue("repair.ref", "An advanced repair cycle requires a repair-state digest fresh from both prior repair slots");
+      }
+    }
+    if (!current.repair.latestRepairRef) {
+      addIssue("repair.latestRepairRef", "An advanced repair cycle requires a fresh latest-repair ref");
+    } else {
+      for (const previousRepairRef of previousRepairRefs) {
+        if (sameTaskToPrCanonicalRefId(current.repair.latestRepairRef, previousRepairRef)) {
+          addIssue(
+            "repair.latestRepairRef",
+            "An advanced repair cycle requires a latest-repair ref fresh from both prior repair slots"
+          );
+        }
+        if (current.repair.latestRepairRef.digest === previousRepairRef.digest) {
+          addIssue(
+            "repair.latestRepairRef",
+            "An advanced repair cycle requires a latest-repair digest fresh from both prior repair slots"
+          );
+        }
+      }
+    }
+  } else if (
+    current.repair.cycle === previous.repair.cycle &&
+    JSON.stringify(current.repair) !== JSON.stringify(previous.repair)
+  ) {
+    addIssue("repair", "An unchanged repair cycle must retain the same immutable repair refs");
+  }
+
+  const attemptChanged = !sameTaskToPrCanonicalRefId(previous.attempt.ref, current.attempt.ref);
+  const nonceChanged = previous.attempt.nonce !== current.attempt.nonce;
+  const generationChanged = !sameTaskToPrCanonicalRefId(
+    previous.attempt.writerGenerationRef,
+    current.attempt.writerGenerationRef
+  );
+  const workRunChanged = !sameTaskToPrCanonicalRefId(previous.workRunRef, current.workRunRef);
+  if (new Set([attemptChanged, nonceChanged, generationChanged, workRunChanged]).size !== 1) {
+    addIssue(
+      "attempt",
+      "Attempt ref, nonce, writer generation, and WorkRun must either all remain stable or all advance together"
+    );
+  }
+  if (attemptChanged && (!current.recovery && !current.handoff)) {
+    addIssue("attempt", "A fresh attempt requires an explicit recovery or handoff transition ref");
+  }
+  if (attemptChanged && current.recovery && current.handoff) {
+    addIssue("attempt", "A fresh attempt must use exactly one recovery or handoff transition");
+  }
+  if (!attemptChanged && (current.recovery || current.handoff) && !previous.recovery && !previous.handoff) {
+    addIssue("attempt", "Recovery and handoff transitions require a fresh attempt");
+  }
+  if (!attemptChanged && JSON.stringify(previous.handoff) !== JSON.stringify(current.handoff)) {
+    addIssue(
+      "handoff",
+      "An unchanged attempt must retain its exact immutable handoff provenance"
+    );
+  }
+  if (!attemptChanged && JSON.stringify(previous.recovery) !== JSON.stringify(current.recovery)) {
+    addIssue(
+      "recovery",
+      "An unchanged attempt must retain its exact immutable recovery provenance"
+    );
+  }
+  if (!attemptChanged && JSON.stringify(previous.attempt) !== JSON.stringify(current.attempt)) {
+    addIssue("attempt", "An unchanged attempt identity cannot mutate attempt-scoped owner refs");
+  }
+  if (
+    !generationChanged &&
+    !sameTaskToPrRef(previous.attempt.writerGenerationRef, current.attempt.writerGenerationRef)
+  ) {
+    addIssue("attempt.writerGenerationRef", "An unchanged writer-generation identity cannot mutate its digest");
+  }
+  if (!workRunChanged && !sameTaskToPrRef(previous.workRunRef, current.workRunRef)) {
+    addIssue("workRunRef", "An unchanged WorkRun identity cannot mutate its digest");
+  }
+
+  if (attemptChanged) {
+    if (current.attempt.ref.digest === previous.attempt.ref.digest) {
+      addIssue("attempt.ref", "A fresh attempt requires a fresh attempt digest");
+    }
+    if (current.attempt.writerGenerationRef.digest === previous.attempt.writerGenerationRef.digest) {
+      addIssue("attempt.writerGenerationRef", "A fresh attempt requires a fresh writer-generation digest");
+    }
+    if (current.workRunRef.digest === previous.workRunRef.digest) {
+      addIssue("workRunRef", "A fresh attempt requires a fresh WorkRun digest");
+    }
+    for (const field of [
+      "runtimeRef",
+      "writerLeaseRef",
+      "writerFenceRef",
+      "providerProfileRef",
+      "providerRouteRef"
+    ] as const) {
+      if (
+        sameTaskToPrCanonicalRefId(previous.attempt[field], current.attempt[field]) ||
+        previous.attempt[field].digest === current.attempt[field].digest
+      ) {
+        addIssue(`attempt.${field}`, `A fresh attempt requires a fresh ${field}`);
+      }
+    }
+    if (current.recovery) {
+      if (!sameTaskToPrRef(current.recovery.priorAttemptRef, previous.attempt.ref)) {
+        addIssue("recovery.priorAttemptRef", "Recovery must bind the immediately prior attempt");
+      }
+      if (!sameTaskToPrRef(current.recovery.priorWriterGenerationRef, previous.attempt.writerGenerationRef)) {
+        addIssue("recovery.priorWriterGenerationRef", "Recovery must bind the immediately prior writer generation");
+      }
+      if (!sameTaskToPrRef(current.recovery.priorWorkRunRef, previous.workRunRef)) {
+        addIssue("recovery.priorWorkRunRef", "Recovery must bind the immediately prior WorkRun");
+      }
+    }
+    if (current.handoff) {
+      if (!sameTaskToPrRef(current.handoff.previousAttemptRef, previous.attempt.ref)) {
+        addIssue("handoff.previousAttemptRef", "Handoff must bind the immediately prior attempt");
+      }
+      if (!sameTaskToPrRef(current.handoff.nextAttemptRef, current.attempt.ref)) {
+        addIssue("handoff.nextAttemptRef", "Handoff must bind the successor attempt");
+      }
+      if (!sameTaskToPrRef(current.handoff.previousWriterGenerationRef, previous.attempt.writerGenerationRef)) {
+        addIssue("handoff.previousWriterGenerationRef", "Handoff must bind the immediately prior writer generation");
+      }
+      if (!sameTaskToPrRef(current.handoff.stoppedWorkRunRef, previous.workRunRef)) {
+        addIssue("handoff.stoppedWorkRunRef", "Handoff must bind the immediately prior WorkRun");
+      }
+    }
+  }
+
+  if (!TASK_TO_PR_LEGAL_STATE_TRANSITIONS[previous.state].includes(current.state)) {
+    addIssue("state", `Illegal task-to-PR lifecycle transition from ${previous.state} to ${current.state}`);
+  }
+
+  validateOwnerRecordTransition("handoff", previous.handoff, current.handoff);
+  validateOwnerRecordTransition("recovery", previous.recovery, current.recovery);
+  validateOwnerRecordTransition("merge.guard", previous.merge?.guard, current.merge?.guard);
+  if (
+    previous.merge &&
+    current.merge &&
+    !sameGitObjectId(previous.merge.guard.expectedHead, current.merge.guard.expectedHead)
+  ) {
+    if (
+      sameTaskToPrCanonicalRefId(
+        previous.merge.guard.providerGuardReceiptRef,
+        current.merge.guard.providerGuardReceiptRef
+      )
+    ) {
+      addIssue(
+        "merge.guard.providerGuardReceiptRef",
+        "A changed guarded head requires a fresh provider guard receipt identity"
+      );
+    }
+    if (
+      previous.merge.guard.providerGuardReceiptRef.digest ===
+      current.merge.guard.providerGuardReceiptRef.digest
+    ) {
+      addIssue(
+        "merge.guard.providerGuardReceiptRef",
+        "A changed guarded head requires a fresh provider guard receipt digest"
+      );
+    }
+  }
+  validateOwnerRecordTransition(
+    "cleanup.eligibility",
+    previous.cleanup?.eligibility,
+    current.cleanup?.eligibility
+  );
+  validateOwnerRecordTransition("rollback.plan", previous.rollback?.plan, current.rollback?.plan);
+
+  for (const [path, left, right] of [
+    ["merge", previous.merge?.outcome ? previous.merge : undefined, current.merge],
+    ["cancellation", previous.cancellation, current.cancellation],
+    ["cleanup", previous.cleanup?.outcome ? previous.cleanup : undefined, current.cleanup],
+    ["rollback", previous.rollback?.outcome ? previous.rollback : undefined, current.rollback]
+  ] as const) {
+    if (left && JSON.stringify(left) !== JSON.stringify(right)) {
+      addIssue(path, "Complete immutable terminal owner facts cannot change or disappear");
+    }
+  }
+
+  return issues.length === 0 ? { success: true, issues: [] } : { success: false, issues };
+}
+
+export function validateTaskToPrAdapterCoreEquivalence(
+  localInput: unknown,
+  cloudInput: unknown
+): TaskToPrTransitionResult {
+  const issues: TaskToPrTransitionIssue[] = [];
+  const parsedLocal = TaskToPrProjectionSchema.safeParse(localInput);
+  const parsedCloud = TaskToPrProjectionSchema.safeParse(cloudInput);
+  if (!parsedLocal.success) {
+    issues.push(...taskToPrParseIssues("local", parsedLocal.error.issues));
+  }
+  if (!parsedCloud.success) {
+    issues.push(...taskToPrParseIssues("cloud", parsedCloud.error.issues));
+  }
+  if (!parsedLocal.success || !parsedCloud.success) {
+    return { success: false, issues };
+  }
+  if (
+    parsedLocal.data.adapterExtensions.length === 0 ||
+    parsedLocal.data.adapterExtensions.some((extension) => extension.mode !== "local")
+  ) {
+    issues.push({
+      path: "local.adapterExtensions",
+      message: "The first adapter projection must contain one or more local-only extensions"
+    });
+  }
+  if (
+    parsedCloud.data.adapterExtensions.length === 0 ||
+    parsedCloud.data.adapterExtensions.some((extension) => extension.mode !== "cloud")
+  ) {
+    issues.push({
+      path: "cloud.adapterExtensions",
+      message: "The second adapter projection must contain one or more cloud-only extensions"
+    });
+  }
+  if (issues.length > 0) {
+    return { success: false, issues };
+  }
+  const { adapterExtensions: _localExtensions, ...localCore } = parsedLocal.data;
+  const { adapterExtensions: _cloudExtensions, ...cloudCore } = parsedCloud.data;
+  if (JSON.stringify(localCore) !== JSON.stringify(cloudCore)) {
+    return {
+      success: false,
+      issues: [
+        {
+          path: "core",
+          message: "Local and cloud adapters must serialize byte-equivalent task-to-PR core projections"
+        }
+      ]
+    };
+  }
+  return { success: true, issues: [] };
+}
+
 export const TrajectoryEventSchema = z
   .object({
     id: z.string().min(1),
@@ -2729,6 +5237,11 @@ export const ContractSchemaRegistry = {
   [SCHEMA_IDS.resourceRef]: ResourceRefSchema,
   [SCHEMA_IDS.evidenceRef]: EvidenceRefSchema,
   [SCHEMA_IDS.workRun]: WorkRunSchema,
+  [SCHEMA_IDS.taskToPrProjection]: TaskToPrProjectionSchema as z.ZodType<
+    TaskToPrProjection,
+    z.ZodTypeDef,
+    TaskToPrProjectionInput
+  >,
   [SCHEMA_IDS.decisionEnvelope]: DecisionEnvelopeSchema,
   [SCHEMA_IDS.costEstimate]: CostEstimateSchema,
   [SCHEMA_IDS.capabilityCard]: CapabilityCardSchema,
@@ -2764,6 +5277,7 @@ export type ContractBySchemaId = {
   [SCHEMA_IDS.resourceRef]: ResourceRef;
   [SCHEMA_IDS.evidenceRef]: EvidenceRef;
   [SCHEMA_IDS.workRun]: WorkRun;
+  [SCHEMA_IDS.taskToPrProjection]: TaskToPrProjection;
   [SCHEMA_IDS.decisionEnvelope]: DecisionEnvelope;
   [SCHEMA_IDS.costEstimate]: CostEstimate;
   [SCHEMA_IDS.capabilityCard]: CapabilityCard;
@@ -2796,6 +5310,7 @@ export type ActorRefInput = z.input<typeof ActorRefSchema>;
 export type ResourceRefInput = z.input<typeof ResourceRefSchema>;
 export type EvidenceRefInput = z.input<typeof EvidenceRefSchema>;
 export type WorkRunInput = z.input<typeof WorkRunSchema>;
+export type TaskToPrProjectionInput = z.input<typeof TaskToPrProjectionSchema>;
 export type DecisionEnvelopeInput = z.input<typeof DecisionEnvelopeSchema>;
 export type CostEstimateInput = z.input<typeof CostEstimateSchema>;
 export type CapabilityCardInput = z.input<typeof CapabilityCardSchema>;
@@ -2831,6 +5346,7 @@ export type ContractInputBySchemaId = {
   [SCHEMA_IDS.resourceRef]: ResourceRefInput;
   [SCHEMA_IDS.evidenceRef]: EvidenceRefInput;
   [SCHEMA_IDS.workRun]: WorkRunInput;
+  [SCHEMA_IDS.taskToPrProjection]: TaskToPrProjectionInput;
   [SCHEMA_IDS.decisionEnvelope]: DecisionEnvelopeInput;
   [SCHEMA_IDS.costEstimate]: CostEstimateInput;
   [SCHEMA_IDS.capabilityCard]: CapabilityCardInput;
