@@ -11,7 +11,9 @@ import {
   TaskToPrRecoverySchema,
   TaskToPrRefSchema,
   WorkRunSchema,
+  deriveTaskToPrEvidenceId,
   deriveTaskToPrIdentityDigest,
+  deriveTaskToPrRefId,
   parseContract,
   parseEmbeddedContract,
   validateContract,
@@ -29,18 +31,32 @@ function sha(seed: string): string {
   return seed.repeat(64);
 }
 
+function opaque32(seed: string): string {
+  return createHash("sha256").update(seed, "utf8").digest("hex").slice(0, 32);
+}
+
+function projectionId(seed: string): string {
+  return `task_to_pr_projection:opaque-${opaque32(seed)}`;
+}
+
+function attemptNonce(seed: string): string {
+  return `attempt_nonce:opaque-${opaque32(seed)}`;
+}
+
 function ref(role: TaskToPrRole, authority: TaskToPrAuthority, seed: string, redaction: Redaction = "none") {
+  const digest = createHash("sha256").update(`${role}:${authority}:${seed}`, "utf8").digest("hex");
   return {
     role,
     authority,
-    id: `${role}:opaque-${seed}`,
-    digest: createHash("sha256").update(`${role}:${authority}:${seed}`, "utf8").digest("hex"),
+    id: deriveTaskToPrRefId(role, authority, digest),
+    digest,
     redaction
   };
 }
 
 function evidence(id: string, seed: string, redaction: "partial" | "full" = "full") {
-  return { id: `evidence:opaque-${id}`, digest: sha(seed), redaction };
+  const digest = sha(seed);
+  return { id: deriveTaskToPrEvidenceId(digest), digest, redaction };
 }
 
 function head(seed: string) {
@@ -50,77 +66,109 @@ function head(seed: string) {
 function withActiveProvenance<T extends Record<string, any>>(
   projection: T
 ): Omit<T, "provenanceLedger"> & { provenanceLedger: TaskToPrProjection["provenanceLedger"] } {
+  const terminalStates = new Set([
+    "merged",
+    "closed_unmerged",
+    "failed",
+    "blocked",
+    "cancelled",
+    "cleanup_complete",
+    "rolled_back"
+  ]);
+  const normalized = {
+    ...projection,
+    terminalDispositionRef: terminalStates.has(projection.state)
+      ? projection.terminalDispositionRef
+      : undefined,
+    merge:
+      projection.merge && projection.state === "merge_ready"
+        ? {
+            ...projection.merge,
+            guard: { ...projection.merge.guard, decision: "eligible" }
+          }
+        : projection.merge
+  };
   const active = [
-    { category: "projection_id", projectionId: projection.id },
-    { category: "work_run", ref: projection.workRunRef },
-    { category: "attempt", ref: projection.attempt.ref },
-    { category: "attempt_nonce", nonce: projection.attempt.nonce },
-    { category: "runtime", ref: projection.attempt.runtimeRef },
-    { category: "writer_generation", ref: projection.attempt.writerGenerationRef },
-    { category: "writer_lease", ref: projection.attempt.writerLeaseRef },
-    { category: "writer_fence", ref: projection.attempt.writerFenceRef },
-    { category: "provider_profile", ref: projection.attempt.providerProfileRef },
-    { category: "provider_route", ref: projection.attempt.providerRouteRef },
-    { category: "replay_cursor", ref: projection.events.replayCursorRef },
+    { category: "projection_id", projectionId: normalized.id },
+    { category: "work_run", ref: normalized.workRunRef },
+    { category: "attempt", ref: normalized.attempt.ref },
+    { category: "admission", ref: normalized.attempt.admissionRef },
+    { category: "worker_actor", ref: normalized.attempt.workerActorRef },
+    { category: "worker_assignment", ref: normalized.attempt.workerRef },
+    { category: "attempt_nonce", nonce: normalized.attempt.nonce },
+    { category: "runtime", ref: normalized.attempt.runtimeRef },
+    { category: "writer_generation", ref: normalized.attempt.writerGenerationRef },
+    { category: "writer_lease", ref: normalized.attempt.writerLeaseRef },
+    { category: "writer_fence", ref: normalized.attempt.writerFenceRef },
+    { category: "provider_profile", ref: normalized.attempt.providerProfileRef },
+    { category: "provider_route", ref: normalized.attempt.providerRouteRef },
+    { category: "replay_cursor", ref: normalized.events.replayCursorRef },
     {
       category: "replay_prefix",
-      sequence: projection.events.sequence,
-      prefixDigest: projection.events.prefixDigest
+      sequence: normalized.events.sequence,
+      prefixDigest: normalized.events.prefixDigest
     },
-    { category: "repair_state", ref: projection.repair.ref },
-    ...(projection.repair.latestRepairRef
-      ? [{ category: "latest_repair", ref: projection.repair.latestRepairRef }]
+    { category: "repair_state", ref: normalized.repair.ref },
+    ...(normalized.repair.latestRepairRef
+      ? [{ category: "latest_repair", ref: normalized.repair.latestRepairRef }]
       : []),
-    ...(projection.handoff ? [{ category: "handoff", ref: projection.handoff.ref }] : []),
-    ...(projection.recovery ? [{ category: "recovery", ref: projection.recovery.ref }] : []),
-    ...(projection.exactHead
+    ...(normalized.handoff ? [{ category: "handoff", ref: normalized.handoff.ref }] : []),
+    ...(normalized.recovery ? [{ category: "recovery", ref: normalized.recovery.ref }] : []),
+    ...(normalized.exactHead
       ? [
           {
             category: "equality_proof",
-            ref: projection.exactHead.equalityProofRef,
-            head: projection.exactHead.localHead
+            ref: normalized.exactHead.equalityProofRef,
+            base: normalized.exactHead.expectedBase,
+            head: normalized.exactHead.localHead
           },
-          ...projection.exactHead.ciProofBundleRefs.map((proofRef: TaskToPrRef) => ({
+          ...normalized.exactHead.ciProofBundleRefs.map((proofRef: TaskToPrRef) => ({
             category: "ci_proof",
             ref: proofRef,
-            head: projection.exactHead.localHead
+            base: normalized.exactHead.expectedBase,
+            head: normalized.exactHead.localHead
           }))
         ]
       : []),
-    ...((projection.reviews ?? []) as Array<{
+    ...((normalized.reviews ?? []) as Array<{
       ref: TaskToPrRef;
       reviewRunRef: TaskToPrRef;
       proofBundleRef: TaskToPrRef;
+      base: ReturnType<typeof head>;
       head: ReturnType<typeof head>;
     }>).flatMap((review) => [
-      { category: "review_proof", ref: review.proofBundleRef, head: review.head },
-      { category: "review_record", ref: review.ref, head: review.head },
-      { category: "review_run", ref: review.reviewRunRef, head: review.head }
+      { category: "review_proof", ref: review.proofBundleRef, base: review.base, head: review.head },
+      { category: "review_record", ref: review.ref, base: review.base, head: review.head },
+      { category: "review_run", ref: review.reviewRunRef, base: review.base, head: review.head }
     ]),
-    ...(projection.merge
+    ...(normalized.merge
       ? [
-          { category: "merge_guard", ref: projection.merge.guard.ref },
+          { category: "merge_guard", ref: normalized.merge.guard.ref },
           {
             category: "provider_guard_receipt",
-            ref: projection.merge.guard.providerGuardReceiptRef,
-            head: projection.merge.guard.expectedHead
+            ref: normalized.merge.guard.providerGuardReceiptRef,
+            base: normalized.merge.guard.expectedBase,
+            head: normalized.merge.guard.expectedHead
           }
         ]
       : []),
-    ...(projection.cleanup
-      ? [{ category: "cleanup_eligibility", ref: projection.cleanup.eligibility.ref }]
+    ...(normalized.cleanup
+      ? [{ category: "cleanup_eligibility", ref: normalized.cleanup.eligibility.ref }]
       : []),
-    ...(projection.rollback
-      ? [{ category: "rollback_plan", ref: projection.rollback.plan.ref }]
+    ...(normalized.rollback
+      ? [{ category: "rollback_plan", ref: normalized.rollback.plan.ref }]
+      : []),
+    ...(normalized.terminalDispositionRef
+      ? [{ category: "terminal_disposition", ref: normalized.terminalDispositionRef }]
       : [])
   ];
-  const provenanceLedger = [...(projection.provenanceLedger ?? [])];
+  const provenanceLedger = [...(normalized.provenanceLedger ?? [])];
   for (const entry of active) {
     if (!provenanceLedger.some((existing: unknown) => JSON.stringify(existing) === JSON.stringify(entry))) {
       provenanceLedger.push(entry);
     }
   }
-  return { ...projection, provenanceLedger } as Omit<T, "provenanceLedger"> & {
+  return { ...normalized, provenanceLedger } as Omit<T, "provenanceLedger"> & {
     provenanceLedger: TaskToPrProjection["provenanceLedger"];
   };
 }
@@ -142,23 +190,27 @@ function validProjection() {
   const prGroupRef = ref("pr_group", "todos", "5");
   const leafTaskRef = ref("leaf_task", "todos", "6");
   const repoRef = ref("repo", "repos", "b");
+  const worktreeRef = ref("worktree", "repos", "c", "partial");
+  const branchRef = ref("branch", "repos", "d");
   const baseHead = head("e");
   const frozenScopeDigest = sha("2");
   const identityDigest = deriveTaskToPrIdentityDigest({
-    canonicalizationVersion: 1,
+    canonicalizationVersion: 2,
     rootRequestRef,
     prGroupRef,
     leafTaskRef,
     repoRef,
+    worktreeRef,
+    branchRef,
     baseHead,
     frozenScopeDigest
   });
 
   return withActiveProvenance({
     schema: SCHEMA_IDS.taskToPrProjection,
-    id: "task_to_pr_projection:opaque-123",
+    id: projectionId("valid-projection"),
     createdAt,
-    canonicalizationVersion: 1,
+    canonicalizationVersion: 2,
     identityDigest,
     frozenScopeDigest,
     state: "cleanup_complete",
@@ -168,8 +220,9 @@ function validProjection() {
     leafTaskRef,
     attempt: {
       ref: currentAttempt,
-      nonce: "attempt_nonce:opaque-4fbd95f2-7bb7-4e7e-a7ee-2fa4c9bed5b2",
+      nonce: attemptNonce("valid-attempt"),
       admissionRef: ref("admission", "codewith", "1", "partial"),
+      workerActorRef: ref("worker_actor", "codewith", "stable-worker", "partial"),
       workerRef: ref("worker", "codewith", "2", "partial"),
       runtimeRef: ref("runtime", "codewith", "3", "partial"),
       writerGenerationRef: currentGeneration,
@@ -180,8 +233,8 @@ function validProjection() {
     },
     repository: {
       repoRef,
-      worktreeRef: ref("worktree", "repos", "c", "partial"),
-      branchRef: ref("branch", "repos", "d"),
+      worktreeRef,
+      branchRef,
       baseHead,
       branchHead: reviewedHead
     },
@@ -206,6 +259,8 @@ function validProjection() {
     exactHead: {
       pullRequestRef,
       remoteBranchRef: ref("branch", "repos", "d"),
+      expectedBase: baseHead,
+      providerPullRequestBase: baseHead,
       localHead: reviewedHead,
       remoteHead: reviewedHead,
       providerPullRequestHead: reviewedHead,
@@ -217,6 +272,7 @@ function validProjection() {
       {
         ref: reviewRef,
         pullRequestRef,
+        base: baseHead,
         head: reviewedHead,
         reviewerRef: ref("reviewer", "review", "7"),
         reviewRunRef: ref("review_run", "review", "8"),
@@ -236,6 +292,7 @@ function validProjection() {
       guard: {
         ref: ref("merge_guard", "todos", "b"),
         pullRequestRef,
+        expectedBase: baseHead,
         expectedHead: reviewedHead,
         reviewRefs: [reviewRef],
         proofBundleRefs: [proofBundleRef, headEqualityProofRef, ciProofBundleRef],
@@ -243,13 +300,15 @@ function validProjection() {
         operatorRunRef: ref("merge_operator_run", "merge_provider", "d", "partial"),
         providerGuardReceiptRef: ref("merge_guard_receipt", "merge_provider", "c", "full"),
         mechanism: "compare_and_swap",
-        decision: "eligible",
+        decision: "consumed",
         evaluatedAt: createdAt
       },
       outcome: {
         ref: ref("merge_outcome", "merge_provider", "d", "partial"),
         guardRef: ref("merge_guard", "todos", "b"),
         pullRequestRef,
+        expectedBase: baseHead,
+        observedBase: baseHead,
         expectedHead: reviewedHead,
         observedHead: reviewedHead,
         status: "merged",
@@ -258,12 +317,17 @@ function validProjection() {
         evidenceRefs: [evidence("ev_merge_cas", "f")]
       }
     },
+    terminalDispositionRef: ref("terminal_disposition", "todos", "terminal"),
     cleanup: {
       eligibility: {
         ref: ref("cleanup_eligibility", "repos", "6"),
         status: "eligible",
         targetWorktreeRef: ref("worktree", "repos", "c", "partial"),
         eventCursorRef: ref("replay_cursor", "todos", "f"),
+        terminalDispositionRef: ref("terminal_disposition", "todos", "terminal"),
+        writerLeaseRef: ref("writer_lease", "repos", "7", "partial"),
+        leaseRevocationEvidenceRef: evidence("ev_cleanup_lease_revoked", "1"),
+        consumedEventEvidenceRef: evidence("ev_cleanup_event_consumed", "2"),
         evaluatedAt: createdAt,
         evidenceRefs: [evidence("ev_cleanup_gate", "7")]
       },
@@ -344,11 +408,13 @@ describe("task-to-PR projection v1", () => {
     const projection = validProjection();
     expect(
       deriveTaskToPrIdentityDigest({
-        canonicalizationVersion: 1,
+        canonicalizationVersion: 2,
         rootRequestRef: projection.rootRequestRef,
         prGroupRef: projection.prGroupRef,
         leafTaskRef: projection.leafTaskRef,
         repoRef: projection.repository.repoRef,
+        worktreeRef: projection.repository.worktreeRef,
+        branchRef: projection.repository.branchRef,
         baseHead: projection.repository.baseHead,
         frozenScopeDigest: projection.frozenScopeDigest
       })
@@ -394,6 +460,7 @@ describe("task-to-PR projection v1", () => {
       "provider_profile",
       "provider_route",
       "admission",
+      "worker_actor",
       "worker",
       "runtime",
       "repo",
@@ -420,6 +487,7 @@ describe("task-to-PR projection v1", () => {
       "cleanup_outcome",
       "rollback_plan",
       "rollback_outcome",
+      "terminal_disposition",
       "openloops_invocation",
       "adapter_extension"
     ];
@@ -431,6 +499,7 @@ describe("task-to-PR projection v1", () => {
       "provider_profile",
       "provider_route",
       "admission",
+      "worker_actor",
       "worker",
       "runtime",
       "worktree",
@@ -621,10 +690,10 @@ describe("task-to-PR projection v1", () => {
       TaskToPrProjectionSchema.safeParse(
         withActiveProvenance({
           ...projection,
-          id: "task_to_pr_projection:opaque-owner-record",
+          id: projectionId("valid-projection"),
           attempt: {
             ...projection.attempt,
-            nonce: "attempt_nonce:opaque-owner-record"
+            nonce: attemptNonce("owner-record")
           },
           provenanceLedger: projection.provenanceLedger.filter(
             (entry) => entry.category !== "attempt_nonce"
@@ -1215,7 +1284,7 @@ describe("task-to-PR projection v1", () => {
     const projection = validProjection();
     const previous = parseProjection({
       ...projection,
-      id: "task_to_pr_projection:opaque-previous",
+      id: projectionId("valid-projection"),
       createdAt: "2026-07-23T15:09:00.000Z",
       state: "running",
       pullRequestRef: undefined,
@@ -1235,7 +1304,7 @@ describe("task-to-PR projection v1", () => {
     });
     const current = parseProjection({
       ...previous,
-      id: "task_to_pr_projection:opaque-current",
+      id: projectionId("valid-projection"),
       createdAt,
       events: {
         ...previous.events,
@@ -1248,14 +1317,14 @@ describe("task-to-PR projection v1", () => {
 
     const replayed = {
       ...current,
-      id: "task_to_pr_projection:opaque-replayed",
+      id: projectionId("valid-projection"),
       events: { ...current.events, sequence: previous.events.sequence - 1 }
     };
     expect(validateTaskToPrProjectionTransition(previous, replayed).success).toBe(false);
 
     const staleCursor = {
       ...current,
-      id: "task_to_pr_projection:opaque-stale-cursor",
+      id: projectionId("valid-projection"),
       events: {
         ...current.events,
         replayCursorRef: previous.events.replayCursorRef
@@ -1265,7 +1334,7 @@ describe("task-to-PR projection v1", () => {
 
     const reusedCursorDigest: TaskToPrProjection = {
       ...current,
-      id: "task_to_pr_projection:opaque-reused-cursor-digest",
+      id: projectionId("valid-projection"),
       events: {
         ...current.events,
         replayCursorRef: {
@@ -1279,7 +1348,7 @@ describe("task-to-PR projection v1", () => {
 
     const stalePrefix = {
       ...current,
-      id: "task_to_pr_projection:opaque-stale-prefix",
+      id: projectionId("valid-projection"),
       events: {
         ...current.events,
         prefixDigest: previous.events.prefixDigest
@@ -1289,17 +1358,17 @@ describe("task-to-PR projection v1", () => {
 
     const partialAttemptAdvance = {
       ...current,
-      id: "task_to_pr_projection:opaque-partial-attempt",
+      id: projectionId("valid-projection"),
       attempt: {
         ...current.attempt,
-        nonce: "attempt_nonce:opaque-fresh"
+        nonce: attemptNonce("fresh")
       }
     };
     expect(validateTaskToPrProjectionTransition(previous, partialAttemptAdvance).success).toBe(false);
     expect(
       validateTaskToPrProjectionTransition(previous, {
         ...current,
-        id: "task_to_pr_projection:opaque-mutated-attempt-scope",
+        id: projectionId("valid-projection"),
         attempt: {
           ...current.attempt,
           runtimeRef: ref("runtime", "codewith", "c", "partial")
@@ -1309,7 +1378,7 @@ describe("task-to-PR projection v1", () => {
     expect(
       validateTaskToPrProjectionTransition(previous, {
         ...current,
-        id: "task_to_pr_projection:opaque-mutated-repair-ref",
+        id: projectionId("valid-projection"),
         repair: {
           ...current.repair,
           ref: ref("repair_cycle", "todos", "c")
@@ -1320,14 +1389,14 @@ describe("task-to-PR projection v1", () => {
     expect(
       validateTaskToPrProjectionTransition(previous, {
         ...current,
-        id: "task_to_pr_projection:opaque-invalid",
+        id: projectionId("valid-projection"),
         unknownMutablePayload: true
       }).success
     ).toBe(false);
 
     const mutatedTerminal = {
       ...projection,
-      id: "task_to_pr_projection:opaque-mutated-terminal",
+      id: projectionId("valid-projection"),
       merge: {
         ...projection.merge,
         outcome: {
@@ -1356,7 +1425,7 @@ describe("task-to-PR projection v1", () => {
     const projection = validProjection();
     const mergePrevious = parseProjection({
       ...projection,
-      id: "task_to_pr_projection:opaque-guard-owner-previous",
+      id: projectionId("valid-projection"),
       state: "merge_ready",
       merge: {
         guard: projection.merge.guard
@@ -1365,7 +1434,7 @@ describe("task-to-PR projection v1", () => {
     });
     const mergeRotated = TaskToPrProjectionSchema.parse(withActiveProvenance({
       ...mergePrevious,
-      id: "task_to_pr_projection:opaque-guard-owner-rotated",
+      id: projectionId("valid-projection"),
       events: {
         ...mergePrevious.events,
         replayCursorRef: ref("replay_cursor", "todos", "2"),
@@ -1383,7 +1452,7 @@ describe("task-to-PR projection v1", () => {
 
     const cleanupPrevious = parseProjection({
       ...projection,
-      id: "task_to_pr_projection:opaque-cleanup-owner-previous",
+      id: projectionId("valid-projection"),
       state: "merged",
       cleanup: {
         eligibility: projection.cleanup.eligibility
@@ -1392,7 +1461,7 @@ describe("task-to-PR projection v1", () => {
     const cleanupCursorRef = ref("replay_cursor", "todos", "4");
     const cleanupRotated = TaskToPrProjectionSchema.parse(withActiveProvenance({
       ...cleanupPrevious,
-      id: "task_to_pr_projection:opaque-cleanup-owner-rotated",
+      id: projectionId("valid-projection"),
       events: {
         ...cleanupPrevious.events,
         replayCursorRef: cleanupCursorRef,
@@ -1411,7 +1480,7 @@ describe("task-to-PR projection v1", () => {
 
     const rollbackPrevious = TaskToPrProjectionSchema.parse(withActiveProvenance({
       ...projection,
-      id: "task_to_pr_projection:opaque-rollback-owner-previous",
+      id: projectionId("valid-projection"),
       state: "merged",
       cleanup: undefined,
       rollback: {
@@ -1424,7 +1493,7 @@ describe("task-to-PR projection v1", () => {
     }));
     const rollbackRotated = TaskToPrProjectionSchema.parse(withActiveProvenance({
       ...rollbackPrevious,
-      id: "task_to_pr_projection:opaque-rollback-owner-rotated",
+      id: projectionId("valid-projection"),
       events: {
         ...rollbackPrevious.events,
         replayCursorRef: ref("replay_cursor", "todos", "6"),
@@ -1491,7 +1560,7 @@ describe("task-to-PR projection v1", () => {
     for (const ownerCase of cases) {
       const retained = parseProjection({
         ...ownerCase.previous,
-        id: `task_to_pr_projection:opaque-${ownerCase.path.replace(".", "-")}-retained`
+        id: projectionId("valid-projection"),
       });
       expect(
         validateTaskToPrProjectionTransition(ownerCase.previous, retained),
@@ -1551,7 +1620,7 @@ describe("task-to-PR projection v1", () => {
     const base = validProjection();
     const previous = parseProjection({
       ...base,
-      id: "task_to_pr_projection:opaque-transition-previous",
+      id: projectionId("valid-projection"),
       createdAt: "2026-07-23T15:08:00.000Z",
       state: "running",
       pullRequestRef: undefined,
@@ -1573,7 +1642,9 @@ describe("task-to-PR projection v1", () => {
     const nextAttempt = {
       ...previous.attempt,
       ref: ref("attempt", "todos", "a"),
-      nonce: "attempt_nonce:opaque-next",
+      nonce: attemptNonce("next"),
+      admissionRef: ref("admission", "codewith", "next", "partial"),
+      workerRef: ref("worker", "codewith", "next", "partial"),
       runtimeRef: ref("runtime", "codewith", "b", "partial"),
       writerGenerationRef: ref("writer_generation", "todos", "5"),
       writerLeaseRef: ref("writer_lease", "repos", "d", "partial"),
@@ -1604,7 +1675,7 @@ describe("task-to-PR projection v1", () => {
     };
     const recovered = TaskToPrProjectionSchema.parse(withActiveProvenance({
       ...previous,
-      id: "task_to_pr_projection:opaque-transition-current",
+      id: projectionId("valid-projection"),
       createdAt,
       state: "recovering",
       workRunRef: nextWorkRunRef,
@@ -1621,7 +1692,7 @@ describe("task-to-PR projection v1", () => {
 
     const reusedAttemptDigest: TaskToPrProjection = {
       ...recovered,
-      id: "task_to_pr_projection:opaque-reused-attempt-digest",
+      id: projectionId("valid-projection"),
       attempt: {
         ...recovered.attempt,
         ref: {
@@ -1635,7 +1706,7 @@ describe("task-to-PR projection v1", () => {
 
     const reusedGenerationDigest: TaskToPrProjection = {
       ...recovered,
-      id: "task_to_pr_projection:opaque-reused-generation-digest",
+      id: projectionId("valid-projection"),
       attempt: {
         ...recovered.attempt,
         writerGenerationRef: {
@@ -1657,7 +1728,7 @@ describe("task-to-PR projection v1", () => {
 
     const reusedWorkRunDigest: TaskToPrProjection = {
       ...recovered,
-      id: "task_to_pr_projection:opaque-reused-work-run-digest",
+      id: projectionId("valid-projection"),
       workRunRef: {
         ...recovered.workRunRef,
         id: "work_run:opaque-fresh-id-stale-digest",
@@ -1669,7 +1740,7 @@ describe("task-to-PR projection v1", () => {
     expect(
       validateTaskToPrProjectionTransition(previous, {
         ...recovered,
-        id: "task_to_pr_projection:opaque-reused-attempt-canonical-id",
+        id: projectionId("valid-projection"),
         attempt: {
           ...recovered.attempt,
           ref: {
@@ -1683,7 +1754,7 @@ describe("task-to-PR projection v1", () => {
     expect(
       validateTaskToPrProjectionTransition(previous, {
         ...recovered,
-        id: "task_to_pr_projection:opaque-reused-generation-canonical-id",
+        id: projectionId("valid-projection"),
         attempt: {
           ...recovered.attempt,
           writerGenerationRef: {
@@ -1705,7 +1776,7 @@ describe("task-to-PR projection v1", () => {
     expect(
       validateTaskToPrProjectionTransition(previous, {
         ...recovered,
-        id: "task_to_pr_projection:opaque-reused-work-run-canonical-id",
+        id: projectionId("valid-projection"),
         workRunRef: {
           ...recovered.workRunRef,
           id: previous.workRunRef.id,
@@ -1724,7 +1795,7 @@ describe("task-to-PR projection v1", () => {
       expect(
         validateTaskToPrProjectionTransition(previous, {
           ...recovered,
-          id: `task_to_pr_projection:opaque-stale-${field.toLowerCase()}`,
+          id: projectionId("valid-projection"),
           attempt: { ...recovered.attempt, [field]: staleRef }
         }).success
       ).toBe(false);
@@ -1732,7 +1803,7 @@ describe("task-to-PR projection v1", () => {
     expect(
       validateTaskToPrProjectionTransition(previous, {
         ...recovered,
-        id: "task_to_pr_projection:opaque-reused-runtime-digest",
+        id: projectionId("valid-projection"),
         attempt: {
           ...recovered.attempt,
           runtimeRef: {
@@ -1747,14 +1818,14 @@ describe("task-to-PR projection v1", () => {
     expect(
       validateTaskToPrProjectionTransition(previous, {
         ...recovered,
-        id: "task_to_pr_projection:opaque-wrong-prior-run",
+        id: projectionId("valid-projection"),
         recovery: { ...recovered.recovery, priorWorkRunRef: nextWorkRunRef }
       }).success
     ).toBe(false);
 
     const handedOff = withActiveProvenance({
       ...recovered,
-      id: "task_to_pr_projection:opaque-handoff-current",
+      id: projectionId("valid-projection"),
       state: "handed_off",
       provenanceLedger: previous.provenanceLedger,
       recovery: undefined,
@@ -1773,7 +1844,7 @@ describe("task-to-PR projection v1", () => {
     expect(
       validateTaskToPrProjectionTransition(previous, {
         ...handedOff,
-        id: "task_to_pr_projection:opaque-handoff-wrong-prior",
+        id: projectionId("valid-projection"),
         handoff: {
           ...handedOff.handoff,
           previousAttemptRef: nextAttempt.ref
@@ -1783,7 +1854,7 @@ describe("task-to-PR projection v1", () => {
 
     const retainedHandoff = withActiveProvenance({
       ...handedOff,
-      id: "task_to_pr_projection:opaque-handoff-retained",
+      id: projectionId("valid-projection"),
       events: {
         ...handedOff.events,
         replayCursorRef: ref("replay_cursor", "todos", "8"),
@@ -1798,7 +1869,7 @@ describe("task-to-PR projection v1", () => {
 
     const removedHandoff = withActiveProvenance({
       ...retainedHandoff,
-      id: "task_to_pr_projection:opaque-handoff-removed",
+      id: projectionId("valid-projection"),
       state: "running" as const,
       handoff: undefined
     });
@@ -1807,7 +1878,7 @@ describe("task-to-PR projection v1", () => {
 
     const mutatedHandoff = withActiveProvenance({
       ...retainedHandoff,
-      id: "task_to_pr_projection:opaque-handoff-mutated",
+      id: projectionId("valid-projection"),
       handoff: {
         ...retainedHandoff.handoff,
         stopEvidenceRef: evidence("ev_handoff_stop_mutated", "a")
@@ -1818,7 +1889,7 @@ describe("task-to-PR projection v1", () => {
 
     const switchedToRecovery = withActiveProvenance({
       ...retainedHandoff,
-      id: "task_to_pr_projection:opaque-handoff-switched-to-recovery",
+      id: projectionId("valid-projection"),
       state: "recovering" as const,
       handoff: undefined,
       recovery: {
@@ -1832,7 +1903,7 @@ describe("task-to-PR projection v1", () => {
 
     const retainedRecovery = withActiveProvenance({
       ...recovered,
-      id: "task_to_pr_projection:opaque-recovery-retained",
+      id: projectionId("valid-projection"),
       events: {
         ...recovered.events,
         replayCursorRef: ref("replay_cursor", "todos", "b"),
@@ -1846,7 +1917,7 @@ describe("task-to-PR projection v1", () => {
     });
     const mutatedRecovery = withActiveProvenance({
       ...retainedRecovery,
-      id: "task_to_pr_projection:opaque-recovery-mutated",
+      id: projectionId("valid-projection"),
       recovery: {
         ...retainedRecovery.recovery!,
         stopEvidenceRef: evidence("ev_recovery_stop_mutated", "d")
@@ -1860,7 +1931,7 @@ describe("task-to-PR projection v1", () => {
     const projection = validProjection();
     const initial = parseProjection({
       ...projection,
-      id: "task_to_pr_projection:opaque-owner-rotation-initial",
+      id: projectionId("valid-projection"),
       state: "running",
       pullRequestRef: undefined,
       exactHead: undefined,
@@ -1919,7 +1990,9 @@ describe("task-to-PR projection v1", () => {
       const nextAttempt = {
         ...previous.attempt,
         ref: ref("attempt", "todos", seeds.attempt),
-        nonce: `attempt_nonce:opaque-${label}`,
+        nonce: attemptNonce(`${label}`),
+        admissionRef: ref("admission", "codewith", `${label}-admission`, "partial"),
+        workerRef: ref("worker", "codewith", `${label}-worker`, "partial"),
         runtimeRef: ref("runtime", "codewith", seeds.runtime, "partial"),
         writerGenerationRef: ref("writer_generation", "todos", seeds.generation),
         writerLeaseRef: ref("writer_lease", "repos", seeds.lease, "partial"),
@@ -1942,7 +2015,7 @@ describe("task-to-PR projection v1", () => {
 
       return TaskToPrProjectionSchema.parse(withActiveProvenance({
         ...previous,
-        id: `task_to_pr_projection:opaque-${owner}-${label}`,
+        id: projectionId("valid-projection"),
         state: owner === "handoff" ? "handed_off" : "recovering",
         workRunRef: nextWorkRunRef,
         attempt: nextAttempt,
@@ -2035,13 +2108,13 @@ describe("task-to-PR projection v1", () => {
     const projection = validProjection();
     const initial = parseProjection({
       ...projection,
-      id: "task_to_pr_projection:opaque-cumulative-a",
+      id: projectionId("valid-projection"),
       state: "running",
       workRunRef: ref("work_run", "codewith", "lineage-a"),
       attempt: {
         ...projection.attempt,
         ref: ref("attempt", "todos", "lineage-a"),
-        nonce: "attempt_nonce:opaque-lineage-a",
+        nonce: attemptNonce("lineage-a"),
         runtimeRef: ref("runtime", "codewith", "lineage-a", "partial"),
         writerGenerationRef: ref("writer_generation", "todos", "lineage-a"),
         writerLeaseRef: ref("writer_lease", "repos", "lineage-a", "partial"),
@@ -2082,7 +2155,9 @@ describe("task-to-PR projection v1", () => {
       const nextAttempt = {
         ...previous.attempt,
         ref: ref("attempt", "todos", `lineage-${label}`),
-        nonce: `attempt_nonce:opaque-lineage-${label}`,
+        nonce: attemptNonce(`lineage-${label}`),
+        admissionRef: ref("admission", "codewith", `lineage-${label}`, "partial"),
+        workerRef: ref("worker", "codewith", `lineage-${label}`, "partial"),
         runtimeRef: ref("runtime", "codewith", `lineage-${label}`, "partial"),
         writerGenerationRef: ref("writer_generation", "todos", `lineage-${label}`),
         writerLeaseRef: ref("writer_lease", "repos", `lineage-${label}`, "partial"),
@@ -2092,7 +2167,7 @@ describe("task-to-PR projection v1", () => {
       };
       return parseProjection({
         ...previous,
-        id: `task_to_pr_projection:opaque-cumulative-${label}`,
+        id: projectionId("valid-projection"),
         state: "handed_off",
         workRunRef: ref("work_run", "codewith", `lineage-${label}`),
         attempt: nextAttempt,
@@ -2131,10 +2206,8 @@ describe("task-to-PR projection v1", () => {
       issues: []
     });
 
-    const projectionIdReuse = structuredClone(current);
-    projectionIdReuse.id = initial.id;
-    expect(TaskToPrProjectionSchema.safeParse(projectionIdReuse).success).toBe(true);
-    expect(validateTaskToPrProjectionTransition(middle, projectionIdReuse).success).toBe(false);
+    expect(initial.id).toBe(middle.id);
+    expect(middle.id).toBe(current.id);
 
     type RefReuseCase = {
       category:
@@ -2296,7 +2369,7 @@ describe("task-to-PR projection v1", () => {
 
     const repairMiddle = parseProjection({
       ...initial,
-      id: "task_to_pr_projection:opaque-cumulative-repair-b",
+      id: projectionId("valid-projection"),
       state: "repairing",
       events: {
         ...initial.events,
@@ -2315,7 +2388,7 @@ describe("task-to-PR projection v1", () => {
     });
     const repairCurrent = parseProjection({
       ...repairMiddle,
-      id: "task_to_pr_projection:opaque-cumulative-repair-c",
+      id: projectionId("valid-projection"),
       events: {
         ...repairMiddle.events,
         replayCursorRef: ref("replay_cursor", "todos", "repair-c"),
@@ -2389,7 +2462,7 @@ describe("task-to-PR projection v1", () => {
     const base = validProjection();
     const previous = parseProjection({
       ...base,
-      id: "task_to_pr_projection:opaque-repair-previous",
+      id: projectionId("valid-projection"),
       createdAt: "2026-07-23T15:09:00.000Z",
       state: "reviewing",
       cleanup: undefined,
@@ -2404,7 +2477,7 @@ describe("task-to-PR projection v1", () => {
     });
     const repairing = parseProjection({
       ...previous,
-      id: "task_to_pr_projection:opaque-repair-current",
+      id: projectionId("valid-projection"),
       createdAt,
       state: "repairing",
       repair: {
@@ -2425,7 +2498,7 @@ describe("task-to-PR projection v1", () => {
 
     const reusedRepairStateDigest: TaskToPrProjection = {
       ...repairing,
-      id: "task_to_pr_projection:opaque-repair-state-reused-digest",
+      id: projectionId("valid-projection"),
       repair: {
         ...repairing.repair,
         ref: {
@@ -2439,7 +2512,7 @@ describe("task-to-PR projection v1", () => {
 
     const reusedLatestRepairDigest: TaskToPrProjection = {
       ...repairing,
-      id: "task_to_pr_projection:opaque-latest-repair-reused-digest",
+      id: projectionId("valid-projection"),
       repair: {
         ...repairing.repair,
         latestRepairRef: {
@@ -2466,7 +2539,7 @@ describe("task-to-PR projection v1", () => {
 
     const repairStateReusingPriorLatest: TaskToPrProjection = {
       ...repairing,
-      id: "task_to_pr_projection:opaque-repair-state-reuses-prior-latest",
+      id: projectionId("valid-projection"),
       repair: {
         ...repairing.repair,
         ref: {
@@ -2479,7 +2552,7 @@ describe("task-to-PR projection v1", () => {
 
     const latestRepairReusingPriorState: TaskToPrProjection = {
       ...repairing,
-      id: "task_to_pr_projection:opaque-latest-repair-reuses-prior-state",
+      id: projectionId("valid-projection"),
       repair: {
         ...repairing.repair,
         latestRepairRef: {
@@ -2493,7 +2566,7 @@ describe("task-to-PR projection v1", () => {
     expect(
       validateTaskToPrProjectionTransition(previous, {
         ...repairing,
-        id: "task_to_pr_projection:opaque-repair-stale-ref",
+        id: projectionId("valid-projection"),
         repair: {
           ...repairing.repair,
           ref: previous.repair.ref
@@ -2505,7 +2578,7 @@ describe("task-to-PR projection v1", () => {
       validateTaskToPrProjectionTransition(
         parseProjection({
           ...previous,
-          id: "task_to_pr_projection:opaque-running",
+          id: projectionId("valid-projection"),
           state: "running",
           reviews: [],
           exactHead: undefined,
@@ -2513,7 +2586,7 @@ describe("task-to-PR projection v1", () => {
         }),
         {
           ...previous,
-          id: "task_to_pr_projection:opaque-admitted-again",
+          id: projectionId("valid-projection"),
           state: "admitted",
           reviews: [],
           exactHead: undefined,
@@ -2524,7 +2597,7 @@ describe("task-to-PR projection v1", () => {
     expect(
       validateTaskToPrProjectionTransition(base, {
         ...base,
-        id: "task_to_pr_projection:opaque-reentered",
+        id: projectionId("valid-projection"),
         state: "running",
         merge: undefined,
         exactHead: undefined,
@@ -2600,13 +2673,13 @@ describe("task-to-PR projection v1", () => {
 
     const runningPrevious = parseProjection({
       ...reviewOnly,
-      id: "task_to_pr_projection:opaque-running-before-review",
+      id: projectionId("valid-projection"),
       state: "running",
       reviews: []
     });
     const runningWithApprovedReview: TaskToPrProjection = {
       ...runningPrevious,
-      id: "task_to_pr_projection:opaque-running-with-review",
+      id: projectionId("valid-projection"),
       reviews: reviewOnly.reviews
     };
     expect(TaskToPrProjectionSchema.safeParse(runningWithApprovedReview).success).toBe(false);
@@ -2617,7 +2690,7 @@ describe("task-to-PR projection v1", () => {
     const projection = validProjection();
     const runningWithPullRequest = parseProjection({
       ...projection,
-      id: "task_to_pr_projection:opaque-running-with-pr",
+      id: projectionId("valid-projection"),
       state: "running",
       exactHead: undefined,
       reviews: [],
@@ -2627,8 +2700,10 @@ describe("task-to-PR projection v1", () => {
 
     const phaseDrift = withActiveProvenance({
       ...runningWithPullRequest,
-      id: "task_to_pr_projection:opaque-blocked-with-stale-cursor",
-      state: "blocked"
+      id: projectionId("valid-projection"),
+      state: "blocked",
+      terminalDispositionRef: ref("terminal_disposition", "todos", "blocked-stale-cursor"),
+      evidenceRefs: [evidence("blocked_stale_cursor", "1")]
     });
     const phaseDriftResult = validateTaskToPrProjectionTransition(runningWithPullRequest, phaseDrift);
     expect(phaseDriftResult.success).toBe(false);
@@ -2636,7 +2711,7 @@ describe("task-to-PR projection v1", () => {
 
     const recoveryProjection = parseProjection({
       ...validRecoveryProjection(),
-      id: "task_to_pr_projection:opaque-recovering-before-identity-drift",
+      id: projectionId("valid-projection"),
       state: "recovering",
       pullRequestRef: undefined,
       exactHead: undefined,
@@ -2652,7 +2727,7 @@ describe("task-to-PR projection v1", () => {
     });
     const recoveryIdentityDrift = withActiveProvenance({
       ...recoveryProjection,
-      id: "task_to_pr_projection:opaque-recovering-after-identity-drift",
+      id: projectionId("valid-projection"),
       recovery: {
         ...recoveryProjection.recovery!,
         ref: ref("recovery", "todos", "a")
@@ -2673,7 +2748,7 @@ describe("task-to-PR projection v1", () => {
         runningWithPullRequest,
         withActiveProvenance({
           ...runningWithPullRequest,
-          id: `task_to_pr_projection:opaque-pr-identity-drift-${pullRequestRef ? "replaced" : "removed"}`,
+          id: projectionId("valid-projection"),
           events: advancedEvents,
           pullRequestRef
         })
@@ -2691,7 +2766,7 @@ describe("task-to-PR projection v1", () => {
     };
     const previous = TaskToPrProjectionSchema.parse(withActiveProvenance({
       ...projection,
-      id: "task_to_pr_projection:opaque-adverse-review-history",
+      id: projectionId("valid-projection"),
       state: "reviewing",
       reviews: [adverseReview],
       merge: undefined,
@@ -2700,6 +2775,7 @@ describe("task-to-PR projection v1", () => {
     const approvedReview = {
       ref: ref("review", "review", "3"),
       pullRequestRef: projection.pullRequestRef,
+      base: projection.repository.baseHead,
       head: projection.repository.branchHead,
       reviewerRef: ref("reviewer", "review", "3"),
       reviewRunRef: ref("review_run", "review", "4"),
@@ -2716,7 +2792,7 @@ describe("task-to-PR projection v1", () => {
 
     const appendOnly = TaskToPrProjectionSchema.parse(withActiveProvenance({
       ...previous,
-      id: "task_to_pr_projection:opaque-appended-review-history",
+      id: projectionId("valid-projection"),
       events: advancedEvents,
       reviews: [adverseReview, approvedReview]
     }));
@@ -2724,7 +2800,7 @@ describe("task-to-PR projection v1", () => {
 
     const reorderedHistory = parseProjection({
       ...appendOnly,
-      id: "task_to_pr_projection:opaque-reordered-review-history",
+      id: projectionId("valid-projection"),
       events: {
         ...appendOnly.events,
         replayCursorRef: ref("replay_cursor", "todos", "8"),
@@ -2737,7 +2813,7 @@ describe("task-to-PR projection v1", () => {
 
     const prependedHistory = parseProjection({
       ...appendOnly,
-      id: "task_to_pr_projection:opaque-prepended-review-history",
+      id: projectionId("valid-projection"),
       reviews: [approvedReview, adverseReview]
     });
     expect(validateTaskToPrProjectionTransition(previous, prependedHistory).success).toBe(false);
@@ -2746,7 +2822,7 @@ describe("task-to-PR projection v1", () => {
       previous,
       withActiveProvenance({
         ...previous,
-        id: "task_to_pr_projection:opaque-rewritten-adverse-review",
+        id: projectionId("valid-projection"),
         events: advancedEvents,
         reviews: [{ ...adverseReview, verdict: "approved" }]
       })
@@ -2756,7 +2832,7 @@ describe("task-to-PR projection v1", () => {
 
     const replacedForEligibility = withActiveProvenance({
       ...appendOnly,
-      id: "task_to_pr_projection:opaque-replaced-adverse-review",
+      id: projectionId("valid-projection"),
       state: "merge_ready" as const,
       reviews: [approvedReview],
       merge: {
@@ -2781,7 +2857,7 @@ describe("task-to-PR projection v1", () => {
     const secondCiProof = ref("proof_bundle", "review", "3");
     const previous = TaskToPrProjectionSchema.parse(withActiveProvenance({
       ...projection,
-      id: "task_to_pr_projection:opaque-exact-head-previous",
+      id: projectionId("valid-projection"),
       createdAt: "2026-07-23T15:09:00.000Z",
       state: "running",
       reviews: [],
@@ -2800,7 +2876,7 @@ describe("task-to-PR projection v1", () => {
     };
     const retained = parseProjection({
       ...previous,
-      id: "task_to_pr_projection:opaque-exact-head-retained",
+      id: projectionId("valid-projection"),
       createdAt,
       events: advancedEvents
     });
@@ -2808,14 +2884,14 @@ describe("task-to-PR projection v1", () => {
 
     const removed = parseProjection({
       ...retained,
-      id: "task_to_pr_projection:opaque-exact-head-removed",
+      id: projectionId("valid-projection"),
       exactHead: undefined
     });
     expect(validateTaskToPrProjectionTransition(previous, removed).success).toBe(false);
 
     const replacedEqualityProof = TaskToPrProjectionSchema.parse(withActiveProvenance({
       ...retained,
-      id: "task_to_pr_projection:opaque-exact-head-equality-replaced",
+      id: projectionId("valid-projection"),
       exactHead: {
         ...retained.exactHead!,
         equalityProofRef: ref("proof_bundle", "review", "5")
@@ -2825,7 +2901,7 @@ describe("task-to-PR projection v1", () => {
 
     const reorderedCiProofs = parseProjection({
       ...retained,
-      id: "task_to_pr_projection:opaque-exact-head-ci-reordered",
+      id: projectionId("valid-projection"),
       exactHead: {
         ...retained.exactHead!,
         ciProofBundleRefs: [...retained.exactHead!.ciProofBundleRefs].reverse()
@@ -2838,7 +2914,7 @@ describe("task-to-PR projection v1", () => {
     const projection = validProjection();
     const previous = parseProjection({
       ...projection,
-      id: "task_to_pr_projection:opaque-cross-head-previous",
+      id: projectionId("valid-projection"),
       createdAt: "2026-07-23T15:09:00.000Z",
       state: "reviewing",
       merge: undefined,
@@ -2847,7 +2923,7 @@ describe("task-to-PR projection v1", () => {
     const nextHead = head("b");
     const freshCrossHead = TaskToPrProjectionSchema.parse(withActiveProvenance({
       ...previous,
-      id: "task_to_pr_projection:opaque-cross-head-fresh",
+      id: projectionId("valid-projection"),
       createdAt: "2026-07-23T15:12:00.000Z",
       repository: {
         ...previous.repository,
@@ -2883,7 +2959,7 @@ describe("task-to-PR projection v1", () => {
 
     const reusedEverything: TaskToPrProjection = {
       ...freshCrossHead,
-      id: "task_to_pr_projection:opaque-cross-head-replayed",
+      id: projectionId("valid-projection"),
       exactHead: {
         ...freshCrossHead.exactHead!,
         equalityProofRef: previous.exactHead!.equalityProofRef,
@@ -2965,14 +3041,14 @@ describe("task-to-PR projection v1", () => {
     ];
     for (const { label, mutate } of staleIdentityCases) {
       const candidate = structuredClone(freshCrossHead);
-      candidate.id = `task_to_pr_projection:opaque-cross-head-stale-${label.replaceAll(" ", "-")}`;
+      candidate.id = previous.id;
       mutate(candidate);
       expect(validateTaskToPrProjectionTransition(previous, candidate).success, label).toBe(false);
     }
 
     const reorderedAndExpanded: TaskToPrProjection = {
       ...freshCrossHead,
-      id: "task_to_pr_projection:opaque-cross-head-reordered",
+      id: projectionId("valid-projection"),
       exactHead: {
         ...freshCrossHead.exactHead!,
         ciProofBundleRefs: [
@@ -3052,7 +3128,7 @@ describe("task-to-PR projection v1", () => {
     const projection = validProjection();
     const present = parseProjection({
       ...projection,
-      id: "task_to_pr_projection:opaque-owner-aba-present",
+      id: projectionId("valid-projection"),
       state: "merged",
       cleanup: {
         eligibility: projection.cleanup.eligibility
@@ -3061,7 +3137,7 @@ describe("task-to-PR projection v1", () => {
     const absentCursor = ref("replay_cursor", "todos", "3");
     const absent = parseProjection({
       ...present,
-      id: "task_to_pr_projection:opaque-owner-aba-absent",
+      id: projectionId("valid-projection"),
       cleanup: undefined,
       events: {
         ...present.events,
@@ -3075,7 +3151,6 @@ describe("task-to-PR projection v1", () => {
       present.provenanceLedger
     );
     expect(absent.provenanceLedger.slice(present.provenanceLedger.length).map((entry) => entry.category)).toEqual([
-      "projection_id",
       "replay_cursor",
       "replay_prefix"
     ]);
@@ -3083,7 +3158,7 @@ describe("task-to-PR projection v1", () => {
     const reactivatedCursor = ref("replay_cursor", "todos", "5");
     const reactivated = parseProjection({
       ...absent,
-      id: "task_to_pr_projection:opaque-owner-aba-reactivated",
+      id: projectionId("valid-projection"),
       cleanup: {
         eligibility: {
           ...present.cleanup!.eligibility,
@@ -3103,7 +3178,7 @@ describe("task-to-PR projection v1", () => {
     const freshRotation = TaskToPrProjectionSchema.parse(
       withActiveProvenance({
         ...absent,
-        id: "task_to_pr_projection:opaque-owner-aba-fresh",
+        id: projectionId("valid-projection"),
         cleanup: {
           eligibility: {
             ...present.cleanup!.eligibility,
@@ -3135,7 +3210,7 @@ describe("task-to-PR projection v1", () => {
       cleanup: undefined
     });
     const prefixRedactionMutation = structuredClone(previous);
-    prefixRedactionMutation.id = "task_to_pr_projection:opaque-prefix-redaction-mutation";
+    prefixRedactionMutation.id = previous.id;
     const handoffIndex = prefixRedactionMutation.provenanceLedger.findIndex(
       (entry) => entry.category === "handoff"
     );
@@ -3152,7 +3227,14 @@ describe("task-to-PR projection v1", () => {
     };
     const prefixCandidate = withActiveProvenance(prefixRedactionMutation);
     expect(TaskToPrProjectionSchema.safeParse(prefixCandidate).success).toBe(true);
-    expect(validateTaskToPrProjectionTransition(previous, prefixCandidate)).toMatchObject({
+    const prefixCandidateWithStableId = {
+      ...prefixCandidate,
+      id: previous.id,
+      provenanceLedger: prefixCandidate.provenanceLedger.filter(
+        (entry) => entry.category !== "projection_id" || entry.projectionId === previous.id
+      )
+    };
+    expect(validateTaskToPrProjectionTransition(previous, prefixCandidateWithStableId)).toMatchObject({
       success: false,
       issues: [
         {
@@ -3176,15 +3258,22 @@ describe("task-to-PR projection v1", () => {
     const projection = validProjection();
     const reviewed = parseProjection({
       ...projection,
-      id: "task_to_pr_projection:opaque-five-step-reviewed",
+      id: projectionId("valid-projection"),
       state: "reviewing",
       merge: undefined,
       cleanup: undefined
     });
     const repairing = parseProjection({
       ...reviewed,
-      id: "task_to_pr_projection:opaque-five-step-repairing",
+      id: projectionId("valid-projection"),
       state: "repairing",
+      repair: {
+        ref: ref("repair_cycle", "todos", "five-step-state"),
+        cycle: reviewed.repair.cycle + 1,
+        cap: 2,
+        exhausted: true,
+        latestRepairRef: ref("repair_cycle", "todos", "five-step-latest")
+      },
       events: {
         ...reviewed.events,
         replayCursorRef: ref("replay_cursor", "todos", "3"),
@@ -3200,7 +3289,7 @@ describe("task-to-PR projection v1", () => {
     const nextHead = head("b");
     const evidenceFree = parseProjection({
       ...repairing,
-      id: "task_to_pr_projection:opaque-five-step-evidence-free",
+      id: projectionId("valid-projection"),
       state: "running",
       repository: {
         ...repairing.repository,
@@ -3222,8 +3311,8 @@ describe("task-to-PR projection v1", () => {
 
     const stillEvidenceFree = parseProjection({
       ...evidenceFree,
-      id: "task_to_pr_projection:opaque-five-step-still-evidence-free",
-      state: "repairing",
+      id: projectionId("valid-projection"),
+      state: "running",
       events: {
         ...evidenceFree.events,
         replayCursorRef: ref("replay_cursor", "todos", "9"),
@@ -3243,7 +3332,7 @@ describe("task-to-PR projection v1", () => {
     };
     const staleFifthSnapshot = {
       ...stillEvidenceFree,
-      id: "task_to_pr_projection:opaque-five-step-stale-evidence",
+      id: projectionId("valid-projection"),
       state: "reviewing" as const,
       exactHead: {
         ...reviewed.exactHead!,
@@ -3270,7 +3359,7 @@ describe("task-to-PR projection v1", () => {
     const projection = validProjection();
     const reviewed = parseProjection({
       ...projection,
-      id: "task_to_pr_projection:opaque-reviewed-before-recovery",
+      id: projectionId("valid-projection"),
       state: "reviewing",
       merge: undefined,
       cleanup: undefined
@@ -3286,7 +3375,9 @@ describe("task-to-PR projection v1", () => {
       const nextAttempt = {
         ...previous.attempt,
         ref: ref("attempt", "todos", "a"),
-        nonce: "attempt_nonce:opaque-review-recovery",
+        nonce: attemptNonce("review-recovery"),
+        admissionRef: ref("admission", "codewith", "review-recovery", "partial"),
+        workerRef: ref("worker", "codewith", "review-recovery", "partial"),
         runtimeRef: ref("runtime", "codewith", "b", "partial"),
         writerGenerationRef: ref("writer_generation", "todos", "5"),
         writerLeaseRef: ref("writer_lease", "repos", "d", "partial"),
@@ -3342,7 +3433,7 @@ describe("task-to-PR projection v1", () => {
       reviewed.exactHead,
       reviewed.reviews,
       reviewed.provenanceLedger,
-      "task_to_pr_projection:opaque-reviewed-recovery-retained"
+      reviewed.id
     );
     expect(validateTaskToPrProjectionTransition(reviewed, retained)).toEqual({
       success: true,
@@ -3351,7 +3442,7 @@ describe("task-to-PR projection v1", () => {
 
     const preReview = parseProjection({
       ...reviewed,
-      id: "task_to_pr_projection:opaque-pre-review-recovery",
+      id: projectionId("valid-projection"),
       state: "running",
       handoff: undefined,
       exactHead: undefined,
@@ -3363,7 +3454,7 @@ describe("task-to-PR projection v1", () => {
       reviewed.exactHead,
       reviewed.reviews,
       preReview.provenanceLedger,
-      "task_to_pr_projection:opaque-recovery-invented-reviews"
+      preReview.id
     );
     expect(TaskToPrProjectionSchema.safeParse(invented).success).toBe(true);
     expect(validateTaskToPrProjectionTransition(preReview, invented).success).toBe(false);
@@ -3373,7 +3464,7 @@ describe("task-to-PR projection v1", () => {
     const projection = validProjection();
     const previous = parseProjection({
       ...projection,
-      id: "task_to_pr_projection:opaque-guard-receipt-previous",
+      id: projectionId("valid-projection"),
       state: "merge_ready",
       merge: {
         guard: projection.merge.guard
@@ -3392,7 +3483,7 @@ describe("task-to-PR projection v1", () => {
     const changedHead = TaskToPrProjectionSchema.parse(
       withActiveProvenance({
         ...previous,
-        id: "task_to_pr_projection:opaque-guard-receipt-fresh",
+        id: projectionId("valid-projection"),
         createdAt: "2026-07-23T15:12:00.000Z",
         repository: {
           ...previous.repository,
@@ -3450,7 +3541,7 @@ describe("task-to-PR projection v1", () => {
     ]) {
       const stale = {
         ...changedHead,
-        id: `task_to_pr_projection:opaque-guard-receipt-stale-${staleReceipt.id.endsWith("-example") ? "id" : "digest"}`,
+        id: projectionId("valid-projection"),
         merge: {
           guard: {
             ...changedHead.merge!.guard,
@@ -3532,7 +3623,7 @@ describe("task-to-PR projection v1", () => {
         ...recoveryProjection,
         recovery: {
           ...recoveryProjection.recovery,
-          successorAttemptNonce: "attempt_nonce:opaque-different"
+          successorAttemptNonce: attemptNonce("different")
         }
       }).success
     ).toBe(false);
@@ -3637,7 +3728,7 @@ describe("task-to-PR projection v1", () => {
 
     const handoffOnly = parseProjection({
       ...projection,
-      id: "task_to_pr_projection:opaque-handoff-only",
+      id: projectionId("valid-projection"),
       state: "handed_off",
       pullRequestRef: undefined,
       exactHead: undefined,
@@ -3648,7 +3739,7 @@ describe("task-to-PR projection v1", () => {
     });
     const recoveryOnly = parseProjection({
       ...recoveryProjection,
-      id: "task_to_pr_projection:opaque-recovery-only",
+      id: projectionId("valid-projection"),
       state: "recovering",
       pullRequestRef: undefined,
       exactHead: undefined,
@@ -3708,7 +3799,7 @@ describe("task-to-PR projection v1", () => {
     expect(
       validateTaskToPrProjectionTransition(projection, {
         ...projection,
-        id: "task_to_pr_projection:opaque-guard-mutated-after-outcome",
+        id: projectionId("valid-projection"),
         merge: {
           ...projection.merge,
           guard: {
@@ -3721,7 +3812,7 @@ describe("task-to-PR projection v1", () => {
     expect(
       validateTaskToPrProjectionTransition(projection, {
         ...projection,
-        id: "task_to_pr_projection:opaque-cleanup-gate-mutated-after-outcome",
+        id: projectionId("valid-projection"),
         cleanup: {
           ...projection.cleanup,
           eligibility: {
@@ -3734,7 +3825,7 @@ describe("task-to-PR projection v1", () => {
 
     const rolledBack = TaskToPrProjectionSchema.parse(withActiveProvenance({
       ...projection,
-      id: "task_to_pr_projection:opaque-rollback-terminal",
+      id: projectionId("valid-projection"),
       state: "rolled_back",
       cleanup: undefined,
       rollback: {
@@ -3756,7 +3847,7 @@ describe("task-to-PR projection v1", () => {
     expect(
       validateTaskToPrProjectionTransition(rolledBack, {
         ...rolledBack,
-        id: "task_to_pr_projection:opaque-rollback-plan-mutated-after-outcome",
+        id: projectionId("valid-projection"),
         rollback: {
           ...rolledBack.rollback,
           plan: {
@@ -3954,6 +4045,636 @@ describe("task-to-PR projection v1", () => {
       }).success
     ).toBe(false);
     expect(validateTaskToPrAdapterCoreEquivalence(local, { ...cloud, mutableProviderPayload: true }).success).toBe(false);
+  });
+
+  test("binds the expected and provider-observed PR base through exact-head, review, guard, and outcome facts", () => {
+    const projection = validProjection();
+    expect("expectedBase" in projection.exactHead).toBe(true);
+    expect("providerPullRequestBase" in projection.exactHead).toBe(true);
+    expect("base" in projection.reviews[0]!).toBe(true);
+    expect("expectedBase" in projection.merge.guard).toBe(true);
+    expect("expectedBase" in projection.merge.outcome).toBe(true);
+    expect("observedBase" in projection.merge.outcome).toBe(true);
+    const otherBase = head("c");
+    expect(
+      TaskToPrProjectionSchema.safeParse({
+        ...projection,
+        exactHead: {
+          ...projection.exactHead,
+          providerPullRequestBase: otherBase
+        }
+      }).success
+    ).toBe(false);
+    expect(
+      TaskToPrProjectionSchema.safeParse({
+        ...projection,
+        reviews: projection.reviews.map((review, index) =>
+          index === 0 ? { ...review, base: otherBase } : review
+        )
+      }).success
+    ).toBe(false);
+    expect(
+      TaskToPrProjectionSchema.safeParse({
+        ...projection,
+        merge: {
+          ...projection.merge,
+          guard: { ...projection.merge.guard, expectedBase: otherBase }
+        }
+      }).success
+    ).toBe(false);
+    expect(
+      TaskToPrProjectionSchema.safeParse({
+        ...projection,
+        merge: {
+          ...projection.merge,
+          outcome: { ...projection.merge.outcome, observedBase: otherBase }
+        }
+      }).success
+    ).toBe(false);
+  });
+
+  test("keeps one canonical projection id and rejects identity-only snapshots without owner-event advancement", () => {
+    const projection = validProjection();
+    const previous = parseProjection({
+      ...projection,
+      id: projectionId("valid-projection"),
+      state: "running",
+      pullRequestRef: undefined,
+      exactHead: undefined,
+      handoff: undefined,
+      reviews: [],
+      merge: undefined,
+      cleanup: undefined,
+      repair: {
+        ref: ref("repair_cycle", "todos", "identity-stable"),
+        cycle: 0,
+        cap: 2,
+        exhausted: false
+      },
+      provenanceLedger: [],
+      evidenceRefs: []
+    });
+    const identityOnly = parseProjection({
+      ...previous,
+      id: projectionId("identity-rotated"),
+    });
+    expect(validateTaskToPrProjectionTransition(previous, identityOnly).success).toBe(false);
+
+    const eventAdvanced = parseProjection({
+      ...previous,
+      id: projectionId("identity-rotated-with-event"),
+      events: {
+        ...previous.events,
+        replayCursorRef: ref("replay_cursor", "todos", "identity-advanced"),
+        sequence: previous.events.sequence + 1,
+        prefixDigest: sha("6")
+      }
+    });
+    expect(validateTaskToPrProjectionTransition(previous, eventAdvanced).success).toBe(false);
+  });
+
+  test("enforces the bidirectional state, merge-guard, and merge-outcome matrix", () => {
+    const projection = validProjection();
+    const cancellation = {
+      ref: ref("cancellation", "todos", "matrix-cancel"),
+      cancelledAttemptRef: projection.attempt.ref,
+      preservedStateRefs: [
+        projection.workRunRef,
+        projection.rootRequestRef,
+        projection.prGroupRef,
+        projection.leafTaskRef,
+        projection.attempt.ref,
+        projection.repository.repoRef,
+        projection.repository.worktreeRef,
+        projection.repository.branchRef,
+        projection.events.streamRef,
+        projection.pullRequestRef
+      ],
+      evidenceRefs: [evidence("matrix_cancel", "7")]
+    };
+    expect(
+      TaskToPrProjectionSchema.safeParse({
+        ...projection,
+        state: "cancelled",
+        merge: { guard: projection.merge.guard },
+        cleanup: undefined,
+        cancellation
+      }).success
+    ).toBe(false);
+    expect(
+      TaskToPrProjectionSchema.safeParse({
+        ...projection,
+        state: "failed",
+        cleanup: undefined,
+        evidenceRefs: [evidence("matrix_failed", "8")]
+      }).success
+    ).toBe(false);
+    expect(
+      TaskToPrProjectionSchema.safeParse({
+        ...projection,
+        state: "merge_ready",
+        merge: {
+          ...projection.merge,
+          outcome: projection.merge.outcome
+        },
+        cleanup: undefined
+      }).success
+    ).toBe(false);
+  });
+
+  test("preserves eligible merge-guard lineage through revocation or consumption", () => {
+    const terminalProjection = validProjection();
+    const previous = parseProjection({
+      ...terminalProjection,
+      state: "merge_ready",
+      terminalDispositionRef: undefined,
+      cleanup: undefined,
+      merge: {
+        guard: {
+          ...terminalProjection.merge.guard,
+          decision: "eligible"
+        }
+      },
+      provenanceLedger: []
+    });
+    const nextEvents = (seed: string) => ({
+      ...previous.events,
+      replayCursorRef: ref("replay_cursor", "todos", `guard-lineage-${seed}`),
+      sequence: previous.events.sequence + 1,
+      prefixDigest: createHash("sha256").update(`guard-lineage-${seed}`, "utf8").digest("hex")
+    });
+    const terminalDispositionRef = ref("terminal_disposition", "todos", "guard-lineage-terminal");
+    const consumedGuard = {
+      ...previous.merge!.guard,
+      ref: ref("merge_guard", "todos", "guard-lineage-consumed"),
+      decision: "consumed" as const
+    };
+    const merged = parseProjection({
+      ...previous,
+      state: "merged",
+      events: nextEvents("consumed"),
+      terminalDispositionRef,
+      merge: {
+        guard: consumedGuard,
+        outcome: {
+          ...terminalProjection.merge.outcome,
+          guardRef: consumedGuard.ref
+        }
+      },
+      provenanceLedger: previous.provenanceLedger
+    });
+    expect(validateTaskToPrProjectionTransition(previous, merged)).toEqual({
+      success: true,
+      issues: []
+    });
+
+    const unrelatedGuard = {
+      ...consumedGuard,
+      ref: ref("merge_guard", "todos", "guard-lineage-unrelated"),
+      operatorRef: ref("merge_operator", "merge_provider", "guard-lineage-unrelated", "partial")
+    };
+    const unrelatedMerged = parseProjection({
+      ...merged,
+      events: nextEvents("unrelated"),
+      merge: {
+        guard: unrelatedGuard,
+        outcome: {
+          ...merged.merge!.outcome!,
+          guardRef: unrelatedGuard.ref
+        }
+      },
+      provenanceLedger: previous.provenanceLedger
+    });
+    expect(validateTaskToPrProjectionTransition(previous, unrelatedMerged).success).toBe(false);
+
+    const failedWithoutRevocation = parseProjection({
+      ...previous,
+      state: "failed",
+      events: nextEvents("dropped"),
+      terminalDispositionRef,
+      merge: undefined,
+      provenanceLedger: previous.provenanceLedger,
+      evidenceRefs: [evidence("guard_lineage_dropped", "4")]
+    });
+    expect(validateTaskToPrProjectionTransition(previous, failedWithoutRevocation).success).toBe(false);
+
+    const revokedGuard = {
+      ...previous.merge!.guard,
+      ref: ref("merge_guard", "todos", "guard-lineage-revoked"),
+      decision: "revoked" as const
+    };
+    const failedWithRevocation = parseProjection({
+      ...previous,
+      state: "failed",
+      events: nextEvents("revoked"),
+      terminalDispositionRef,
+      merge: { guard: revokedGuard },
+      provenanceLedger: previous.provenanceLedger,
+      evidenceRefs: [evidence("guard_lineage_revoked", "5")]
+    });
+    expect(validateTaskToPrProjectionTransition(previous, failedWithRevocation)).toEqual({
+      success: true,
+      issues: []
+    });
+  });
+
+  test("treats failed and blocked dispositions as terminal rather than advertising impossible recovery edges", () => {
+    const terminalProjection = validProjection();
+    const failed = parseProjection({
+      ...terminalProjection,
+      state: "failed",
+      pullRequestRef: undefined,
+      exactHead: undefined,
+      handoff: undefined,
+      reviews: [],
+      merge: undefined,
+      cleanup: undefined,
+      repair: {
+        ref: ref("repair_cycle", "todos", "terminal-recovery"),
+        cycle: 0,
+        cap: 2,
+        exhausted: false
+      },
+      terminalDispositionRef: ref("terminal_disposition", "todos", "terminal-recovery"),
+      provenanceLedger: [],
+      evidenceRefs: [evidence("terminal_recovery_failed", "6")]
+    });
+    const nextAttempt = {
+      ...failed.attempt,
+      ref: ref("attempt", "todos", "terminal-recovery-next"),
+      nonce: attemptNonce("terminal-recovery-next"),
+      admissionRef: ref("admission", "codewith", "terminal-recovery-next", "partial"),
+      workerRef: ref("worker", "codewith", "terminal-recovery-next", "partial"),
+      runtimeRef: ref("runtime", "codewith", "terminal-recovery-next", "partial"),
+      writerGenerationRef: ref("writer_generation", "todos", "terminal-recovery-next"),
+      writerLeaseRef: ref("writer_lease", "repos", "terminal-recovery-next", "partial"),
+      writerFenceRef: ref("writer_fence", "repos", "terminal-recovery-next", "full"),
+      providerProfileRef: ref("provider_profile", "codewith", "terminal-recovery-next", "full"),
+      providerRouteRef: ref("provider_route", "codewith", "terminal-recovery-next", "partial")
+    };
+    const recovering = parseProjection({
+      ...failed,
+      state: "recovering",
+      workRunRef: ref("work_run", "codewith", "terminal-recovery-next"),
+      attempt: nextAttempt,
+      events: {
+        ...failed.events,
+        replayCursorRef: ref("replay_cursor", "todos", "terminal-recovery-next"),
+        sequence: failed.events.sequence + 1,
+        prefixDigest: createHash("sha256").update("terminal-recovery-next", "utf8").digest("hex")
+      },
+      recovery: {
+        ref: ref("recovery", "todos", "terminal-recovery-next"),
+        priorAttemptRef: failed.attempt.ref,
+        priorWriterGenerationRef: failed.attempt.writerGenerationRef,
+        priorWorkRunRef: failed.workRunRef,
+        successorAttemptNonce: nextAttempt.nonce,
+        successorWriterGenerationRef: nextAttempt.writerGenerationRef,
+        preservedStateRefs: [
+          failed.workRunRef,
+          failed.rootRequestRef,
+          failed.prGroupRef,
+          failed.leafTaskRef,
+          failed.repository.repoRef,
+          failed.repository.worktreeRef,
+          failed.repository.branchRef,
+          failed.events.streamRef
+        ],
+        stopEvidenceRef: evidence("terminal_recovery_stop", "7"),
+        leaseRevocationEvidenceRef: evidence("terminal_recovery_revoke", "8")
+      },
+      terminalDispositionRef: undefined,
+      provenanceLedger: failed.provenanceLedger,
+      evidenceRefs: []
+    });
+    const result = validateTaskToPrProjectionTransition(failed, recovering);
+    expect(result.success).toBe(false);
+    expect(result.issues.some((issue) => issue.path === "state")).toBe(true);
+  });
+
+  test("requires terminal owner, lease-revocation, and consumed-event facts before deleted cleanup", () => {
+    const projection = validProjection();
+    const previous = parseProjection({
+      ...projection,
+      id: projectionId("valid-projection"),
+      state: "running",
+      pullRequestRef: undefined,
+      exactHead: undefined,
+      handoff: undefined,
+      reviews: [],
+      merge: undefined,
+      cleanup: undefined,
+      repair: {
+        ref: ref("repair_cycle", "todos", "cleanup-running"),
+        cycle: 0,
+        cap: 2,
+        exhausted: false
+      },
+      provenanceLedger: [],
+      evidenceRefs: []
+    });
+    const deleted = withActiveProvenance({
+      ...previous,
+      id: projectionId("valid-projection"),
+      state: "cleanup_complete",
+      events: {
+        ...previous.events,
+        replayCursorRef: ref("replay_cursor", "todos", "cleanup-consumed"),
+        sequence: previous.events.sequence + 1,
+        prefixDigest: sha("9")
+      },
+      cleanup: {
+        eligibility: {
+          ref: ref("cleanup_eligibility", "repos", "cleanup-gate"),
+          status: "eligible",
+          targetWorktreeRef: previous.repository.worktreeRef,
+          eventCursorRef: ref("replay_cursor", "todos", "cleanup-consumed"),
+          evaluatedAt: createdAt,
+          evidenceRefs: [evidence("cleanup_gate_without_terminal", "a")]
+        },
+        outcome: {
+          ref: ref("cleanup_outcome", "repos", "cleanup-deleted"),
+          eligibilityRef: ref("cleanup_eligibility", "repos", "cleanup-gate"),
+          targetWorktreeRef: previous.repository.worktreeRef,
+          status: "deleted",
+          finishedAt: createdAt,
+          evidenceRefs: [evidence("cleanup_deleted_without_terminal", "b")]
+        }
+      }
+    });
+    expect(TaskToPrProjectionSchema.safeParse(deleted).success).toBe(false);
+  });
+
+  test("consumes exactly one repair cycle on entry and freezes repair state after terminal disposition", () => {
+    const projection = validProjection();
+    const exhausted = parseProjection({
+      ...projection,
+      id: projectionId("valid-projection"),
+      state: "running",
+      pullRequestRef: undefined,
+      exactHead: undefined,
+      handoff: undefined,
+      reviews: [],
+      merge: undefined,
+      cleanup: undefined,
+      repair: {
+        ref: ref("repair_cycle", "todos", "repair-exhausted-state"),
+        cycle: 2,
+        cap: 2,
+        exhausted: true,
+        latestRepairRef: ref("repair_cycle", "todos", "repair-exhausted-latest")
+      },
+      provenanceLedger: [],
+      evidenceRefs: []
+    });
+    const reentered = parseProjection({
+      ...exhausted,
+      id: projectionId("valid-projection"),
+      state: "repairing",
+      events: {
+        ...exhausted.events,
+        replayCursorRef: ref("replay_cursor", "todos", "repair-reentry"),
+        sequence: exhausted.events.sequence + 1,
+        prefixDigest: sha("a")
+      }
+    });
+    expect(validateTaskToPrProjectionTransition(exhausted, reentered).success).toBe(false);
+
+    const terminal = parseProjection({
+      ...projection,
+      id: projectionId("valid-projection"),
+      state: "merged",
+      cleanup: undefined
+    });
+    const terminalRepairMutation = parseProjection({
+      ...terminal,
+      id: projectionId("valid-projection"),
+      events: {
+        ...terminal.events,
+        replayCursorRef: ref("replay_cursor", "todos", "repair-terminal"),
+        sequence: terminal.events.sequence + 1,
+        prefixDigest: sha("b")
+      },
+      repair: {
+        ref: ref("repair_cycle", "todos", "repair-terminal-state"),
+        cycle: terminal.repair.cycle + 1,
+        cap: 2,
+        exhausted: true,
+        latestRepairRef: ref("repair_cycle", "todos", "repair-terminal-latest")
+      }
+    });
+    expect(validateTaskToPrProjectionTransition(terminal, terminalRepairMutation).success).toBe(false);
+  });
+
+  test("requires fresh admission and worker-assignment refs on every successor attempt", () => {
+    const projection = validProjection();
+    const previous = parseProjection({
+      ...projection,
+      id: projectionId("valid-projection"),
+      state: "running",
+      pullRequestRef: undefined,
+      exactHead: undefined,
+      handoff: undefined,
+      reviews: [],
+      merge: undefined,
+      cleanup: undefined,
+      repair: {
+        ref: ref("repair_cycle", "todos", "attempt-previous"),
+        cycle: 0,
+        cap: 2,
+        exhausted: false
+      },
+      provenanceLedger: [],
+      evidenceRefs: []
+    });
+    const nextAttempt = {
+      ...previous.attempt,
+      ref: ref("attempt", "todos", "attempt-next"),
+      nonce: attemptNonce("attempt-next"),
+      runtimeRef: ref("runtime", "codewith", "attempt-next", "partial"),
+      writerGenerationRef: ref("writer_generation", "todos", "attempt-next"),
+      writerLeaseRef: ref("writer_lease", "repos", "attempt-next", "partial"),
+      writerFenceRef: ref("writer_fence", "repos", "attempt-next", "full"),
+      providerProfileRef: ref("provider_profile", "codewith", "attempt-next", "full"),
+      providerRouteRef: ref("provider_route", "codewith", "attempt-next", "partial")
+    };
+    const successor = parseProjection({
+      ...previous,
+      id: projectionId("valid-projection"),
+      state: "recovering",
+      workRunRef: ref("work_run", "codewith", "attempt-next"),
+      attempt: nextAttempt,
+      events: {
+        ...previous.events,
+        replayCursorRef: ref("replay_cursor", "todos", "attempt-next"),
+        sequence: previous.events.sequence + 1,
+        prefixDigest: sha("c")
+      },
+      recovery: {
+        ref: ref("recovery", "todos", "attempt-next"),
+        priorAttemptRef: previous.attempt.ref,
+        priorWriterGenerationRef: previous.attempt.writerGenerationRef,
+        priorWorkRunRef: previous.workRunRef,
+        successorAttemptNonce: nextAttempt.nonce,
+        successorWriterGenerationRef: nextAttempt.writerGenerationRef,
+        preservedStateRefs: [
+          previous.workRunRef,
+          previous.rootRequestRef,
+          previous.prGroupRef,
+          previous.leafTaskRef,
+          previous.repository.repoRef,
+          previous.repository.worktreeRef,
+          previous.repository.branchRef,
+          previous.events.streamRef
+        ],
+        stopEvidenceRef: evidence("attempt_next_stopped", "d"),
+        leaseRevocationEvidenceRef: evidence("attempt_next_revoked", "e")
+      }
+    });
+    expect(validateTaskToPrProjectionTransition(previous, successor).success).toBe(false);
+  });
+
+  test("versions canonical identity and binds branch plus worktree while retaining the v1 derivation path", () => {
+    const projection = validProjection();
+    const original = deriveTaskToPrIdentityDigest({
+      canonicalizationVersion: 2,
+      rootRequestRef: projection.rootRequestRef,
+      prGroupRef: projection.prGroupRef,
+      leafTaskRef: projection.leafTaskRef,
+      repoRef: projection.repository.repoRef,
+      worktreeRef: projection.repository.worktreeRef,
+      branchRef: projection.repository.branchRef,
+      baseHead: projection.repository.baseHead,
+      frozenScopeDigest: projection.frozenScopeDigest
+    });
+    const aliased = deriveTaskToPrIdentityDigest({
+      canonicalizationVersion: 2,
+      rootRequestRef: projection.rootRequestRef,
+      prGroupRef: projection.prGroupRef,
+      leafTaskRef: projection.leafTaskRef,
+      repoRef: projection.repository.repoRef,
+      worktreeRef: ref("worktree", "repos", "identity-alias", "partial"),
+      branchRef: ref("branch", "repos", "identity-alias"),
+      baseHead: projection.repository.baseHead,
+      frozenScopeDigest: projection.frozenScopeDigest
+    });
+    expect(aliased).not.toBe(original);
+
+    const legacyIdentityDigest = deriveTaskToPrIdentityDigest({
+      canonicalizationVersion: 1,
+      rootRequestRef: projection.rootRequestRef,
+      prGroupRef: projection.prGroupRef,
+      leafTaskRef: projection.leafTaskRef,
+      repoRef: projection.repository.repoRef,
+      baseHead: projection.repository.baseHead,
+      frozenScopeDigest: projection.frozenScopeDigest
+    });
+    expect(
+      TaskToPrProjectionSchema.safeParse({
+        ...projection,
+        canonicalizationVersion: 1,
+        identityDigest: legacyIdentityDigest
+      }).success
+    ).toBe(true);
+  });
+
+  test("reserves the v1 adapter-extension namespace independently of unrelated schema registration", () => {
+    const projection = validProjection();
+    expect(
+      TaskToPrAdapterExtensionSchema.safeParse({
+        ...projection.adapterExtensions[0],
+        schema: "hasna.unrelated_future_contract.v1"
+      }).success
+    ).toBe(false);
+    expect(TaskToPrAdapterExtensionSchema.safeParse(projection.adapterExtensions[0]).success).toBe(true);
+  });
+
+  test("rejects duplicate and conflicting same-role recovery or cancellation preservation refs", () => {
+    const recoveryProjection = validRecoveryProjection();
+    expect(
+      TaskToPrProjectionSchema.safeParse({
+        ...recoveryProjection,
+        recovery: {
+          ...recoveryProjection.recovery,
+          preservedStateRefs: [
+            ...recoveryProjection.recovery.preservedStateRefs,
+            ref("root_request", "todos", "conflicting-root")
+          ]
+        }
+      }).success
+    ).toBe(false);
+
+    const projection = validProjection();
+    const cancellation = {
+      ref: ref("cancellation", "todos", "duplicate-preservation"),
+      cancelledAttemptRef: projection.attempt.ref,
+      preservedStateRefs: [
+        projection.workRunRef,
+        projection.rootRequestRef,
+        projection.rootRequestRef,
+        projection.prGroupRef,
+        projection.leafTaskRef,
+        projection.attempt.ref,
+        projection.repository.repoRef,
+        projection.repository.worktreeRef,
+        projection.repository.branchRef,
+        projection.events.streamRef,
+        projection.pullRequestRef
+      ],
+      evidenceRefs: [evidence("duplicate_preservation", "f")]
+    };
+    expect(
+      TaskToPrProjectionSchema.safeParse({
+        ...projection,
+        state: "cancelled",
+        merge: undefined,
+        exactHead: undefined,
+        reviews: [],
+        cleanup: undefined,
+        cancellation
+      }).success
+    ).toBe(false);
+  });
+
+  test("requires distinct stop and lease-revocation evidence identities", () => {
+    const projection = validProjection();
+    expect(
+      TaskToPrHandoffSchema.safeParse({
+        ...projection.handoff,
+        leaseRevocationEvidenceRef: projection.handoff.stopEvidenceRef
+      }).success
+    ).toBe(false);
+    const recoveryProjection = validRecoveryProjection();
+    expect(
+      TaskToPrRecoverySchema.safeParse({
+        ...recoveryProjection.recovery,
+        leaseRevocationEvidenceRef: recoveryProjection.recovery.stopEvidenceRef
+      }).success
+    ).toBe(false);
+  });
+
+  test("rejects event cursor sequences beyond Number.MAX_SAFE_INTEGER", () => {
+    const projection = validProjection();
+    expect(
+      TaskToPrProjectionSchema.safeParse(
+        withActiveProvenance({
+          ...projection,
+          events: {
+            ...projection.events,
+            sequence: Number.MAX_SAFE_INTEGER + 1
+          }
+        })
+      ).success
+    ).toBe(false);
+  });
+
+  test("requires structurally nonsemantic owner-resolvable reference ids", () => {
+    expect(
+      TaskToPrRefSchema.safeParse({
+        ...ref("root_request", "todos", "semantic"),
+        id: "root_request:opaque-project-alpha-customer-42"
+      }).success
+    ).toBe(false);
   });
 
   test("preserves v1 WorkRun parsing and refuses silent v1 widening", () => {

@@ -1,36 +1,36 @@
 {
   "schema": "hasna.task_to_pr_projection.v1",
-  "id": "task_to_pr_projection:opaque-example",
+  "id": "task_to_pr_projection:opaque-0123456789abcdef0123456789abcdef",
   "createdAt": "2026-07-23T15:10:00.000Z",
-  "canonicalizationVersion": 1,
-  "identityDigest": "efa1cc954b50628d575d7b353262264ad29926c12b8094580ab058bfb081fb4d",
+  "canonicalizationVersion": 2,
+  "identityDigest": "2ea71da0896bbae24c42ae106fd2179f46a6c327a7d40cdcd10f63ce57d0a170",
   "frozenScopeDigest": "2222222222222222222222222222222222222222222222222222222222222222",
   "state": "merged",
   "workRunRef": {
     "role": "work_run",
     "authority": "codewith",
-    "id": "work_run:opaque-example",
+    "id": "work_run:codewith:opaque-01010101010101010101010101010101",
     "digest": "0101010101010101010101010101010101010101010101010101010101010101",
     "redaction": "none"
   },
   "rootRequestRef": {
     "role": "root_request",
     "authority": "todos",
-    "id": "root_request:opaque-example",
+    "id": "root_request:todos:opaque-44444444444444444444444444444444",
     "digest": "4444444444444444444444444444444444444444444444444444444444444444",
     "redaction": "none"
   },
   "prGroupRef": {
     "role": "pr_group",
     "authority": "todos",
-    "id": "pr_group:opaque-example",
+    "id": "pr_group:todos:opaque-55555555555555555555555555555555",
     "digest": "5555555555555555555555555555555555555555555555555555555555555555",
     "redaction": "none"
   },
   "leafTaskRef": {
     "role": "leaf_task",
     "authority": "todos",
-    "id": "leaf_task:opaque-example",
+    "id": "leaf_task:todos:opaque-66666666666666666666666666666666",
     "digest": "6666666666666666666666666666666666666666666666666666666666666666",
     "redaction": "none"
   },
@@ -38,64 +38,71 @@
     "ref": {
       "role": "attempt",
       "authority": "todos",
-      "id": "attempt:opaque-example",
+      "id": "attempt:todos:opaque-02020202020202020202020202020202",
       "digest": "0202020202020202020202020202020202020202020202020202020202020202",
       "redaction": "none"
     },
-    "nonce": "attempt_nonce:opaque-example-0001",
+    "nonce": "attempt_nonce:opaque-11111111111111111111111111111111",
     "admissionRef": {
       "role": "admission",
       "authority": "codewith",
-      "id": "admission:opaque-example",
-      "digest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "id": "admission:codewith:opaque-13131313131313131313131313131313",
+      "digest": "1313131313131313131313131313131313131313131313131313131313131313",
+      "redaction": "partial"
+    },
+    "workerActorRef": {
+      "role": "worker_actor",
+      "authority": "codewith",
+      "id": "worker_actor:codewith:opaque-14141414141414141414141414141414",
+      "digest": "1414141414141414141414141414141414141414141414141414141414141414",
       "redaction": "partial"
     },
     "workerRef": {
       "role": "worker",
       "authority": "codewith",
-      "id": "worker:opaque-example",
-      "digest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "id": "worker:codewith:opaque-15151515151515151515151515151515",
+      "digest": "1515151515151515151515151515151515151515151515151515151515151515",
       "redaction": "partial"
     },
     "runtimeRef": {
       "role": "runtime",
       "authority": "codewith",
-      "id": "runtime:opaque-example",
+      "id": "runtime:codewith:opaque-03030303030303030303030303030303",
       "digest": "0303030303030303030303030303030303030303030303030303030303030303",
       "redaction": "partial"
     },
     "writerGenerationRef": {
       "role": "writer_generation",
       "authority": "todos",
-      "id": "writer_generation:opaque-example",
+      "id": "writer_generation:todos:opaque-88888888888888888888888888888888",
       "digest": "8888888888888888888888888888888888888888888888888888888888888888",
       "redaction": "none"
     },
     "writerLeaseRef": {
       "role": "writer_lease",
       "authority": "repos",
-      "id": "writer_lease:opaque-example",
+      "id": "writer_lease:repos:opaque-99999999999999999999999999999999",
       "digest": "9999999999999999999999999999999999999999999999999999999999999999",
       "redaction": "partial"
     },
     "writerFenceRef": {
       "role": "writer_fence",
       "authority": "repos",
-      "id": "writer_fence:opaque-example",
+      "id": "writer_fence:repos:opaque-04040404040404040404040404040404",
       "digest": "0404040404040404040404040404040404040404040404040404040404040404",
       "redaction": "full"
     },
     "providerProfileRef": {
       "role": "provider_profile",
       "authority": "codewith",
-      "id": "provider_profile:opaque-example",
+      "id": "provider_profile:codewith:opaque-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "redaction": "full"
     },
     "providerRouteRef": {
       "role": "provider_route",
       "authority": "codewith",
-      "id": "provider_route:opaque-example",
+      "id": "provider_route:codewith:opaque-cccccccccccccccccccccccccccccccc",
       "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       "redaction": "partial"
     }
@@ -104,21 +111,21 @@
     "repoRef": {
       "role": "repo",
       "authority": "repos",
-      "id": "repo:opaque-example",
+      "id": "repo:repos:opaque-dddddddddddddddddddddddddddddddd",
       "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
       "redaction": "none"
     },
     "worktreeRef": {
       "role": "worktree",
       "authority": "repos",
-      "id": "worktree:opaque-example",
+      "id": "worktree:repos:opaque-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       "redaction": "partial"
     },
     "branchRef": {
       "role": "branch",
       "authority": "repos",
-      "id": "branch:opaque-example",
+      "id": "branch:repos:opaque-ffffffffffffffffffffffffffffffff",
       "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
       "redaction": "none"
     },
@@ -135,14 +142,14 @@
     "streamRef": {
       "role": "event_stream",
       "authority": "todos",
-      "id": "event_stream:opaque-example",
+      "id": "event_stream:todos:opaque-11111111111111111111111111111111",
       "digest": "1111111111111111111111111111111111111111111111111111111111111111",
       "redaction": "none"
     },
     "replayCursorRef": {
       "role": "replay_cursor",
       "authority": "todos",
-      "id": "replay_cursor:opaque-example",
+      "id": "replay_cursor:todos:opaque-22222222222222222222222222222222",
       "digest": "2222222222222222222222222222222222222222222222222222222222222222",
       "redaction": "none"
     },
@@ -152,7 +159,7 @@
   "pullRequestRef": {
     "role": "pull_request",
     "authority": "todos",
-    "id": "pull_request:opaque-example",
+    "id": "pull_request:todos:opaque-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
     "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
     "redaction": "none"
   },
@@ -160,16 +167,24 @@
     "pullRequestRef": {
       "role": "pull_request",
       "authority": "todos",
-      "id": "pull_request:opaque-example",
+      "id": "pull_request:todos:opaque-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       "redaction": "none"
     },
     "remoteBranchRef": {
       "role": "branch",
       "authority": "repos",
-      "id": "branch:opaque-example",
+      "id": "branch:repos:opaque-ffffffffffffffffffffffffffffffff",
       "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
       "redaction": "none"
+    },
+    "expectedBase": {
+      "algorithm": "sha1",
+      "value": "1111111111111111111111111111111111111111"
+    },
+    "providerPullRequestBase": {
+      "algorithm": "sha1",
+      "value": "1111111111111111111111111111111111111111"
     },
     "localHead": {
       "algorithm": "sha1",
@@ -186,7 +201,7 @@
     "equalityProofRef": {
       "role": "proof_bundle",
       "authority": "review",
-      "id": "proof_bundle:opaque-head-equality",
+      "id": "proof_bundle:review:opaque-ffffffffffffffffffffffffffffffff",
       "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
       "redaction": "none"
     },
@@ -194,7 +209,7 @@
       {
         "role": "proof_bundle",
         "authority": "review",
-        "id": "proof_bundle:opaque-ci",
+        "id": "proof_bundle:review:opaque-00000000000000000000000000000000",
         "digest": "0000000000000000000000000000000000000000000000000000000000000000",
         "redaction": "none"
       }
@@ -206,16 +221,20 @@
       "ref": {
         "role": "review",
         "authority": "review",
-        "id": "review:opaque-example",
+        "id": "review:review:opaque-66666666666666666666666666666666",
         "digest": "6666666666666666666666666666666666666666666666666666666666666666",
         "redaction": "none"
       },
       "pullRequestRef": {
         "role": "pull_request",
         "authority": "todos",
-        "id": "pull_request:opaque-example",
+        "id": "pull_request:todos:opaque-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
         "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
         "redaction": "none"
+      },
+      "base": {
+        "algorithm": "sha1",
+        "value": "1111111111111111111111111111111111111111"
       },
       "head": {
         "algorithm": "sha1",
@@ -224,21 +243,21 @@
       "reviewerRef": {
         "role": "reviewer",
         "authority": "review",
-        "id": "reviewer:opaque-example",
+        "id": "reviewer:review:opaque-44444444444444444444444444444444",
         "digest": "4444444444444444444444444444444444444444444444444444444444444444",
         "redaction": "none"
       },
       "reviewRunRef": {
         "role": "review_run",
         "authority": "review",
-        "id": "review_run:opaque-example",
+        "id": "review_run:review:opaque-55555555555555555555555555555555",
         "digest": "5555555555555555555555555555555555555555555555555555555555555555",
         "redaction": "none"
       },
       "proofBundleRef": {
         "role": "proof_bundle",
         "authority": "review",
-        "id": "proof_bundle:opaque-review",
+        "id": "proof_bundle:review:opaque-11111111111111111111111111111111",
         "digest": "1111111111111111111111111111111111111111111111111111111111111111",
         "redaction": "none"
       },
@@ -250,7 +269,7 @@
     "ref": {
       "role": "repair_cycle",
       "authority": "todos",
-      "id": "repair_cycle:opaque-zero",
+      "id": "repair_cycle:todos:opaque-44444444444444444444444444444444",
       "digest": "4444444444444444444444444444444444444444444444444444444444444444",
       "redaction": "none"
     },
@@ -263,16 +282,20 @@
       "ref": {
         "role": "merge_guard",
         "authority": "todos",
-        "id": "merge_guard:opaque-example",
+        "id": "merge_guard:todos:opaque-77777777777777777777777777777777",
         "digest": "7777777777777777777777777777777777777777777777777777777777777777",
         "redaction": "none"
       },
       "pullRequestRef": {
         "role": "pull_request",
         "authority": "todos",
-        "id": "pull_request:opaque-example",
+        "id": "pull_request:todos:opaque-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
         "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
         "redaction": "none"
+      },
+      "expectedBase": {
+        "algorithm": "sha1",
+        "value": "1111111111111111111111111111111111111111"
       },
       "expectedHead": {
         "algorithm": "sha1",
@@ -282,7 +305,7 @@
         {
           "role": "review",
           "authority": "review",
-          "id": "review:opaque-example",
+          "id": "review:review:opaque-66666666666666666666666666666666",
           "digest": "6666666666666666666666666666666666666666666666666666666666666666",
           "redaction": "none"
         }
@@ -291,21 +314,21 @@
         {
           "role": "proof_bundle",
           "authority": "review",
-          "id": "proof_bundle:opaque-review",
+          "id": "proof_bundle:review:opaque-11111111111111111111111111111111",
           "digest": "1111111111111111111111111111111111111111111111111111111111111111",
           "redaction": "none"
         },
         {
           "role": "proof_bundle",
           "authority": "review",
-          "id": "proof_bundle:opaque-head-equality",
+          "id": "proof_bundle:review:opaque-ffffffffffffffffffffffffffffffff",
           "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
           "redaction": "none"
         },
         {
           "role": "proof_bundle",
           "authority": "review",
-          "id": "proof_bundle:opaque-ci",
+          "id": "proof_bundle:review:opaque-00000000000000000000000000000000",
           "digest": "0000000000000000000000000000000000000000000000000000000000000000",
           "redaction": "none"
         }
@@ -313,49 +336,57 @@
       "operatorRef": {
         "role": "merge_operator",
         "authority": "merge_provider",
-        "id": "merge_operator:opaque-example",
+        "id": "merge_operator:merge_provider:opaque-88888888888888888888888888888888",
         "digest": "8888888888888888888888888888888888888888888888888888888888888888",
         "redaction": "partial"
       },
       "operatorRunRef": {
         "role": "merge_operator_run",
         "authority": "merge_provider",
-        "id": "merge_operator_run:opaque-example",
+        "id": "merge_operator_run:merge_provider:opaque-99999999999999999999999999999999",
         "digest": "9999999999999999999999999999999999999999999999999999999999999999",
         "redaction": "partial"
       },
       "providerGuardReceiptRef": {
         "role": "merge_guard_receipt",
         "authority": "merge_provider",
-        "id": "merge_guard_receipt:opaque-example",
+        "id": "merge_guard_receipt:merge_provider:opaque-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "redaction": "full"
       },
       "mechanism": "compare_and_swap",
-      "decision": "eligible",
+      "decision": "consumed",
       "evaluatedAt": "2026-07-23T15:10:00.000Z"
     },
     "outcome": {
       "ref": {
         "role": "merge_outcome",
         "authority": "merge_provider",
-        "id": "merge_outcome:opaque-example",
+        "id": "merge_outcome:merge_provider:opaque-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "redaction": "partial"
       },
       "guardRef": {
         "role": "merge_guard",
         "authority": "todos",
-        "id": "merge_guard:opaque-example",
+        "id": "merge_guard:todos:opaque-77777777777777777777777777777777",
         "digest": "7777777777777777777777777777777777777777777777777777777777777777",
         "redaction": "none"
       },
       "pullRequestRef": {
         "role": "pull_request",
         "authority": "todos",
-        "id": "pull_request:opaque-example",
+        "id": "pull_request:todos:opaque-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
         "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
         "redaction": "none"
+      },
+      "expectedBase": {
+        "algorithm": "sha1",
+        "value": "1111111111111111111111111111111111111111"
+      },
+      "observedBase": {
+        "algorithm": "sha1",
+        "value": "1111111111111111111111111111111111111111"
       },
       "expectedHead": {
         "algorithm": "sha1",
@@ -369,31 +400,38 @@
       "mergeCommitRef": {
         "role": "commit",
         "authority": "repos",
-        "id": "commit:opaque-example",
+        "id": "commit:repos:opaque-cccccccccccccccccccccccccccccccc",
         "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "redaction": "none"
       },
       "finishedAt": "2026-07-23T15:10:00.000Z",
       "evidenceRefs": [
         {
-          "id": "evidence:opaque-merge-cas",
+          "id": "evidence:opaque-dddddddddddddddddddddddddddddddd",
           "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
           "redaction": "full"
         }
       ]
     }
   },
+  "terminalDispositionRef": {
+    "role": "terminal_disposition",
+    "authority": "todos",
+    "id": "terminal_disposition:todos:opaque-16161616161616161616161616161616",
+    "digest": "1616161616161616161616161616161616161616161616161616161616161616",
+    "redaction": "none"
+  },
   "provenanceLedger": [
     {
       "category": "projection_id",
-      "projectionId": "task_to_pr_projection:opaque-example"
+      "projectionId": "task_to_pr_projection:opaque-0123456789abcdef0123456789abcdef"
     },
     {
       "category": "work_run",
       "ref": {
         "role": "work_run",
         "authority": "codewith",
-        "id": "work_run:opaque-example",
+        "id": "work_run:codewith:opaque-01010101010101010101010101010101",
         "digest": "0101010101010101010101010101010101010101010101010101010101010101",
         "redaction": "none"
       }
@@ -403,21 +441,51 @@
       "ref": {
         "role": "attempt",
         "authority": "todos",
-        "id": "attempt:opaque-example",
+        "id": "attempt:todos:opaque-02020202020202020202020202020202",
         "digest": "0202020202020202020202020202020202020202020202020202020202020202",
         "redaction": "none"
       }
     },
     {
+      "category": "admission",
+      "ref": {
+        "role": "admission",
+        "authority": "codewith",
+        "id": "admission:codewith:opaque-13131313131313131313131313131313",
+        "digest": "1313131313131313131313131313131313131313131313131313131313131313",
+        "redaction": "partial"
+      }
+    },
+    {
+      "category": "worker_actor",
+      "ref": {
+        "role": "worker_actor",
+        "authority": "codewith",
+        "id": "worker_actor:codewith:opaque-14141414141414141414141414141414",
+        "digest": "1414141414141414141414141414141414141414141414141414141414141414",
+        "redaction": "partial"
+      }
+    },
+    {
+      "category": "worker_assignment",
+      "ref": {
+        "role": "worker",
+        "authority": "codewith",
+        "id": "worker:codewith:opaque-15151515151515151515151515151515",
+        "digest": "1515151515151515151515151515151515151515151515151515151515151515",
+        "redaction": "partial"
+      }
+    },
+    {
       "category": "attempt_nonce",
-      "nonce": "attempt_nonce:opaque-example-0001"
+      "nonce": "attempt_nonce:opaque-11111111111111111111111111111111"
     },
     {
       "category": "runtime",
       "ref": {
         "role": "runtime",
         "authority": "codewith",
-        "id": "runtime:opaque-example",
+        "id": "runtime:codewith:opaque-03030303030303030303030303030303",
         "digest": "0303030303030303030303030303030303030303030303030303030303030303",
         "redaction": "partial"
       }
@@ -427,7 +495,7 @@
       "ref": {
         "role": "writer_generation",
         "authority": "todos",
-        "id": "writer_generation:opaque-example",
+        "id": "writer_generation:todos:opaque-88888888888888888888888888888888",
         "digest": "8888888888888888888888888888888888888888888888888888888888888888",
         "redaction": "none"
       }
@@ -437,7 +505,7 @@
       "ref": {
         "role": "writer_lease",
         "authority": "repos",
-        "id": "writer_lease:opaque-example",
+        "id": "writer_lease:repos:opaque-99999999999999999999999999999999",
         "digest": "9999999999999999999999999999999999999999999999999999999999999999",
         "redaction": "partial"
       }
@@ -447,7 +515,7 @@
       "ref": {
         "role": "writer_fence",
         "authority": "repos",
-        "id": "writer_fence:opaque-example",
+        "id": "writer_fence:repos:opaque-04040404040404040404040404040404",
         "digest": "0404040404040404040404040404040404040404040404040404040404040404",
         "redaction": "full"
       }
@@ -457,7 +525,7 @@
       "ref": {
         "role": "provider_profile",
         "authority": "codewith",
-        "id": "provider_profile:opaque-example",
+        "id": "provider_profile:codewith:opaque-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "redaction": "full"
       }
@@ -467,7 +535,7 @@
       "ref": {
         "role": "provider_route",
         "authority": "codewith",
-        "id": "provider_route:opaque-example",
+        "id": "provider_route:codewith:opaque-cccccccccccccccccccccccccccccccc",
         "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "redaction": "partial"
       }
@@ -477,7 +545,7 @@
       "ref": {
         "role": "replay_cursor",
         "authority": "todos",
-        "id": "replay_cursor:opaque-example",
+        "id": "replay_cursor:todos:opaque-22222222222222222222222222222222",
         "digest": "2222222222222222222222222222222222222222222222222222222222222222",
         "redaction": "none"
       }
@@ -492,7 +560,7 @@
       "ref": {
         "role": "repair_cycle",
         "authority": "todos",
-        "id": "repair_cycle:opaque-zero",
+        "id": "repair_cycle:todos:opaque-44444444444444444444444444444444",
         "digest": "4444444444444444444444444444444444444444444444444444444444444444",
         "redaction": "none"
       }
@@ -502,9 +570,13 @@
       "ref": {
         "role": "proof_bundle",
         "authority": "review",
-        "id": "proof_bundle:opaque-head-equality",
+        "id": "proof_bundle:review:opaque-ffffffffffffffffffffffffffffffff",
         "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "redaction": "none"
+      },
+      "base": {
+        "algorithm": "sha1",
+        "value": "1111111111111111111111111111111111111111"
       },
       "head": {
         "algorithm": "sha1",
@@ -516,9 +588,13 @@
       "ref": {
         "role": "proof_bundle",
         "authority": "review",
-        "id": "proof_bundle:opaque-ci",
+        "id": "proof_bundle:review:opaque-00000000000000000000000000000000",
         "digest": "0000000000000000000000000000000000000000000000000000000000000000",
         "redaction": "none"
+      },
+      "base": {
+        "algorithm": "sha1",
+        "value": "1111111111111111111111111111111111111111"
       },
       "head": {
         "algorithm": "sha1",
@@ -530,9 +606,13 @@
       "ref": {
         "role": "proof_bundle",
         "authority": "review",
-        "id": "proof_bundle:opaque-review",
+        "id": "proof_bundle:review:opaque-11111111111111111111111111111111",
         "digest": "1111111111111111111111111111111111111111111111111111111111111111",
         "redaction": "none"
+      },
+      "base": {
+        "algorithm": "sha1",
+        "value": "1111111111111111111111111111111111111111"
       },
       "head": {
         "algorithm": "sha1",
@@ -544,9 +624,13 @@
       "ref": {
         "role": "review",
         "authority": "review",
-        "id": "review:opaque-example",
+        "id": "review:review:opaque-66666666666666666666666666666666",
         "digest": "6666666666666666666666666666666666666666666666666666666666666666",
         "redaction": "none"
+      },
+      "base": {
+        "algorithm": "sha1",
+        "value": "1111111111111111111111111111111111111111"
       },
       "head": {
         "algorithm": "sha1",
@@ -558,9 +642,13 @@
       "ref": {
         "role": "review_run",
         "authority": "review",
-        "id": "review_run:opaque-example",
+        "id": "review_run:review:opaque-55555555555555555555555555555555",
         "digest": "5555555555555555555555555555555555555555555555555555555555555555",
         "redaction": "none"
+      },
+      "base": {
+        "algorithm": "sha1",
+        "value": "1111111111111111111111111111111111111111"
       },
       "head": {
         "algorithm": "sha1",
@@ -572,7 +660,7 @@
       "ref": {
         "role": "merge_guard",
         "authority": "todos",
-        "id": "merge_guard:opaque-example",
+        "id": "merge_guard:todos:opaque-77777777777777777777777777777777",
         "digest": "7777777777777777777777777777777777777777777777777777777777777777",
         "redaction": "none"
       }
@@ -582,13 +670,27 @@
       "ref": {
         "role": "merge_guard_receipt",
         "authority": "merge_provider",
-        "id": "merge_guard_receipt:opaque-example",
+        "id": "merge_guard_receipt:merge_provider:opaque-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "redaction": "full"
+      },
+      "base": {
+        "algorithm": "sha1",
+        "value": "1111111111111111111111111111111111111111"
       },
       "head": {
         "algorithm": "sha1",
         "value": "2222222222222222222222222222222222222222"
+      }
+    },
+    {
+      "category": "terminal_disposition",
+      "ref": {
+        "role": "terminal_disposition",
+        "authority": "todos",
+        "id": "terminal_disposition:todos:opaque-16161616161616161616161616161616",
+        "digest": "1616161616161616161616161616161616161616161616161616161616161616",
+        "redaction": "none"
       }
     }
   ],
@@ -599,7 +701,7 @@
       "ref": {
         "role": "adapter_extension",
         "authority": "adapter",
-        "id": "adapter_extension:opaque-local-example",
+        "id": "adapter_extension:adapter:opaque-55555555555555555555555555555555",
         "digest": "5555555555555555555555555555555555555555555555555555555555555555",
         "redaction": "partial"
       },
@@ -611,7 +713,7 @@
       "ref": {
         "role": "adapter_extension",
         "authority": "adapter",
-        "id": "adapter_extension:opaque-cloud-example",
+        "id": "adapter_extension:adapter:opaque-77777777777777777777777777777777",
         "digest": "7777777777777777777777777777777777777777777777777777777777777777",
         "redaction": "full"
       },

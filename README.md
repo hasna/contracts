@@ -402,9 +402,10 @@ remains a bounded trace. The projection only binds their owner-resolved refs.
 Authority is fixed:
 
 - Todos owns the canonical root request, PR group, leaf task, attempt,
-  repair state, and append-only lifecycle history.
-- Codewith owns durable run admission, opaque profile/route selection, and
-  runtime state.
+  writer generation, terminal disposition, repair state, and append-only
+  lifecycle history.
+- Codewith owns durable run admission, worker actor and assignment, opaque
+  profile/route selection, and runtime state.
 - Repos owns repository, worktree, branch, writer lease/fence refs, and cleanup.
 - Infinity may execute an admitted attempt but is only an adapter; it does not
   become an authority or history store.
@@ -413,18 +414,19 @@ Authority is fixed:
   context. It owns no Codewith goal, Todos task or history, Repos lease,
   review, merge guard, or merge outcome.
 
-Every `TaskToPrRef` has one role, one authority, one typed opaque owner id
-(`role:opaque-*`), one lowercase SHA-256 identity digest, and an explicit redaction state. Canonical
-objects are dereferenced from their owning packages instead of embedded as
-mutable payloads. Sensitive owner ids are role-prefixed opaque refs and reject
-account-like, fence-like, URL-like, credential-like, and secret-marker values.
-The projection id (`task_to_pr_projection:opaque-*`) and attempt nonce
-(`attempt_nonce:opaque-*`) use the same fail-closed rule; untyped ids and values
-that hide an account, fence, or GitHub PAT marker behind a delimiter are
-rejected.
+Every `TaskToPrRef` has one role, one allowed authority, one lowercase SHA-256
+owner-record digest, one explicit redaction state, and one structural
+nonsemantic id:
+`role:authority:opaque-<first-32-hex-characters-of-digest>`. This makes owner
+resolution schema-driven rather than dependent on a semantic-keyword blacklist.
+Canonical objects are dereferenced from their owning packages instead of
+embedded as mutable payloads. The projection id
+(`task_to_pr_projection:opaque-*`) and attempt nonce
+(`attempt_nonce:opaque-*`) each require an independent 128-bit lowercase
+hexadecimal surrogate.
 `TaskToPrEvidenceRef` is deliberately smaller than `EvidencePointer`: it only
-carries a typed opaque `evidence:opaque-*` id, immutable digest, and
-`partial`/`full` redaction, so a
+allows `evidence:opaque-<first-32-hex-characters-of-digest>`, the immutable
+digest, and `partial`/`full` redaction, so a
 projection cannot inline a URI, summary, command output, or secret-adjacent
 payload.
 
@@ -433,111 +435,123 @@ payload.
 | `workRunRef` | exactly 1 | Codewith; points to the existing `WorkRun` receipt |
 | `rootRequestRef` / `prGroupRef` / `leafTaskRef` | exactly 1 each | Todos; immutable canonical identities |
 | `attempt.ref` / `attempt.nonce` | exactly 1 each | Todos attempt identity; every retry uses a fresh nonce |
-| admission / worker / runtime refs | exactly 1 each | redacted Codewith owner-record refs for the admitted runtime |
+| admission / worker actor / worker assignment / runtime refs | exactly 1 each | distinct redacted Codewith owner records; every successor attempt rotates admission and assignment in addition to the attempt-scoped runtime identity |
 | writer generation / lease / fence refs | exactly 1 each | generation is Todos-bound; lease/fence are redacted Repos refs, never a fence value |
 | provider profile / route refs | exactly 1 each | redacted opaque Codewith refs; never provider account or credential data |
 | repo / worktree / branch plus base and branch heads | exactly 1 binding | canonical Repos refs with exact Git object ids |
-| event stream / replay cursor / sequence / prefix digest | exactly 1 cursor | Todos append-only history is referenced, never copied |
-| `handoff` | 0 or 1 current transition | Todos ref binding prior/next attempts, prior/next generations, and the prior WorkRun plus stop/revocation evidence; the full record is immutable under one canonical ref, while a later handoff requires both a fresh canonical role/authority/id and a fresh digest; mutually exclusive with recovery |
+| event stream / replay cursor / sequence / prefix digest | exactly 1 cursor | Todos append-only history is referenced, never copied; sequences are nonnegative safe integers |
+| `handoff` | 0 or 1 current transition | Todos ref binding prior/next attempts, prior/next generations, and the prior WorkRun plus distinct stop and revocation evidence identities/digests; the full record is immutable under one canonical ref, while a later handoff requires both a fresh canonical role/authority/id and a fresh digest; mutually exclusive with recovery |
 | `pullRequestRef` | 0 or 1 | Todos PR-group identity; required by review or merge state |
-| exact-head proof | required before review/merge | local head = remote head = provider PR head, with equality and CI proof refs; once established, the complete exact-head fact (including the equality ref and ordered CI refs) is immutable while the branch head is unchanged; every branch-head change requires fresh canonical identities and digests for all equality and CI proof refs |
-| `reviews` | 0 or more unique exact-head reviews | review ref, reviewer/run, proof bundle, PR, and immutable head; review-record refs are unique by canonical id and digest; same-head history preserves the prior array as an exact immutable prefix and can only append, while a new branch head requires fresh review, review-run, and proof-bundle identities and digests (the reviewer actor may remain stable) |
-| `repair` | exactly 1 state | cumulative Todos cycle `0..2`; never decrements or resets; state/latest refs are disjoint by id and digest, and an advance makes both slots fresh from both prior slots |
-| merge guard / outcome | 0 or 1 each | guard binds reviewed head and proof; a guard is immutable under one canonical ref and any changed guard uses a fresh canonical id and digest; a changed expected head also requires a fresh provider-guard receipt id and digest; terminal outcome requires the exact immutable `guardRef` and is CAS-bound |
-| recovery / cancellation | recovery is mutually exclusive with handoff and cancellation; 0 or 1 each | preserves required root/group/leaf/repo/worktree/branch/event and present PR refs; recovery binds canonically distinct prior attempt/generation/WorkRun refs, is immutable under one canonical recovery ref, and rotates each successor/current or later recovery ref to both a fresh canonical role/authority/id and fresh digest |
-| cleanup eligibility / outcome | 0 or 1 each | Repos-owned; eligibility is immutable under one canonical ref and a changed decision uses a fresh canonical id and digest; both bind the canonical worktree and the outcome binds the eligibility decision |
+| exact-head proof | required before review/merge | exact expected base = provider PR base and local head = remote head = provider PR head, with equality and CI proof refs; same-base/head facts are immutable and every base/head change requires fresh proof identities and digests |
+| `reviews` | 0 or more unique exact-base/exact-head reviews | review ref, reviewer/run, proof bundle, PR, immutable base, and immutable head; same-base/head history preserves the prior array as an exact immutable prefix and can only append, while a changed base or head requires fresh review, review-run, and proof-bundle identities and digests |
+| `repair` | exactly 1 state | cumulative Todos cycle `0..2`; never decrements or resets; entering `repairing` consumes exactly one new cycle, exhausted work cannot re-enter repair, and repair state freezes after terminal disposition |
+| merge guard / outcome | 0 or 1 each | guard binds reviewed base/head and proof; only `merge_ready` may carry `eligible`, terminal outcomes require a `consumed` guard, and failed/blocked/cancelled history may only retain a revoked guard; outcome classifies base drift independently from head drift and binds the exact immutable guard |
+| recovery / cancellation | recovery is mutually exclusive with handoff and cancellation; 0 or 1 each | preservation refs are an exact one-per-role set for root/group/leaf/repo/worktree/branch/event and present PR; recovery binds canonically distinct prior attempt/generation/WorkRun refs, distinct stop/revocation evidence, and a fresh successor nonce/generation |
+| `terminalDispositionRef` | exactly 1 in terminal states; absent otherwise | durable Todos owner fact for the terminal disposition; immutable after establishment |
+| cleanup eligibility / outcome | 0 or 1 each | Repos-owned; eligibility binds the terminal disposition, current replay cursor, exact writer lease, canonical worktree, distinct lease-revocation and consumed-event evidence, and must be `eligible` before deletion; outcome binds the exact eligibility decision |
 | rollback plan / outcome | 0 or 1 each | plan targets a commit or branch, remains immutable under one canonical ref, and uses a fresh canonical id and digest when the plan or target changes; immutable outcome binds the exact plan and target |
-| `provenanceLedger` | exactly 1 append-only identity ledger | immutable exact-prefix tombstones for projection snapshot id, WorkRun, attempt, nonce, runtime, writer generation/lease/fence, provider profile/route, replay cursor/prefix, repair state/latest repair, handoff, recovery, merge guard, cleanup eligibility, rollback plan, equality/CI/review proof, review record/run, and provider guard receipt identities; active identities must be represented exactly, all ref ids/digests share one global uniqueness domain, and projection-id/nonce/prefix values are independently globally unique |
+| `provenanceLedger` | exactly 1 append-only identity ledger | immutable exact-prefix tombstones for the stable projection id, WorkRun, attempt, admission, worker actor/assignment, nonce, runtime, writer generation/lease/fence, provider profile/route, replay cursor/prefix, repair state/latest repair, handoff, recovery, merge guard, cleanup eligibility, rollback plan, terminal disposition, and base/head-bound equality/CI/review/provider-receipt identities; active identities must be represented exactly and all ref ids/digests share one global uniqueness domain |
 | OpenLoops invocation | 0 or 1 | optional redacted context only |
-| adapter extensions | 0 or more unique mode/schema pairs | `local` or `cloud` ref plus digest only; separately namespaced, unregistered schema ids cannot equal any canonical `SCHEMA_IDS` contract or redefine canonical fields |
+| adapter extensions | 0 or more unique mode/schema pairs | `local` or `cloud` ref plus digest only; every extension schema must use the permanently reserved `hasna.task_to_pr_adapter_extension.*` namespace |
 
 The top-level document deliberately has `createdAt` but no `updatedAt`.
-Producers treat a parsed projection as immutable. A changed lifecycle state is
-emitted as a new projection while the Todos stream/cursor remains the only
-canonical history. `provenanceLedger` is not another event store: it is an
-identity-only index over Todos history containing typed immutable projection
-ids, owner refs/digests, attempt nonces, replay prefix digests bound to their
-sequence, and the Git object id for head-bound refs. Ref equality is exact
-across role, authority, id,
-digest, and redaction. Its exact-prefix tombstones make pairwise validation
-remember all transition-fresh identities across absent phases, preventing
-owner, attempt-lineage, replay, repair, and proof ABA without copying owner
-payloads or lifecycle events. `validateTaskToPrProjectionTransition` parses both snapshots
-before comparing them. It rejects changed canonical identity, replay regression,
-sequence advances without a fresh cursor and prefix digest, repair advances
-without fresh repair refs, partial attempt/generation/WorkRun rotation, recovery
-or handoff that does not bind the immediately prior attempt/generation/WorkRun,
-handoff and recovery in the same current snapshot, reused canonical IDs or
-digests for advancing replay/repair/attempt/generation/WorkRun refs, reused
-attempt-scoped runtime/lease/fence/profile/route refs, mutation, removal, or
-handoff/recovery switching while an attempt identity is unchanged, illegal lifecycle
-edges, any semantic lifecycle drift without replay-sequence advancement,
-provenance-ledger truncation/reordering/mutation (including redaction drift),
-inactive identity reactivation, historical projection-id, attempt-nonce, or
-replay-prefix reuse,
-or appending a tombstone that does not represent a current active fact,
-same-ref mutation or half-rotation of handoff, recovery, merge-guard,
-cleanup-eligibility, or rollback-plan owner records (a changed owner fact must
-rotate both its canonical role/authority/id and digest),
-replacement or removal of an established canonical PR ref, mutation or
-removal of an established same-head exact-head fact, movement, mutation, or
-removal within the immutable same-head review prefix, reuse of any prior equality, CI, or review
-proof identity or digest after a branch-head change (including reordered or
-recategorized proof refs), reuse of prior review or review-run identities or
-digests across heads, active-state re-entry from terminal work states, and mutation or
-disappearance of complete terminal merge, cancellation, cleanup, or rollback
-facts after their owner outcome exists.
+Producers emit immutable snapshots under one stable top-level projection id;
+the Todos stream/cursor remains the only canonical lifecycle history. Any
+semantic change requires replay-sequence advancement with a fresh cursor and
+prefix digest. `provenanceLedger` is not another event store: it is an
+identity-only exact-prefix index over that history. Head-bound entries carry
+both base and head, while admission, worker assignment, terminal disposition,
+attempt nonce, and replay-prefix facts remain independently replay-safe. Ref
+equality is exact across role, authority, id, digest, and redaction.
+
+`validateTaskToPrProjectionTransition` parses both snapshots before comparing
+them. It rejects top-level id changes, identity-scope mutation, replay
+regression, sequence advances without a fresh cursor/prefix, semantic drift
+without an event advance, provenance truncation/reordering/mutation, inactive
+identity reactivation, illegal lifecycle edges, partial attempt lineage
+rotation, and successor attempts that reuse admission, worker assignment,
+runtime, lease, fence, profile, or route identities. Handoff/recovery must bind
+the immediately prior attempt, generation, and WorkRun; recovery and
+cancellation preservation lists must contain exactly the required roles with
+no duplicates or extras. Repair entry advances exactly one cycle, cannot occur
+after exhaustion, and repair is immutable after terminal disposition.
+Same-base/head exact-head and review facts remain immutable prefixes; a base or
+head change rotates equality, CI, review, review-run, review-proof, and provider
+receipt identities. Terminal disposition plus complete merge, cancellation,
+cleanup, and rollback owner facts are immutable once present.
 `admitted`, `running`, and `handed_off` snapshots cannot carry direct review
 bindings or hidden merge-guard review refs, including on a denied guard. A
 `reviewing` to `recovering` transition may retain the exact same-head
 `exactHead` and review prefix, but recovery cannot invent them from a pre-review
 snapshot or carry merge-guard review refs. Same-head reviews can only be appended after the exact prior array
-prefix; reordering or prepending invalidates the transition. This v1 schema has no review
+prefix; reordering or prepending invalidates the transition. This schema has no review
 supersession field, so producers must advance the reviewed head before emitting
-a replacement review set. An eligible merge guard is authoritative only from
-`merge_ready` or in a consistent post-review terminal/failed/blocked/cancelled
-history; `reviewing` and `repairing` cannot claim merge eligibility.
+a replacement review set. `merge_ready` is the only state that can carry an
+`eligible` guard. A terminal merge outcome requires the same guard authority
+facts in `consumed` state; because guard owner records are immutable, consumption or
+revocation uses a fresh guard ref/digest while preserving the eligible guard's
+exact PR, base/head, review/proof, operator, provider-receipt, and mechanism
+facts. Failed, blocked, and cancelled projections cannot retain eligibility.
+Failed and blocked are durable terminal dispositions and do not advertise a
+transition back to `recovering`; `merge_ready` must revoke into a supported
+non-recovery state before any later recovery attempt. Direct
+nonterminal-to-`cleanup_complete` edges are illegal, and a
+destructive cleanup decision must prove terminal disposition, writer-lease
+revocation, and consumption of the terminal event.
 Consumers must reject unknown fields rather than retain unvalidated embedded
 payloads.
 
-`canonicalizationVersion: 1` derives `identityDigest` from the ordered,
-domain-separated tuple of root-request id/digest, PR-group id/digest,
-leaf-task id/digest, repository id/digest, exact base Git object id, and
-frozen-scope digest. The PR-group owner digest is an input, never the derived
-output, so the binding has no circular dependency. Digests on refs mean
+The exhaustive merge-authority matrix is:
+
+| Projection state | Allowed merge authority |
+| --- | --- |
+| admitted, running, handed_off, reviewing, repairing, recovering | absent, denied-without-outcome, or revoked-without-outcome |
+| merge_ready | eligible without outcome |
+| merged | consumed with `merged` outcome |
+| closed_unmerged | consumed with `closed_unmerged`, `refused`, `head_drift`, or `base_drift` outcome |
+| failed, blocked, cancelled | absent or revoked-without-outcome |
+| cleanup_complete | absent, revoked-without-outcome, or a previously consumed terminal outcome |
+| rolled_back | consumed with `merged` outcome |
+
+`canonicalizationVersion: 2` derives `identityDigest` from the ordered,
+domain-separated tuple of role, authority, id, and digest for root request, PR
+group, leaf task, repository, worktree, and branch, followed by the exact base
+Git object id and frozen-scope digest. `canonicalizationVersion: 1` remains an
+explicit legacy compatibility path using the prior root/group/leaf/repository
+id/digest tuple and never silently upgrades to v2. The PR-group owner digest is
+an input, never the derived output, so the binding has no circular dependency.
+Digests on refs mean
 the SHA-256 of the owning package's canonical, redacted record identity bytes;
 they must never hash a credential, raw fence value, mutable payload, or
 provider account record.
 
-Exact-head binding is transitive: `remoteBranchRef` equals the canonical
-repository branch ref; the local, remote, and provider pull-request heads are
-equal and backed by equality plus CI proof refs; equality, every CI proof, and
-every review proof obligation are globally unique by canonical ref id and
-digest, so one proof cannot discharge two obligations; every `reviews[]`
-head equals that canonical branch head; an eligible merge guard references
-the exact canonical set of projected approved review refs with no extras or
-omissions, every review proof, every CI proof, the equality proof, an opaque
-provider guard receipt, and its CAS/expected-head queue mechanism; and a merged
-outcome observes the same expected head. Only the non-merged `head_drift`
-outcome may carry a mismatched observed head. Worker, reviewer, and
-merge-operator identities and run refs are distinct by canonical digest, not
-by incompatible role-prefixed ids. Exact-head verification, reviews, guard
-evaluation, and merge outcome are chronologically ordered. Cleanup and rollback
-are independent post-terminal branches: each is internally chronological and
-cannot precede the terminal merge outcome it references, but one does not imply
-an order relative to the other unless a runtime intentionally imposes one.
+Exact base/head binding is transitive: `remoteBranchRef` equals the canonical
+repository branch ref; `expectedBase`, provider pull-request base, repository
+base, every review base, guard base, outcome expected base, and all
+base/head-bound provenance entries agree. The local, remote, and provider
+pull-request heads are equal and backed by equality plus CI proof refs.
+Equality, every CI proof, and every review proof obligation are globally unique
+by canonical ref id and digest, so one proof cannot discharge two obligations.
+An eligible merge guard references the exact canonical set of approved review
+refs with no extras or omissions, every review proof, every CI proof, the
+equality proof, an opaque provider receipt, and its CAS/expected-head mechanism.
+A merged outcome observes the same base and head. Only `head_drift` may carry a
+mismatched observed head and only `base_drift` may carry a mismatched observed
+base; each drift outcome keeps the other dimension equal. Exact-head
+verification, reviews, guard evaluation, and merge outcome are chronologically
+ordered.
 
 Sensitive refs (`writer_lease`, `writer_fence`, `provider_profile`,
-`provider_route`, `worktree`, merge-provider refs, and adapter extensions)
+`provider_route`, `admission`, worker/runtime refs, `worktree`,
+merge-provider refs, and adapter extensions)
 require `partial` or `full` redaction. Strict objects reject fields such as
 provider account ids, credentials, raw fence tokens, or embedded adapter
 payloads. Local and cloud adapters serialize the same shared projection and
 place provider-specific detail behind separately validated, redacted extension
-refs. An extension schema is unregistered and separately namespaced: it cannot
-equal any canonical id in `SCHEMA_IDS` (including `hasna.work_run.v1`), use any
-`hasna.task_to_pr_projection.*` schema,
-encode account/fence/credential markers in its schema id, or shadow a canonical
-role. `validateTaskToPrAdapterCoreEquivalence` parses both documents, requires
+refs. Extension schemas use the permanently reserved
+`hasna.task_to_pr_adapter_extension.*` namespace, so adding unrelated canonical
+schemas to `SCHEMA_IDS` cannot make previously accepted adapter data ambiguous.
+`validateTaskToPrAdapterCoreEquivalence` parses both documents, requires
 one or more local-only extensions in its first argument and one or more
 cloud-only extensions in its second, removes only those validated
 `adapterExtensions`, and requires byte-equivalent local and cloud core

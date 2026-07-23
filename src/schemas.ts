@@ -2044,6 +2044,7 @@ export const TASK_TO_PR_ROLE_AUTHORITIES = Object.freeze({
   provider_profile: Object.freeze(["codewith"] as const),
   provider_route: Object.freeze(["codewith"] as const),
   admission: Object.freeze(["codewith"] as const),
+  worker_actor: Object.freeze(["codewith"] as const),
   worker: Object.freeze(["codewith"] as const),
   runtime: Object.freeze(["codewith"] as const),
   repo: Object.freeze(["repos"] as const),
@@ -2070,6 +2071,7 @@ export const TASK_TO_PR_ROLE_AUTHORITIES = Object.freeze({
   cleanup_outcome: Object.freeze(["repos"] as const),
   rollback_plan: Object.freeze(["todos"] as const),
   rollback_outcome: Object.freeze(["repos"] as const),
+  terminal_disposition: Object.freeze(["todos"] as const),
   openloops_invocation: Object.freeze(["openloops"] as const),
   adapter_extension: Object.freeze(["adapter"] as const)
 });
@@ -2086,6 +2088,7 @@ export const TaskToPrRefRoleSchema = z.enum([
   "provider_profile",
   "provider_route",
   "admission",
+  "worker_actor",
   "worker",
   "runtime",
   "repo",
@@ -2112,6 +2115,7 @@ export const TaskToPrRefRoleSchema = z.enum([
   "cleanup_outcome",
   "rollback_plan",
   "rollback_outcome",
+  "terminal_disposition",
   "openloops_invocation",
   "adapter_extension"
 ]);
@@ -2129,38 +2133,33 @@ export const TaskToPrAuthoritySchema = z.enum([
 export type TaskToPrAuthority = z.infer<typeof TaskToPrAuthoritySchema>;
 
 const LowerSha256DigestSchema = z.string().regex(/^[a-f0-9]{64}$/);
-const OpaqueTaskToPrIdSchema = z
-  .string()
-  .trim()
-  .min(3)
-  .max(256)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/, "Reference ids must be opaque identifiers, never accounts, URLs, paths, or queries");
-const ForbiddenOpaqueOwnerDirectPattern =
-  /(?:@|[/?#=&+]|-----BEGIN|github_pat_|gh[pousr]_|sk-[A-Za-z0-9]|AKIA[0-9A-Z])/i;
-const ForbiddenOpaqueOwnerNormalizedMarkerPattern =
-  /(?:bearer|password|secret|credential|account|fence|token|privatekey|apikey|githubpat)/i;
-const OpaqueOwnerSuffixPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
-function containsForbiddenTaskToPrMarker(value: string): boolean {
-  return (
-    ForbiddenOpaqueOwnerDirectPattern.test(value) ||
-    ForbiddenOpaqueOwnerNormalizedMarkerPattern.test(value.replace(/[._:-]+/g, ""))
-  );
+const OpaqueTaskToPrIdSchema = z.string().trim().min(3).max(256);
+const NonsemanticOpaqueSuffixPattern = /^[a-f0-9]{32}$/;
+export function deriveTaskToPrRefId(
+  role: TaskToPrRefRole,
+  authority: TaskToPrAuthority,
+  digest: string
+): string {
+  return `${role}:${authority}:opaque-${digest.slice(0, 32)}`;
+}
+export function deriveTaskToPrEvidenceId(digest: string): string {
+  return `evidence:opaque-${digest.slice(0, 32)}`;
 }
 const TaskToPrProjectionIdSchema = OpaqueTaskToPrIdSchema.refine(
   (value) => {
     const prefix = "task_to_pr_projection:opaque-";
     const suffix = value.startsWith(prefix) ? value.slice(prefix.length) : "";
-    return OpaqueOwnerSuffixPattern.test(suffix) && !containsForbiddenTaskToPrMarker(suffix);
+    return NonsemanticOpaqueSuffixPattern.test(suffix);
   },
-  "Projection ids must be typed opaque owner-record refs and cannot encode accounts, fences, locators, or credentials"
+  "Projection ids must use a nonsemantic 128-bit lowercase hexadecimal surrogate"
 );
 const TaskToPrAttemptNonceSchema = OpaqueTaskToPrIdSchema.refine(
   (value) => {
     const prefix = "attempt_nonce:opaque-";
     const suffix = value.startsWith(prefix) ? value.slice(prefix.length) : "";
-    return OpaqueOwnerSuffixPattern.test(suffix) && !containsForbiddenTaskToPrMarker(suffix);
+    return NonsemanticOpaqueSuffixPattern.test(suffix);
   },
-  "Attempt nonces must be typed opaque values and cannot encode accounts, fences, locators, or credentials"
+  "Attempt nonces must use a nonsemantic 128-bit lowercase hexadecimal surrogate"
 );
 const SensitiveTaskToPrRoles = new Set<TaskToPrRefRole>([
   "writer_lease",
@@ -2168,6 +2167,7 @@ const SensitiveTaskToPrRoles = new Set<TaskToPrRefRole>([
   "provider_profile",
   "provider_route",
   "admission",
+  "worker_actor",
   "worker",
   "runtime",
   "worktree",
@@ -2203,28 +2203,12 @@ export const TaskToPrRefSchema = z
         path: ["redaction"]
       });
     }
-    if (SensitiveTaskToPrRoles.has(value.role)) {
-      const sensitiveSuffix = value.id.startsWith(`${value.role}:opaque-`)
-        ? value.id.slice(`${value.role}:opaque-`.length)
-        : "";
-      if (!OpaqueOwnerSuffixPattern.test(sensitiveSuffix) || containsForbiddenTaskToPrMarker(sensitiveSuffix)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `${value.role} ids must be role-prefixed opaque owner-record refs, never raw account, path, credential, or fence values`,
-          path: ["id"]
-        });
-      }
-    }
-    const expectedPrefix = `${value.role}:opaque-`;
-    const opaqueSuffix = value.id.startsWith(expectedPrefix) ? value.id.slice(expectedPrefix.length) : value.id;
-    if (
-      !value.id.startsWith(expectedPrefix) ||
-      !OpaqueOwnerSuffixPattern.test(opaqueSuffix) ||
-      containsForbiddenTaskToPrMarker(opaqueSuffix)
-    ) {
+    const expectedId = deriveTaskToPrRefId(value.role, value.authority, value.digest);
+    if (value.id !== expectedId) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Reference ids must be typed opaque owner refs and cannot contain account, fence, credential, URL, or secret markers",
+        message:
+          "Reference ids must be nonsemantic authority-bound surrogates derived from the canonical role, authority, and owner-record digest",
         path: ["id"]
       });
     }
@@ -2239,20 +2223,35 @@ export const TaskToPrEvidenceRefSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
-    const prefix = "evidence:opaque-";
-    const suffix = value.id.startsWith(prefix) ? value.id.slice(prefix.length) : "";
-    if (
-      !OpaqueOwnerSuffixPattern.test(suffix) ||
-      containsForbiddenTaskToPrMarker(suffix)
-    ) {
+    if (value.id !== deriveTaskToPrEvidenceId(value.digest)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Evidence ids must be typed opaque refs with no account, fence, URL, credential, or secret markers",
+        message:
+          "Evidence ids must be nonsemantic owner-resolvable surrogates derived from their canonical digest",
         path: ["id"]
       });
     }
   });
 export type TaskToPrEvidenceRef = z.infer<typeof TaskToPrEvidenceRefSchema>;
+
+function requireDistinctTaskToPrEvidenceRefs(
+  stopEvidenceRef: TaskToPrEvidenceRef,
+  leaseRevocationEvidenceRef: TaskToPrEvidenceRef,
+  ctx: z.RefinementCtx,
+  path: (string | number)[]
+): void {
+  if (
+    stopEvidenceRef.id === leaseRevocationEvidenceRef.id ||
+    stopEvidenceRef.digest === leaseRevocationEvidenceRef.digest
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        "Stop and lease-revocation facts require distinct evidence identities and digests",
+      path
+    });
+  }
+}
 
 function taskToPrRefFor(role: TaskToPrRefRole) {
   return TaskToPrRefSchema.refine((value) => value.role === role, {
@@ -2309,6 +2308,23 @@ function sameGitObjectId(
   return left.algorithm === right.algorithm && left.value === right.value;
 }
 
+function sameTaskToPrMergeGuardLineageFacts(
+  left: z.infer<typeof TaskToPrMergeGuardSchema>,
+  right: z.infer<typeof TaskToPrMergeGuardSchema>
+): boolean {
+  return (
+    sameTaskToPrRef(left.pullRequestRef, right.pullRequestRef) &&
+    sameGitObjectId(left.expectedBase, right.expectedBase) &&
+    sameGitObjectId(left.expectedHead, right.expectedHead) &&
+    JSON.stringify(left.reviewRefs) === JSON.stringify(right.reviewRefs) &&
+    JSON.stringify(left.proofBundleRefs) === JSON.stringify(right.proofBundleRefs) &&
+    sameTaskToPrRef(left.operatorRef, right.operatorRef) &&
+    sameTaskToPrRef(left.operatorRunRef, right.operatorRunRef) &&
+    sameTaskToPrRef(left.providerGuardReceiptRef, right.providerGuardReceiptRef) &&
+    left.mechanism === right.mechanism
+  );
+}
+
 export const TaskToPrGitObjectIdSchema = z
   .object({
     algorithm: z.enum(["sha1", "sha256"]),
@@ -2327,7 +2343,7 @@ export const TaskToPrGitObjectIdSchema = z
   });
 export type TaskToPrGitObjectId = z.infer<typeof TaskToPrGitObjectIdSchema>;
 
-export interface TaskToPrBindingInput {
+export interface TaskToPrBindingV1Input {
   canonicalizationVersion: 1;
   rootRequestRef: TaskToPrRef;
   prGroupRef: TaskToPrRef;
@@ -2337,18 +2353,44 @@ export interface TaskToPrBindingInput {
   frozenScopeDigest: string;
 }
 
+export interface TaskToPrBindingV2Input {
+  canonicalizationVersion: 2;
+  rootRequestRef: TaskToPrRef;
+  prGroupRef: TaskToPrRef;
+  leafTaskRef: TaskToPrRef;
+  repoRef: TaskToPrRef;
+  worktreeRef: TaskToPrRef;
+  branchRef: TaskToPrRef;
+  baseHead: TaskToPrGitObjectId;
+  frozenScopeDigest: string;
+}
+
+export type TaskToPrBindingInput = TaskToPrBindingV1Input | TaskToPrBindingV2Input;
+
 export function deriveTaskToPrIdentityDigest(input: TaskToPrBindingInput): string {
+  if (input.canonicalizationVersion === 1) {
+    const legacyCanonicalBinding = JSON.stringify([
+      "hasna.task_to_pr_projection.binding.v1",
+      input.canonicalizationVersion,
+      input.rootRequestRef.id,
+      input.rootRequestRef.digest,
+      input.prGroupRef.id,
+      input.prGroupRef.digest,
+      input.leafTaskRef.id,
+      input.leafTaskRef.digest,
+      input.repoRef.id,
+      input.repoRef.digest,
+      input.baseHead.algorithm,
+      input.baseHead.value,
+      input.frozenScopeDigest
+    ]);
+    return createHash("sha256").update(legacyCanonicalBinding, "utf8").digest("hex");
+  }
   const canonicalBinding = JSON.stringify([
-    "hasna.task_to_pr_projection.binding.v1",
+    "hasna.task_to_pr_projection.binding.v2",
     input.canonicalizationVersion,
-    input.rootRequestRef.id,
-    input.rootRequestRef.digest,
-    input.prGroupRef.id,
-    input.prGroupRef.digest,
-    input.leafTaskRef.id,
-    input.leafTaskRef.digest,
-    input.repoRef.id,
-    input.repoRef.digest,
+    ...[input.rootRequestRef, input.prGroupRef, input.leafTaskRef, input.repoRef, input.worktreeRef, input.branchRef]
+      .flatMap((ref) => [ref.role, ref.authority, ref.id, ref.digest]),
     input.baseHead.algorithm,
     input.baseHead.value,
     input.frozenScopeDigest
@@ -2361,6 +2403,7 @@ export const TaskToPrAttemptSchema = z
     ref: taskToPrRefFor("attempt"),
     nonce: TaskToPrAttemptNonceSchema,
     admissionRef: taskToPrRefFor("admission"),
+    workerActorRef: taskToPrRefFor("worker_actor"),
     workerRef: taskToPrRefFor("worker"),
     runtimeRef: taskToPrRefFor("runtime"),
     writerGenerationRef: taskToPrRefFor("writer_generation"),
@@ -2387,7 +2430,7 @@ export const TaskToPrEventCursorSchema = z
   .object({
     streamRef: taskToPrRefFor("event_stream"),
     replayCursorRef: taskToPrRefFor("replay_cursor"),
-    sequence: z.number().int().nonnegative(),
+    sequence: z.number().int().safe().nonnegative(),
     prefixDigest: LowerSha256DigestSchema
   })
   .strict();
@@ -2420,6 +2463,12 @@ export const TaskToPrHandoffSchema = z
       ["nextWriterGenerationRef"],
       "Handoff writer-generation rotation"
     );
+    requireDistinctTaskToPrEvidenceRefs(
+      value.stopEvidenceRef,
+      value.leaseRevocationEvidenceRef,
+      ctx,
+      ["leaseRevocationEvidenceRef"]
+    );
   });
 export type TaskToPrHandoff = z.infer<typeof TaskToPrHandoffSchema>;
 
@@ -2427,6 +2476,7 @@ export const TaskToPrReviewBindingSchema = z
   .object({
     ref: taskToPrRefFor("review"),
     pullRequestRef: taskToPrRefFor("pull_request"),
+    base: TaskToPrGitObjectIdSchema,
     head: TaskToPrGitObjectIdSchema,
     reviewerRef: taskToPrRefFor("reviewer"),
     reviewRunRef: taskToPrRefFor("review_run"),
@@ -2441,6 +2491,8 @@ export const TaskToPrExactHeadBindingSchema = z
   .object({
     pullRequestRef: taskToPrRefFor("pull_request"),
     remoteBranchRef: taskToPrRefFor("branch"),
+    expectedBase: TaskToPrGitObjectIdSchema,
+    providerPullRequestBase: TaskToPrGitObjectIdSchema,
     localHead: TaskToPrGitObjectIdSchema,
     remoteHead: TaskToPrGitObjectIdSchema,
     providerPullRequestHead: TaskToPrGitObjectIdSchema,
@@ -2450,6 +2502,13 @@ export const TaskToPrExactHeadBindingSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (!sameGitObjectId(value.expectedBase, value.providerPullRequestBase)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Expected and provider-observed pull-request bases must be exactly equal",
+        path: ["providerPullRequestBase"]
+      });
+    }
     if (
       !sameGitObjectId(value.localHead, value.remoteHead) ||
       !sameGitObjectId(value.localHead, value.providerPullRequestHead)
@@ -2545,6 +2604,7 @@ export const TaskToPrMergeGuardSchema = z
   .object({
     ref: taskToPrRefFor("merge_guard"),
     pullRequestRef: taskToPrRefFor("pull_request"),
+    expectedBase: TaskToPrGitObjectIdSchema,
     expectedHead: TaskToPrGitObjectIdSchema,
     reviewRefs: z.array(taskToPrRefFor("review")).min(1),
     proofBundleRefs: z.array(taskToPrRefFor("proof_bundle")).min(1),
@@ -2552,7 +2612,7 @@ export const TaskToPrMergeGuardSchema = z
     operatorRunRef: taskToPrRefFor("merge_operator_run"),
     providerGuardReceiptRef: taskToPrRefFor("merge_guard_receipt"),
     mechanism: z.enum(["compare_and_swap", "queue_expected_head"]),
-    decision: z.enum(["eligible", "denied"]),
+    decision: z.enum(["eligible", "denied", "consumed", "revoked"]),
     evaluatedAt: TimestampSchema
   })
   .strict()
@@ -2589,22 +2649,25 @@ export const TaskToPrMergeOutcomeSchema = z
     ref: taskToPrRefFor("merge_outcome"),
     guardRef: taskToPrRefFor("merge_guard"),
     pullRequestRef: taskToPrRefFor("pull_request"),
+    expectedBase: TaskToPrGitObjectIdSchema,
+    observedBase: TaskToPrGitObjectIdSchema,
     expectedHead: TaskToPrGitObjectIdSchema,
     observedHead: TaskToPrGitObjectIdSchema,
-    status: z.enum(["merged", "closed_unmerged", "refused", "head_drift"]),
+    status: z.enum(["merged", "closed_unmerged", "refused", "head_drift", "base_drift"]),
     mergeCommitRef: taskToPrRefFor("commit").optional(),
     finishedAt: TimestampSchema,
     evidenceRefs: z.array(TaskToPrEvidenceRefSchema).min(1)
   })
   .strict()
   .superRefine((value, ctx) => {
+    const baseMatches = sameGitObjectId(value.expectedBase, value.observedBase);
     const headMatches = sameGitObjectId(value.expectedHead, value.observedHead);
     if (value.status === "merged") {
-      if (!headMatches) {
+      if (!baseMatches || !headMatches) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Merged outcomes require the observed head to equal the expected head",
-          path: ["observedHead"]
+          message: "Merged outcomes require observed base and head to equal the guarded values",
+          path: [!baseMatches ? "observedBase" : "observedHead"]
         });
       }
       if (!value.mergeCommitRef) {
@@ -2628,11 +2691,40 @@ export const TaskToPrMergeOutcomeSchema = z
         path: ["observedHead"]
       });
     }
+    if (value.status === "head_drift" && !baseMatches) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Head-drift outcomes cannot also carry an unclassified base drift",
+        path: ["observedBase"]
+      });
+    }
+    if (value.status === "base_drift" && baseMatches) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Base-drift outcomes require distinct expected and observed bases",
+        path: ["observedBase"]
+      });
+    }
+    if (value.status === "base_drift" && !headMatches) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Base-drift outcomes cannot also carry an unclassified head drift",
+        path: ["observedHead"]
+      });
+    }
     if (!headMatches && value.status !== "head_drift") {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Only a head_drift outcome may record an observed head that differs from the expected head",
         path: ["observedHead"]
+      });
+    }
+    if (!baseMatches && value.status !== "base_drift") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Only a base_drift outcome may record an observed base that differs from the expected base",
+        path: ["observedBase"]
       });
     }
   });
@@ -2667,6 +2759,12 @@ export const TaskToPrRecoverySchema = z
       ["successorWriterGenerationRef"],
       "Recovery writer-generation rotation"
     );
+    requireDistinctTaskToPrEvidenceRefs(
+      value.stopEvidenceRef,
+      value.leaseRevocationEvidenceRef,
+      ctx,
+      ["leaseRevocationEvidenceRef"]
+    );
   });
 export type TaskToPrRecovery = z.infer<typeof TaskToPrRecoverySchema>;
 
@@ -2686,10 +2784,27 @@ export const TaskToPrCleanupEligibilitySchema = z
     status: z.enum(["not_ready", "preserved", "blocked", "eligible"]),
     targetWorktreeRef: taskToPrRefFor("worktree"),
     eventCursorRef: taskToPrRefFor("replay_cursor"),
+    terminalDispositionRef: taskToPrRefFor("terminal_disposition"),
+    writerLeaseRef: taskToPrRefFor("writer_lease"),
+    leaseRevocationEvidenceRef: TaskToPrEvidenceRefSchema,
+    consumedEventEvidenceRef: TaskToPrEvidenceRefSchema,
     evaluatedAt: TimestampSchema,
     evidenceRefs: z.array(TaskToPrEvidenceRefSchema).min(1)
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      value.leaseRevocationEvidenceRef.id === value.consumedEventEvidenceRef.id ||
+      value.leaseRevocationEvidenceRef.digest === value.consumedEventEvidenceRef.digest
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Cleanup lease-revocation and consumed-event facts require distinct evidence identities and digests",
+        path: ["consumedEventEvidenceRef"]
+      });
+    }
+  });
 export type TaskToPrCleanupEligibility = z.infer<typeof TaskToPrCleanupEligibilitySchema>;
 
 export const TaskToPrCleanupOutcomeSchema = z
@@ -2793,6 +2908,9 @@ export type TaskToPrProvenanceEntry =
       category:
         | "work_run"
         | "attempt"
+        | "admission"
+        | "worker_actor"
+        | "worker_assignment"
         | "runtime"
         | "writer_generation"
         | "writer_lease"
@@ -2806,7 +2924,8 @@ export type TaskToPrProvenanceEntry =
         | "recovery"
         | "merge_guard"
         | "cleanup_eligibility"
-        | "rollback_plan";
+        | "rollback_plan"
+        | "terminal_disposition";
       ref: TaskToPrRef;
     }
   | {
@@ -2818,6 +2937,7 @@ export type TaskToPrProvenanceEntry =
         | "review_run"
         | "provider_guard_receipt";
       ref: TaskToPrRef;
+      base: TaskToPrGitObjectId;
       head: TaskToPrGitObjectId;
     }
   | {
@@ -2851,6 +2971,24 @@ export const TaskToPrProvenanceEntrySchema: z.ZodType<TaskToPrProvenanceEntry> =
     .object({
       category: z.literal("attempt"),
       ref: taskToPrRefFor("attempt")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("admission"),
+      ref: taskToPrRefFor("admission")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("worker_actor"),
+      ref: taskToPrRefFor("worker_actor")
+    })
+    .strict(),
+  z
+    .object({
+      category: z.literal("worker_assignment"),
+      ref: taskToPrRefFor("worker")
     })
     .strict(),
   z
@@ -2904,7 +3042,7 @@ export const TaskToPrProvenanceEntrySchema: z.ZodType<TaskToPrProvenanceEntry> =
   z
     .object({
       category: z.literal("replay_prefix"),
-      sequence: z.number().int().nonnegative(),
+      sequence: z.number().int().safe().nonnegative(),
       prefixDigest: LowerSha256DigestSchema
     })
     .strict(),
@@ -2952,8 +3090,15 @@ export const TaskToPrProvenanceEntrySchema: z.ZodType<TaskToPrProvenanceEntry> =
     .strict(),
   z
     .object({
+      category: z.literal("terminal_disposition"),
+      ref: taskToPrRefFor("terminal_disposition")
+    })
+    .strict(),
+  z
+    .object({
       category: z.literal("equality_proof"),
       ref: taskToPrRefFor("proof_bundle"),
+      base: TaskToPrGitObjectIdSchema,
       head: TaskToPrGitObjectIdSchema
     })
     .strict(),
@@ -2961,6 +3106,7 @@ export const TaskToPrProvenanceEntrySchema: z.ZodType<TaskToPrProvenanceEntry> =
     .object({
       category: z.literal("ci_proof"),
       ref: taskToPrRefFor("proof_bundle"),
+      base: TaskToPrGitObjectIdSchema,
       head: TaskToPrGitObjectIdSchema
     })
     .strict(),
@@ -2968,6 +3114,7 @@ export const TaskToPrProvenanceEntrySchema: z.ZodType<TaskToPrProvenanceEntry> =
     .object({
       category: z.literal("review_proof"),
       ref: taskToPrRefFor("proof_bundle"),
+      base: TaskToPrGitObjectIdSchema,
       head: TaskToPrGitObjectIdSchema
     })
     .strict(),
@@ -2975,6 +3122,7 @@ export const TaskToPrProvenanceEntrySchema: z.ZodType<TaskToPrProvenanceEntry> =
     .object({
       category: z.literal("review_record"),
       ref: taskToPrRefFor("review"),
+      base: TaskToPrGitObjectIdSchema,
       head: TaskToPrGitObjectIdSchema
     })
     .strict(),
@@ -2982,6 +3130,7 @@ export const TaskToPrProvenanceEntrySchema: z.ZodType<TaskToPrProvenanceEntry> =
     .object({
       category: z.literal("review_run"),
       ref: taskToPrRefFor("review_run"),
+      base: TaskToPrGitObjectIdSchema,
       head: TaskToPrGitObjectIdSchema
     })
     .strict(),
@@ -2989,6 +3138,7 @@ export const TaskToPrProvenanceEntrySchema: z.ZodType<TaskToPrProvenanceEntry> =
     .object({
       category: z.literal("provider_guard_receipt"),
       ref: taskToPrRefFor("merge_guard_receipt"),
+      base: TaskToPrGitObjectIdSchema,
       head: TaskToPrGitObjectIdSchema
     })
     .strict()
@@ -3007,6 +3157,7 @@ type TaskToPrProvenanceProjectionView = {
   merge?: TaskToPrMergeState | undefined;
   cleanup?: TaskToPrCleanupState | undefined;
   rollback?: TaskToPrRollback | undefined;
+  terminalDispositionRef?: TaskToPrRef | undefined;
 };
 
 function taskToPrActiveProvenanceEntries(
@@ -3024,6 +3175,18 @@ function taskToPrActiveProvenanceEntries(
     {
       category: "attempt" as const,
       ref: projection.attempt.ref
+    },
+    {
+      category: "admission" as const,
+      ref: projection.attempt.admissionRef
+    },
+    {
+      category: "worker_actor" as const,
+      ref: projection.attempt.workerActorRef
+    },
+    {
+      category: "worker_assignment" as const,
+      ref: projection.attempt.workerRef
     },
     {
       category: "attempt_nonce" as const,
@@ -3085,11 +3248,13 @@ function taskToPrActiveProvenanceEntries(
           {
             category: "equality_proof" as const,
             ref: projection.exactHead.equalityProofRef,
+            base: projection.exactHead.expectedBase,
             head: projection.exactHead.localHead
           },
           ...projection.exactHead.ciProofBundleRefs.map((ref) => ({
             category: "ci_proof" as const,
             ref,
+            base: projection.exactHead!.expectedBase,
             head: projection.exactHead!.localHead
           }))
         ]
@@ -3098,16 +3263,19 @@ function taskToPrActiveProvenanceEntries(
       {
         category: "review_proof" as const,
         ref: review.proofBundleRef,
+        base: review.base,
         head: review.head
       },
       {
         category: "review_record" as const,
         ref: review.ref,
+        base: review.base,
         head: review.head
       },
       {
         category: "review_run" as const,
         ref: review.reviewRunRef,
+        base: review.base,
         head: review.head
       }
     ]),
@@ -3120,6 +3288,7 @@ function taskToPrActiveProvenanceEntries(
           {
             category: "provider_guard_receipt" as const,
             ref: projection.merge.guard.providerGuardReceiptRef,
+            base: projection.merge.guard.expectedBase,
             head: projection.merge.guard.expectedHead
           }
         ]
@@ -3137,6 +3306,14 @@ function taskToPrActiveProvenanceEntries(
           {
             category: "rollback_plan" as const,
             ref: projection.rollback.plan.ref
+          }
+        ]
+      : []),
+    ...(projection.terminalDispositionRef
+      ? [
+          {
+            category: "terminal_disposition" as const,
+            ref: projection.terminalDispositionRef
           }
         ]
       : [])
@@ -3164,12 +3341,18 @@ function sameTaskToPrProvenanceEntry(
   }
   return (
     sameTaskToPrRef(left.ref, right.ref) &&
-    (("head" in left && "head" in right && sameGitObjectId(left.head, right.head)) ||
-      (!("head" in left) && !("head" in right)))
+    (("head" in left &&
+      "head" in right &&
+      "base" in left &&
+      "base" in right &&
+      sameGitObjectId(left.base, right.base) &&
+      sameGitObjectId(left.head, right.head)) ||
+      (!("head" in left) && !("head" in right) && !("base" in left) && !("base" in right)))
   );
 }
 
-const RegisteredCanonicalSchemaIds = new Set<string>(Object.values(SCHEMA_IDS));
+export const TASK_TO_PR_V1_ADAPTER_EXTENSION_SCHEMA_PREFIX =
+  "hasna.task_to_pr_adapter_extension.";
 
 export const TaskToPrAdapterExtensionSchema = z
   .object({
@@ -3180,15 +3363,11 @@ export const TaskToPrAdapterExtensionSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
-    if (
-      RegisteredCanonicalSchemaIds.has(value.schema) ||
-      value.schema.startsWith("hasna.task_to_pr_projection.") ||
-      containsForbiddenTaskToPrMarker(value.schema)
-    ) {
+    if (!value.schema.startsWith(TASK_TO_PR_V1_ADAPTER_EXTENSION_SCHEMA_PREFIX)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "Adapter extension schema ids must be separately namespaced and unregistered; they cannot reuse canonical contracts, use the core projection namespace, or encode sensitive owner data",
+          "Adapter extension schema ids must use the permanently reserved task-to-PR adapter-extension namespace",
         path: ["schema"]
       });
     }
@@ -3218,8 +3397,7 @@ const TaskToPrStatesWithoutReviewAuthority = new Set<TaskToPrProjectionState>([
   "running",
   "handed_off"
 ]);
-const TaskToPrEligibleGuardAuthoritativeStates = new Set<TaskToPrProjectionState>([
-  "merge_ready",
+const TaskToPrTerminalStates = new Set<TaskToPrProjectionState>([
   "merged",
   "closed_unmerged",
   "failed",
@@ -3228,13 +3406,45 @@ const TaskToPrEligibleGuardAuthoritativeStates = new Set<TaskToPrProjectionState
   "cleanup_complete",
   "rolled_back"
 ]);
+const TASK_TO_PR_STATE_MERGE_MATRIX: Record<
+  TaskToPrProjectionState,
+  ReadonlySet<string>
+> = {
+  admitted: new Set(["absent", "denied:none", "revoked:none"]),
+  running: new Set(["absent", "denied:none", "revoked:none"]),
+  handed_off: new Set(["absent", "denied:none", "revoked:none"]),
+  reviewing: new Set(["absent", "denied:none", "revoked:none"]),
+  repairing: new Set(["absent", "denied:none", "revoked:none"]),
+  merge_ready: new Set(["eligible:none"]),
+  merged: new Set(["consumed:merged"]),
+  closed_unmerged: new Set([
+    "consumed:closed_unmerged",
+    "consumed:refused",
+    "consumed:head_drift",
+    "consumed:base_drift"
+  ]),
+  failed: new Set(["absent", "revoked:none"]),
+  blocked: new Set(["absent", "revoked:none"]),
+  cancelled: new Set(["absent", "revoked:none"]),
+  recovering: new Set(["absent", "denied:none", "revoked:none"]),
+  cleanup_complete: new Set([
+    "absent",
+    "revoked:none",
+    "consumed:merged",
+    "consumed:closed_unmerged",
+    "consumed:refused",
+    "consumed:head_drift",
+    "consumed:base_drift"
+  ]),
+  rolled_back: new Set(["consumed:merged"])
+};
 
 export const TaskToPrProjectionSchema = z
   .object({
     schema: z.literal(SCHEMA_IDS.taskToPrProjection),
     id: TaskToPrProjectionIdSchema,
     createdAt: TimestampSchema,
-    canonicalizationVersion: z.literal(1),
+    canonicalizationVersion: z.union([z.literal(1), z.literal(2)]),
     identityDigest: LowerSha256DigestSchema,
     frozenScopeDigest: LowerSha256DigestSchema,
     state: TaskToPrProjectionStateSchema,
@@ -3256,25 +3466,40 @@ export const TaskToPrProjectionSchema = z
     cancellation: TaskToPrCancellationSchema.optional(),
     cleanup: TaskToPrCleanupStateSchema.optional(),
     rollback: TaskToPrRollbackSchema.optional(),
+    terminalDispositionRef: taskToPrRefFor("terminal_disposition").optional(),
     provenanceLedger: z.array(TaskToPrProvenanceEntrySchema),
     adapterExtensions: z.array(TaskToPrAdapterExtensionSchema).default([]),
     evidenceRefs: z.array(TaskToPrEvidenceRefSchema).default([])
   })
   .strict()
   .superRefine((value, ctx) => {
-    const derivedIdentityDigest = deriveTaskToPrIdentityDigest({
-      canonicalizationVersion: value.canonicalizationVersion,
-      rootRequestRef: value.rootRequestRef,
-      prGroupRef: value.prGroupRef,
-      leafTaskRef: value.leafTaskRef,
-      repoRef: value.repository.repoRef,
-      baseHead: value.repository.baseHead,
-      frozenScopeDigest: value.frozenScopeDigest
-    });
+    const derivedIdentityDigest =
+      value.canonicalizationVersion === 1
+        ? deriveTaskToPrIdentityDigest({
+            canonicalizationVersion: 1,
+            rootRequestRef: value.rootRequestRef,
+            prGroupRef: value.prGroupRef,
+            leafTaskRef: value.leafTaskRef,
+            repoRef: value.repository.repoRef,
+            baseHead: value.repository.baseHead,
+            frozenScopeDigest: value.frozenScopeDigest
+          })
+        : deriveTaskToPrIdentityDigest({
+            canonicalizationVersion: 2,
+            rootRequestRef: value.rootRequestRef,
+            prGroupRef: value.prGroupRef,
+            leafTaskRef: value.leafTaskRef,
+            repoRef: value.repository.repoRef,
+            worktreeRef: value.repository.worktreeRef,
+            branchRef: value.repository.branchRef,
+            baseHead: value.repository.baseHead,
+            frozenScopeDigest: value.frozenScopeDigest
+          });
     if (value.identityDigest !== derivedIdentityDigest) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "identityDigest must equal the canonical v1 root/PR-group/leaf/repo/base/scope binding digest",
+        message:
+          "identityDigest must equal the selected v1 compatibility or v2 branch/worktree-bound canonical identity digest",
         path: ["identityDigest"]
       });
     }
@@ -3368,6 +3593,32 @@ export const TaskToPrProjectionSchema = z
       path: (string | number)[],
       label: string
     ) => {
+      const requiredRoles = new Set(requiredRefs.map((requiredRef) => requiredRef.role));
+      const seenRoles = new Set<TaskToPrRefRole>();
+      for (const [index, preservedRef] of preservedStateRefs.entries()) {
+        if (!requiredRoles.has(preservedRef.role)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `${label} cannot preserve an unrecognized ${preservedRef.role} role`,
+            path: [...path, index]
+          });
+        }
+        if (seenRoles.has(preservedRef.role)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `${label} must preserve exactly one canonical ref per role`,
+            path: [...path, index]
+          });
+        }
+        seenRoles.add(preservedRef.role);
+      }
+      if (preservedStateRefs.length !== requiredRefs.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${label} preservation refs must exactly equal the required canonical role set`,
+          path
+        });
+      }
       for (const requiredRef of requiredRefs) {
         if (!preservedStateRefs.some((preservedRef) => sameTaskToPrRef(preservedRef, requiredRef))) {
           ctx.addIssue({
@@ -3475,6 +3726,30 @@ export const TaskToPrProjectionSchema = z
     }
     if (
       value.cleanup &&
+      (!value.terminalDispositionRef ||
+        !sameTaskToPrRef(
+          value.cleanup.eligibility.terminalDispositionRef,
+          value.terminalDispositionRef
+        ))
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Cleanup eligibility must bind the exact durable terminal owner fact",
+        path: ["cleanup", "eligibility", "terminalDispositionRef"]
+      });
+    }
+    if (
+      value.cleanup &&
+      !sameTaskToPrRef(value.cleanup.eligibility.writerLeaseRef, value.attempt.writerLeaseRef)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Cleanup eligibility must bind the exact writer lease being revoked",
+        path: ["cleanup", "eligibility", "writerLeaseRef"]
+      });
+    }
+    if (
+      value.cleanup &&
       !sameTaskToPrRef(value.cleanup.eligibility.targetWorktreeRef, value.repository.worktreeRef)
     ) {
       ctx.addIssue({
@@ -3526,6 +3801,13 @@ export const TaskToPrProjectionSchema = z
         code: z.ZodIssueCode.custom,
         message: "Exact local head must equal the canonical branch head",
         path: ["exactHead", "localHead"]
+      });
+    }
+    if (value.exactHead && !sameGitObjectId(value.exactHead.expectedBase, value.repository.baseHead)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Exact-head expected base must equal the canonical repository base",
+        path: ["exactHead", "expectedBase"]
       });
     }
     if (value.exactHead && !sameTaskToPrRef(value.exactHead.remoteBranchRef, value.repository.branchRef)) {
@@ -3592,6 +3874,13 @@ export const TaskToPrProjectionSchema = z
     const reviewProofKeys = new Set<string>();
     const reviewProofDigests = new Set<string>();
     for (const [reviewIndex, review] of value.reviews.entries()) {
+      if (!sameGitObjectId(review.base, value.repository.baseHead)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Review base must equal the exact canonical pull-request base",
+          path: ["reviews", reviewIndex, "base"]
+        });
+      }
       if (!sameGitObjectId(review.head, value.repository.branchHead)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -3687,6 +3976,13 @@ export const TaskToPrProjectionSchema = z
           path: ["exactHead"]
         });
       }
+      if (!sameGitObjectId(value.merge.guard.expectedBase, value.repository.baseHead)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Merge guard expected base must equal the exact canonical pull-request base",
+          path: ["merge", "guard", "expectedBase"]
+        });
+      }
       if (!sameGitObjectId(value.merge.guard.expectedHead, value.repository.branchHead)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -3738,7 +4034,10 @@ export const TaskToPrProjectionSchema = z
           });
         }
       }
-      if (value.merge.guard.decision === "eligible") {
+      if (
+        value.merge.guard.decision === "eligible" ||
+        value.merge.guard.decision === "consumed"
+      ) {
         if (value.reviews.length === 0 || value.reviews.some((review) => review.verdict !== "approved")) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -3807,11 +4106,18 @@ export const TaskToPrProjectionSchema = z
           path: ["merge", "outcome", "expectedHead"]
         });
       }
-      if (value.merge.outcome.status === "merged" && value.merge.guard.decision !== "eligible") {
+      if (!sameGitObjectId(value.merge.outcome.expectedBase, value.merge.guard.expectedBase)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Merged outcomes require an eligible merge guard",
-          path: ["merge", "outcome", "status"]
+          message: "Merge outcome expected base must equal the guarded expected base",
+          path: ["merge", "outcome", "expectedBase"]
+        });
+      }
+      if (value.merge.guard.decision !== "consumed") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Every merge outcome requires an explicitly consumed merge guard",
+          path: ["merge", "guard", "decision"]
         });
       }
       if (Date.parse(value.merge.outcome.finishedAt) < Date.parse(value.merge.guard.evaluatedAt)) {
@@ -3883,14 +4189,28 @@ export const TaskToPrProjectionSchema = z
         path: ["merge", "guard", "reviewRefs"]
       });
     }
-    if (
-      value.merge?.guard.decision === "eligible" &&
-      !TaskToPrEligibleGuardAuthoritativeStates.has(value.state)
-    ) {
+    const mergeMatrixKey = value.merge
+      ? `${value.merge.guard.decision}:${value.merge.outcome?.status ?? "none"}`
+      : "absent";
+    if (!TASK_TO_PR_STATE_MERGE_MATRIX[value.state].has(mergeMatrixKey)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `Eligible merge guards are not authoritative in the ${value.state} phase`,
-        path: ["merge", "guard", "decision"]
+        message: `State ${value.state} is incompatible with merge authority ${mergeMatrixKey}`,
+        path: ["merge"]
+      });
+    }
+    if (TaskToPrTerminalStates.has(value.state) && !value.terminalDispositionRef) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${value.state} projections require a durable Todos terminal-disposition owner ref`,
+        path: ["terminalDispositionRef"]
+      });
+    }
+    if (!TaskToPrTerminalStates.has(value.state) && value.terminalDispositionRef) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${value.state} projections cannot carry a terminal-disposition owner ref`,
+        path: ["terminalDispositionRef"]
       });
     }
     if (value.state === "reviewing" && value.reviews.length === 0) {
@@ -3920,7 +4240,7 @@ export const TaskToPrProjectionSchema = z
     }
     if (
       value.state === "closed_unmerged" &&
-      !value.merge?.outcome?.status.match(/^(closed_unmerged|refused|head_drift)$/)
+      !value.merge?.outcome?.status.match(/^(closed_unmerged|refused|head_drift|base_drift)$/)
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -3964,13 +4284,6 @@ export const TaskToPrProjectionSchema = z
     }
     const extensionKeys = new Set<string>();
     for (const [index, extension] of value.adapterExtensions.entries()) {
-      if (RegisteredCanonicalSchemaIds.has(extension.schema)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Adapter extensions are non-authoritative and cannot reuse any registered canonical contract schema",
-          path: ["adapterExtensions", index, "schema"]
-        });
-      }
       const key = `${extension.mode}:${extension.schema}`;
       if (extensionKeys.has(key)) {
         ctx.addIssue({
@@ -4060,17 +4373,16 @@ const TASK_TO_PR_LEGAL_STATE_TRANSITIONS: Record<TaskToPrProjectionState, readon
     "failed",
     "blocked",
     "cancelled",
-    "recovering",
-    "cleanup_complete"
+    "recovering"
   ],
   handed_off: ["handed_off", "running", "reviewing", "repairing", "failed", "blocked", "cancelled", "recovering"],
   reviewing: ["reviewing", "repairing", "merge_ready", "failed", "blocked", "cancelled", "recovering", "closed_unmerged"],
   repairing: ["repairing", "running", "reviewing", "merge_ready", "failed", "blocked", "cancelled", "recovering", "closed_unmerged"],
-  merge_ready: ["merge_ready", "repairing", "merged", "closed_unmerged", "failed", "blocked", "cancelled", "recovering"],
+  merge_ready: ["merge_ready", "repairing", "merged", "closed_unmerged", "failed", "blocked", "cancelled"],
   merged: ["merged", "cleanup_complete", "rolled_back"],
   closed_unmerged: ["closed_unmerged", "cleanup_complete"],
-  failed: ["failed", "recovering", "cleanup_complete", "rolled_back"],
-  blocked: ["blocked", "recovering", "cancelled", "cleanup_complete"],
+  failed: ["failed", "cleanup_complete", "rolled_back"],
+  blocked: ["blocked", "cancelled", "cleanup_complete"],
   cancelled: ["cancelled", "cleanup_complete"],
   recovering: ["recovering", "running", "handed_off", "failed", "blocked", "cancelled"],
   cleanup_complete: ["cleanup_complete"],
@@ -4168,8 +4480,8 @@ export function validateTaskToPrProjectionTransition(
     }
   };
 
-  if (previous.id === current.id) {
-    addIssue("id", "A changed lifecycle snapshot requires a fresh immutable projection id");
+  if (previous.id !== current.id) {
+    addIssue("id", "The canonical top-level projection id is immutable across legal transitions");
   }
   if (Date.parse(current.createdAt) < Date.parse(previous.createdAt)) {
     addIssue("createdAt", "Projection timestamps cannot move backwards");
@@ -4332,6 +4644,19 @@ export function validateTaskToPrProjectionTransition(
   ) {
     addIssue("repair", "An unchanged repair cycle must retain the same immutable repair refs");
   }
+  const enteringRepair = previous.state !== "repairing" && current.state === "repairing";
+  if (enteringRepair && current.repair.cycle !== previous.repair.cycle + 1) {
+    addIssue("repair.cycle", "Every entry into repairing must consume exactly one repair cycle");
+  }
+  if (enteringRepair && previous.repair.exhausted) {
+    addIssue("repair.exhausted", "An exhausted repair budget cannot enter repairing");
+  }
+  if (
+    TaskToPrTerminalStates.has(previous.state) &&
+    JSON.stringify(current.repair) !== JSON.stringify(previous.repair)
+  ) {
+    addIssue("repair", "Repair state is frozen after terminal disposition");
+  }
 
   const attemptChanged = !sameTaskToPrCanonicalRefId(previous.attempt.ref, current.attempt.ref);
   const nonceChanged = previous.attempt.nonce !== current.attempt.nonce;
@@ -4391,6 +4716,8 @@ export function validateTaskToPrProjectionTransition(
       addIssue("workRunRef", "A fresh attempt requires a fresh WorkRun digest");
     }
     for (const field of [
+      "admissionRef",
+      "workerRef",
       "runtimeRef",
       "writerLeaseRef",
       "writerFenceRef",
@@ -4435,13 +4762,43 @@ export function validateTaskToPrProjectionTransition(
     addIssue("state", `Illegal task-to-PR lifecycle transition from ${previous.state} to ${current.state}`);
   }
 
+  if (previous.merge?.guard.decision === "eligible" && current.state !== "merge_ready") {
+    if (!current.merge) {
+      addIssue(
+        "merge",
+        "Leaving merge_ready requires an explicit revoked or consumed successor for the eligible guard"
+      );
+    } else {
+      const expectedDecision = current.merge.outcome ? "consumed" : "revoked";
+      if (current.merge.guard.decision !== expectedDecision) {
+        addIssue(
+          "merge.guard.decision",
+          `Leaving merge_ready requires the eligible guard to become ${expectedDecision}`
+        );
+      }
+      if (!sameTaskToPrMergeGuardLineageFacts(previous.merge.guard, current.merge.guard)) {
+        addIssue(
+          "merge.guard",
+          "A revoked or consumed successor guard must preserve the eligible guard's exact authority facts"
+        );
+      }
+      if (Date.parse(current.merge.guard.evaluatedAt) < Date.parse(previous.merge.guard.evaluatedAt)) {
+        addIssue(
+          "merge.guard.evaluatedAt",
+          "A revoked or consumed successor guard cannot precede the eligible guard"
+        );
+      }
+    }
+  }
+
   validateOwnerRecordTransition("handoff", previous.handoff, current.handoff);
   validateOwnerRecordTransition("recovery", previous.recovery, current.recovery);
   validateOwnerRecordTransition("merge.guard", previous.merge?.guard, current.merge?.guard);
   if (
     previous.merge &&
     current.merge &&
-    !sameGitObjectId(previous.merge.guard.expectedHead, current.merge.guard.expectedHead)
+    (!sameGitObjectId(previous.merge.guard.expectedBase, current.merge.guard.expectedBase) ||
+      !sameGitObjectId(previous.merge.guard.expectedHead, current.merge.guard.expectedHead))
   ) {
     if (
       sameTaskToPrCanonicalRefId(
@@ -4451,7 +4808,7 @@ export function validateTaskToPrProjectionTransition(
     ) {
       addIssue(
         "merge.guard.providerGuardReceiptRef",
-        "A changed guarded head requires a fresh provider guard receipt identity"
+        "A changed guarded base or head requires a fresh provider guard receipt identity"
       );
     }
     if (
@@ -4460,7 +4817,7 @@ export function validateTaskToPrProjectionTransition(
     ) {
       addIssue(
         "merge.guard.providerGuardReceiptRef",
-        "A changed guarded head requires a fresh provider guard receipt digest"
+        "A changed guarded base or head requires a fresh provider guard receipt digest"
       );
     }
   }
@@ -4470,6 +4827,16 @@ export function validateTaskToPrProjectionTransition(
     current.cleanup?.eligibility
   );
   validateOwnerRecordTransition("rollback.plan", previous.rollback?.plan, current.rollback?.plan);
+  if (
+    previous.terminalDispositionRef &&
+    (!current.terminalDispositionRef ||
+      !sameTaskToPrRef(previous.terminalDispositionRef, current.terminalDispositionRef))
+  ) {
+    addIssue(
+      "terminalDispositionRef",
+      "A durable terminal-disposition owner fact cannot change or disappear"
+    );
+  }
 
   for (const [path, left, right] of [
     ["merge", previous.merge?.outcome ? previous.merge : undefined, current.merge],
