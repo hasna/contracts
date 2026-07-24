@@ -2,6 +2,18 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.7.1] - 2026-07-24
+
+### PR-drain finalize (release republish)
+
+- Republish the current `main` line. The `0.7.0` npm artifact was cut before
+  PR #24 (`fix: restore execution-free contracts boundary`) and PR #25
+  (Factory v1 contract spec docs) merged, so the published `0.7.0` tarball did
+  not carry those changes; `0.7.1` ships `main` HEAD including them.
+- The execution-free `secure-local-store` boundary restore (PR #24) — the
+  package and CLI expose only declarative policy/profile/proof metadata, with
+  the `contracts-cli` bin pointing at the declarative entry — is now published.
+
 ## [0.7.0] - 2026-07-24
 
 ### Service contract capability extensions (additive, v1)
