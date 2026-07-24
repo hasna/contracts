@@ -12,11 +12,12 @@ This file is a **docs-only IAP9-00049 inventory pass** for `hasna/contracts`.
 It is an evidence-bound update only: it does not add schemas, serializers, fixtures,
 adapters, tests, or releases in this repository.
 
-Current working base:
+Follow-up working base / provider snapshot:
 
 - canonical checkout: `/home/hasna/workspace/hasna/opensource/open-contracts`
 - canonical worktree root: `/home/hasna/.hasna/repos/worktrees/open-contracts`
-- current contracts main target: `6238e96476b26b950d0a20295f330bf6c0977e90`
+- provider-snapshot main target: `4470cec9e7163fad00f60d1abefae9d0972b6e81`
+- parent of snapshot main merge commit: `0e2fbe01b35d913c97f316d5219e5484963032ef`
 
 ## Canonical source references
 
@@ -74,22 +75,28 @@ No merge mutation stage is defined by this architecture.
 
 ## Live provider evidence snapshot
 
-Fact table from provider evidence refreshed live by the coordinator on **2026-07-24**.
+Fact table from provider evidence snapshot at **2026-07-24T15:57:07Z**.
 
-| PR | State | Head SHA | Merge/Current SHA | Hosted verify |
-| --- | --- | --- | --- | --- |
-| 14 | CLOSED (unmerged) | `16cbc91a40579cb1acfab5407e50b4d71e5989ac` | no merge commit | n/a |
-| 18 | MERGED | `79e8bf352c22885d25222e6f85506a506b15c66b` | `561940d7fb5f2be4993a667f5de4054a44e03822` | FAILURE |
-| 19 | MERGED | `d161b0e9ee5ecac4a26929c846da2a8caa545641` | `05c99537a3d465b8cd4434c3ffb69e96a69c22ea` | SUCCESS |
-| 21 | MERGED | `fb58f19e69567e17e29d2de10fdaee8f71f2f234` | `c76d531555bfd945cf252bd724b18614b82aaad6` | SUCCESS |
-| 22 | MERGED | `56858c1b127a8bc0db139a0b5af44982d690f3c2` | `6238e96476b26b950d0a20295f330bf6c0977e90` | FAILURE |
+| PR | State | Head SHA | Merge/Current SHA | Hosted verify | Check evidence |
+| --- | --- | --- | --- | --- | --- |
+| 14 | CLOSED (unmerged) | `16cbc91a40579cb1acfab5407e50b4d71e5989ac` | no merge commit | SUCCESS (closed unmerged) | PR-head: [28797346429](https://github.com/hasna/contracts/actions/runs/28797346429) |
+| 18 | MERGED | `79e8bf352c22885d25222e6f85506a506b15c66b` | `561940d7fb5f2be4993a667f5de4054a44e03822` | FAILURE | PR-head: [30096907977](https://github.com/hasna/contracts/actions/runs/30096907977) |
+| 19 | MERGED | `d161b0e9ee5ecac4a26929c846da2a8caa545641` | `05c99537a3d465b8cd4434c3ffb69e96a69c22ea` | SUCCESS | PR-head: [30096456412](https://github.com/hasna/contracts/actions/runs/30096456412) |
+| 21 | MERGED | `fb58f19e69567e17e29d2de10fdaee8f71f2f234` | `c76d531555bfd945cf252bd724b18614b82aaad6` | SUCCESS | PR-head: [30096457021](https://github.com/hasna/contracts/actions/runs/30096457021) |
+| 22 | MERGED | `56858c1b127a8bc0db139a0b5af44982d690f3c2` | `6238e96476b26b950d0a20295f330bf6c0977e90` | FAILURE | PR-head: [30097268594](https://github.com/hasna/contracts/actions/runs/30097268594) |
+| 24 | MERGED | `7502c72b73a244932f3baf6976413e7191ea66af` | `722d31c952f60272b4034589318e3025f3791c95` | SUCCESS | PR-head: [30100653251](https://github.com/hasna/contracts/actions/runs/30100653251); post-merge/main push: [30106533346](https://github.com/hasna/contracts/actions/runs/30106533346) |
+| 25 | MERGED | `044c52aa842a72c65a93bb0acda1217942d47172` | `0e2fbe01b35d913c97f316d5219e5484963032ef` | SUCCESS (post-merge) | pre-merge PR-head: [30105961347](https://github.com/hasna/contracts/actions/runs/30105961347) (FAILURE); post-merge combined-main: [30106538936](https://github.com/hasna/contracts/actions/runs/30106538936) |
+| 26 | MERGED | `469c02e76b2e0708ceccf36c744b2584c7682262` | `4470cec9e7163fad00f60d1abefae9d0972b6e81` | SUCCESS (post-merge) | PR-head: [30107008656](https://github.com/hasna/contracts/actions/runs/30107008656); post-merge push: [30107085383](https://github.com/hasna/contracts/actions/runs/30107085383) |
 
 Interpretation:
 
 - PR 14 is closed and unmerged with no merge commit.
-- PR 18 and PR 22 are merged with hosted verification failure.
+- PR 18 and PR 22 are merged with hosted verification failure on pre-merge PR checks.
 - PR 19 and PR 21 are merged with hosted verification success.
-- Current main (`6238e96476b26b950d0a20295f330bf6c0977e90`) remains unhealthy because PR 22 hosted verification fails.
+- PR 24 merged successfully at reviewed head `7502c72b73a244932f3baf6976413e7191ea66af` (merged as `722d31c952f60272b4034589318e3025f3791c95`).
+- PR 25 has a pre-merge PR-head failure run on the old base (`30105961347`) and a post-merge combined-main success run (`30106538936`); `0e2fbe...` is the green predecessor main commit.
+- PR 26 (title: `chore(release): @hasna/contracts 0.7.1 (publish current main)`) became snapshot main `4470cec9e7163fad00f60d1abefae9d0972b6e81` with hosted post-merge success via run `30107085383`.
+- At this snapshot, main (`4470cec9e7163fad00f60d1abefae9d0972b6e81`) is hosted-verified healthy by that post-merge run.
 
 ## Task graph and direct/transitive dependency boundaries
 
@@ -109,9 +116,11 @@ In exact text:
 
 ## Current implemented schema inventory and source alignment
 
-`@hasna/contracts` package version at this base is `0.7.0` (`CONTRACTS_PACKAGE_VERSION`).
-Provider merge/version evidence is not itself release authority, and this is an
-evidence-only baseline. None of the nine provisional schema names, fields, or
+`@hasna/contracts` source package version at this base is `0.7.1` (`CONTRACTS_PACKAGE_VERSION`).
+`npm view @hasna/contracts version dist-tags time --json` reports registry `latest` = `0.7.1` (published `2026-07-24T15:53:22.773Z`), following `0.7.0` (published `2026-07-24T13:41:24.268Z`). PR #26 published `0.7.1` from snapshot main to the registry.
+Semver note: PR #24 (`restore execution-free contracts boundary`) removed execution-ful `secure-local-store` exports, so `0.7.1` is a **breaking change relative to `0.7.0`** yet shipped as a patch bump. Registry `latest` therefore carries a breaking-as-patch artifact; a `0.8.0` reconcile is warranted for dependents, and `0.7.x` must not be republished.
+Provider merge/version evidence is not itself release authority; this section remains evidence-only and non-authoritative.
+None of the nine provisional schema names, fields, or
 mappings is canonical for Factory adoption until the complete task chain is
 terminal and one exact green release artifact/digest is pinned.
 
@@ -365,9 +374,22 @@ This document is implementation-shaped only; it does not execute code changes.
   - nonprinting staged/commit-range secrets scans
   - two independent exact-head adversarial reviews
 
-## Validation evidence on the current base
+## Validation evidence and snapshot-main health
 
-Local aggregate gate results against base `6238e96476b26b950d0a20295f330bf6c0977e90`:
+Snapshot hosted main evidence:
+
+- PR #25 merged at reviewed head `044c52aa842a72c65a93bb0acda1217942d47172` and became main `0e2fbe01b35d913c97f316d5219e5484963032ef` at `2026-07-24T15:43:52Z`; this succeeded via run `30106538936` and remains predecessor evidence.
+- this follows hosted pre-merge PR #25 failure run `30105961347` against candidate parent base `6238e96476b26b950d0a20295f330bf6c0977e90`.
+- PR #26 (source-intent release PR) merged at reviewed head `469c02e76b2e0708ceccf36c744b2584c7682262` and became snapshot main `4470cec9e7163fad00f60d1abefae9d0972b6e81` at `2026-07-24T15:51:41Z`; PR-head and post-merge run evidence are `30107008656` and `30107085383`.
+
+Snapshot follow-up local validation against the snapshot-main base (`4470cec9e7163fad00f60d1abefae9d0972b6e81`) with this docs-only diff:
+
+- `bun install --frozen-lockfile` passed with no changes.
+- `bun run verify:release` exited `0`.
+- `bun test`: `407` passed / `7` skipped / `0` failed; `414` tests across `30` files; `10,274` expect calls.
+- todos hygiene, typecheck, example conformance, build, repo-conformance (including `no_cloud_guard` PASS), dist smoke, isolated Todos consumer smoke, and pack dry-run all passed; pack output was `hasna-contracts-0.7.1.tgz`.
+
+Local aggregate gate results against original PR #25 candidate parent/base `6238e96476b26b950d0a20295f330bf6c0977e90`:
 
 - `bun run verify:release` exited `0`.
 - todos hygiene passed, typecheck passed, `bun test` = `401` passed / `7` skipped / `0` failed.
@@ -389,8 +411,10 @@ Canonical/released Factory authority is not established because this task graph 
 
 - [x] Current IAP9-00049 inventory, schema inventory, and implementation-shaped plan are fully present and internally consistent.
 - [x] Confirms `15` effect kinds, `8` git.publish stages, and the corrected task graph/gate structure.
-- [x] Confirms hosted facts and source references remain preserved, including current base `6238e...` unhealthy and PR #22 verification failure.
-- [x] Verifies local aggregate gate on exact base via `bun run verify:release` with exact results:
+- [x] Verifies snapshot hosted main evidence: PR #26 merged to `4470cec9e7163fad00f60d1abefae9d0972b6e81` with post-merge success run `30107085383`, with predecessor PR #25 success at `30106538936`.
+- [x] Verifies snapshot follow-up local aggregate gate against the snapshot-main base (`4470cec9e7163fad00f60d1abefae9d0972b6e81`) with this docs-only follow-up diff via `bun run verify:release` with exact results:
+  `407` passed, `7` skipped, `0` failed (`bun test`) and no failures from the aggregate gate.
+- [x] Verifies local aggregate gate on exact pre-merge base (`6238e96476b26b950d0a20295f330bf6c0977e90`) via `bun run verify:release` with exact results:
   `401` passed, `7` skipped, `0` failed (`bun test`) and no failures from the aggregate gate.
 - [x] Defers future schema/fixture/property implementation to IAP9-00041; none are claimed implemented in this docs-only PR.
 - [x] Records exact-head adversarial/merge evidence and release posture as Todos/PR artifacts, not mutable document state.
