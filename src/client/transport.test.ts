@@ -680,6 +680,104 @@ describe("authenticated redirect boundary", () => {
   });
 });
 
+describe("authenticated authority-header boundary", () => {
+  const API_KEY = ["fixture", "authority", "value"].join("-");
+  const forbiddenHeaders = [
+    "Host",
+    "hOsT",
+    ":authority",
+    "Forwarded",
+    "X-Forwarded-Host",
+    "X-Original-Host"
+  ];
+
+  test("default headers cannot override the validated request authority", async () => {
+    for (const header of forbiddenHeaders) {
+      let calls = 0;
+      const transport = createHasnaHttpTransport({
+        name: "authority-regression",
+        baseUrl: "https://api.customer.example/v1",
+        apiKey: API_KEY,
+        headers: { [header]: "evil.example" },
+        retry: false,
+        fetchImpl: async () => {
+          calls++;
+          return Response.json({ ok: true });
+        }
+      });
+
+      await expect(transport.get("/items")).rejects.toThrow(/authority header/i);
+      expect(calls).toBe(0);
+    }
+  });
+
+  test("per-call headers cannot override the validated request authority", async () => {
+    for (const header of forbiddenHeaders) {
+      let calls = 0;
+      const transport = createHasnaHttpTransport({
+        name: "authority-regression",
+        baseUrl: "https://api.customer.example/v1",
+        apiKey: API_KEY,
+        retry: false,
+        fetchImpl: async () => {
+          calls++;
+          return Response.json({ ok: true });
+        }
+      });
+
+      await expect(
+        transport.get("/items", { headers: { [header]: "evil.example" } })
+      ).rejects.toThrow(/authority header/i);
+      expect(calls).toBe(0);
+    }
+  });
+
+  test("real Bun HTTP routing never receives an authenticated Host override", async () => {
+    const received: Array<{
+      host: string | null;
+      apiKey: string | null;
+      authorization: string | null;
+    }> = [];
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        received.push({
+          host: request.headers.get("host"),
+          apiKey: request.headers.get("x-api-key"),
+          authorization: request.headers.get("authorization")
+        });
+        return Response.json({ ok: true });
+      }
+    });
+
+    try {
+      const defaults = createHasnaHttpTransport({
+        name: "authority-regression",
+        baseUrl: `http://127.0.0.1:${server.port}`,
+        apiKey: API_KEY,
+        headers: { hOsT: "evil.example" },
+        retry: false
+      });
+      await expect(defaults.get("/items")).rejects.toThrow(/authority header/i);
+
+      const perCall = createHasnaHttpTransport({
+        name: "authority-regression",
+        baseUrl: `http://127.0.0.1:${server.port}`,
+        apiKey: API_KEY,
+        retry: false
+      });
+      await expect(
+        perCall.get("/items", { headers: { Host: "evil.example" } })
+      ).rejects.toThrow(/authority header/i);
+
+      expect(received).toEqual([]);
+    } finally {
+      server.stop(true);
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // END-TO-END PROOF: a real loopback `/v1` server (the "cloud") + a demo app
 // storage resolver that uses the shared contract to flip between a local file

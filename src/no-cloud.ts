@@ -57,6 +57,7 @@ const CONTRACTS_DECLARATION_PATHS = new Set([
   "dist/index.js",
   "dist/mode.js",
   "dist/service-contract.js",
+  "dist/secure-local-store.js",
   "dist/conformance.js",
   "dist/client/transport.js",
   "dist/client/storage.js",
@@ -65,6 +66,7 @@ const CONTRACTS_DECLARATION_PATHS = new Set([
   "dist/schemas.d.ts",
   "dist/mode.d.ts",
   "dist/service-contract.d.ts",
+  "dist/secure-local-store.d.ts",
   "dist/conformance.d.ts"
 ]);
 

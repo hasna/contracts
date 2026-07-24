@@ -198,23 +198,20 @@ contracts no-cloud-scan --manifest app-cloud.manifest.json .
 contracts no-cloud-scan --json hasna-todos-0.11.62.tgz
 ```
 
-Print the shared secure local-store policy for `.hasna` and `.codewith`, or
-produce a dry-run lifecycle plan for owner-only permissions and package-owned
-retention adapters:
+Print the shared declarative secure local-store policy for `.hasna` and
+`.codewith`, optionally filtered to one package-owned store:
 
 ```bash
 contracts secure-local-store --json
 contracts secure-local-store --json --store todos
-contracts secure-local-store "$HOME" --json --plan --store todos
-contracts secure-local-store "$HOME" --json --apply --store todos
-contracts secure-local-store "$HOME" --json --plan --retention --store todos --retention-proof todos-exports-backups
 ```
 
-`secure-local-store` never reads file contents. The contract covers `0700`
-directories, `0600` files, SQLite DB/WAL/SHM sidecars, backups, exports, active
-record exclusions, artifact allowlists, and SQLite maintenance gates. Retention
-and SQLite maintenance are dry-run by default and require explicit package
-adapter proof before deletion or compaction.
+`secure-local-store` is execution-free: it never scans paths, reads file
+contents, changes permissions, deletes files, opens SQLite, or runs retention
+or maintenance. The policy declares `0700` directories, `0600` files, SQLite
+DB/WAL/SHM sidecars, backups, exports, active-record exclusions, artifact
+allowlists, and maintenance proof gates. Owning packages implement those
+operations and emit redacted proof.
 
 ## Storage Kit (vendored codegen)
 

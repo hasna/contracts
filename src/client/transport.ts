@@ -542,6 +542,28 @@ export interface HasnaRequestOptions {
 const DEFAULT_RETRY_STATUSES = [408, 425, 429, 500, 502, 503, 504] as const;
 /** Methods that are idempotent by definition and always safe to retry. */
 const IDEMPOTENT_METHODS = new Set(["GET", "HEAD", "PUT", "DELETE", "OPTIONS"]);
+const AUTHORITY_OVERRIDE_HEADERS = new Set([
+  "host",
+  ":authority",
+  "forwarded",
+  "x-forwarded-host",
+  "x-original-host"
+]);
+
+function assertNoAuthorityOverrideHeaders(
+  headers: Record<string, string> | undefined,
+  source: "transport" | "request"
+): void {
+  if (!headers) return;
+  const forbidden = Object.keys(headers).find((name) =>
+    AUTHORITY_OVERRIDE_HEADERS.has(name.trim().toLowerCase())
+  );
+  if (forbidden) {
+    throw new Error(
+      `Authenticated ${source} headers must not set authority header '${forbidden}'.`
+    );
+  }
+}
 
 export interface HasnaHttpTransportOptions {
   /** App slug (for error context / default host). */
@@ -632,6 +654,8 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
     body: unknown,
     opts: HasnaRequestOptions,
   ): Promise<{ ok: true; value: T } | { ok: false; retryable: boolean; error: Error }> {
+    assertNoAuthorityOverrideHeaders(options.headers, "transport");
+    assertNoAuthorityOverrideHeaders(opts.headers, "request");
     const headers: Record<string, string> = {
       "x-api-key": options.apiKey,
       Authorization: `Bearer ${options.apiKey}`,

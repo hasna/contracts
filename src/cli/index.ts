@@ -11,12 +11,7 @@ import {
 import { scanNoCloudTarget } from "../no-cloud";
 import { runRepoConformance } from "../conformance";
 import { getEmbeddedSchemaId, validateContract } from "../validators";
-import {
-  applySecureLocalStorePlan,
-  planSecureLocalStoreLifecycle,
-  secureLocalStorePolicy,
-  type PlanSecureLocalStoreOptions
-} from "../secure-local-store";
+import { secureLocalStorePolicy } from "../secure-local-store";
 import { runVendorKit } from "./kit-runner";
 import { runIssueKey } from "./issue-key";
 
@@ -77,7 +72,7 @@ function preflightJsonUsageErrors(argv: string[]) {
 
   // issue-key has rich value-taking options; let commander parse it (its
   // CommanderError is already rendered as JSON by main()).
-  if (command === "issue-key" || command === "secure-local-store") {
+  if (command === "issue-key") {
     return false;
   }
 
@@ -87,7 +82,8 @@ function preflightJsonUsageErrors(argv: string[]) {
     conformance: new Set(["--json", "-j"]),
     "no-cloud-scan": new Set(["--json", "-j", "--manifest"]),
     "repo-conformance": new Set(["--json", "-j"]),
-    "vendor-kit": new Set(["--json", "-j", "--check", "--kit-version", "--no-contract"])
+    "vendor-kit": new Set(["--json", "-j", "--check", "--kit-version", "--no-contract"]),
+    "secure-local-store": new Set(["--json", "-j", "--store"])
   };
   const allowedOptions = allowedOptionsByCommand[command] ?? new Set<string>();
   const positionals: string[] = [];
@@ -125,6 +121,20 @@ function preflightJsonUsageErrors(argv: string[]) {
       index += 1;
       continue;
     }
+    if (arg.startsWith("--store=")) {
+      if (arg.slice("--store=".length).length === 0) {
+        return reportParserJsonError("commander.optionMissingArgument", "option '--store <id>' argument missing");
+      }
+      continue;
+    }
+    if (arg === "--store") {
+      const storeValue = args[index + 1];
+      if (!storeValue || storeValue.startsWith("-")) {
+        return reportParserJsonError("commander.optionMissingArgument", "option '--store <id>' argument missing");
+      }
+      index += 1;
+      continue;
+    }
     if (arg.startsWith("-")) {
       if (!allowedOptions.has(arg)) {
         return reportParserJsonError("commander.unknownOption", `unknown option '${arg}'`);
@@ -145,23 +155,7 @@ function collectOption(value: string, previous: string[] = []): string[] {
   return [...previous, value];
 }
 
-function parsePositiveInteger(value: string, fallback: number): number {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function printSecureLocalStoreText(payload: ReturnType<typeof secureLocalStorePolicy> | ReturnType<typeof planSecureLocalStoreLifecycle>) {
-  if ("actions" in payload) {
-    console.log(`${payload.ok ? "ok" : "blocked"} hasna.secure_local_store_policy.v1 ${payload.mode}`);
-    console.log(
-      `stores=${payload.summary.stores} scanned=${payload.summary.scannedEntries} planned=${payload.summary.planned} blocked=${payload.summary.blocked} skipped=${payload.summary.skipped} applied=${payload.summary.applied} failed=${payload.summary.failed}`
-    );
-    for (const action of payload.actions) {
-      console.log(`  ${action.status} ${action.kind} ${action.storeId} ${action.path} ${action.reason}`);
-    }
-    return;
-  }
-
+function printSecureLocalStoreText(payload: ReturnType<typeof secureLocalStorePolicy>) {
   console.log(`ok ${payload.schema} ${payload.id}`);
   for (const store of payload.stores) {
     console.log(`  ${store.storeId} ${store.packageName} ${store.root}/${store.relativePath}`);
@@ -342,90 +336,23 @@ export function createContractsProgram() {
 
   program
     .command("secure-local-store")
-    .description("Print or plan the shared .hasna/.codewith secure local-store lifecycle contract")
-    .argument("[home]", "Home directory to inspect when --plan or --apply is set. Omitted: print the default policy.")
-    .option("--plan", "Dry-run filesystem lifecycle plan for the selected stores")
-    .option("--apply", "Apply owner-only chmod repairs from the plan")
-    .option("--retention", "Include retention candidates in the dry-run plan")
-    .option("--apply-retention", "Apply allowlisted retention deletes; requires --apply")
-    .option("--sqlite-maintenance", "Include SQLite maintenance actions")
-    .option("--apply-sqlite-maintenance", "Run planned SQLite maintenance; requires --apply and --assume-exclusive-sqlite")
-    .option("--assume-exclusive-sqlite", "Assert no app process is using selected SQLite stores")
+    .description("Print the execution-free .hasna/.codewith secure local-store policy")
     .option("--store <id>", "Limit to a store id; repeat for multiple stores", collectOption, [])
-    .option("--active-path <path>", "Path to exclude from retention as active; repeat for multiple paths", collectOption, [])
-    .option("--retention-proof <adapter>", "Adapter id with package-owned active-record proof; repeat for multiple adapters", collectOption, [])
-    .option("--max-entries <n>", "Maximum filesystem entries to scan per store", "25000")
     .option("-j, --json", "Output JSON")
-    .action(async (
-      home: string | undefined,
-      options: {
-        plan?: boolean;
-        apply?: boolean;
-        retention?: boolean;
-        applyRetention?: boolean;
-        sqliteMaintenance?: boolean;
-        applySqliteMaintenance?: boolean;
-        assumeExclusiveSqlite?: boolean;
-        store?: string[];
-        activePath?: string[];
-        retentionProof?: string[];
-        maxEntries?: string;
-        json?: boolean;
-      }
-    ) => {
+    .action((options: { store?: string[]; json?: boolean }) => {
       const stores = options.store && options.store.length > 0 ? options.store : undefined;
-      const shouldPlan = Boolean(options.plan || options.apply || options.retention || options.sqliteMaintenance);
-      if (!shouldPlan) {
-        let policy;
-        try {
-          policy = secureLocalStorePolicy(stores);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          reportCliError(options, `secure-local-store failed: ${message}`, { code: "secure_local_store_error" });
-          return;
-        }
-        if (options.json) {
-          console.log(JSON.stringify(policy, null, 2));
-        } else {
-          printSecureLocalStoreText(policy);
-        }
-        return;
-      }
-
-      const planOptions: PlanSecureLocalStoreOptions = {
-        apply: Boolean(options.apply),
-        includeRetention: Boolean(options.retention || options.applyRetention),
-        includeSqliteMaintenance: Boolean(options.sqliteMaintenance || options.applySqliteMaintenance),
-        assumeExclusiveSqlite: Boolean(options.assumeExclusiveSqlite),
-        maxEntries: parsePositiveInteger(options.maxEntries ?? "25000", 25_000)
-      };
-      if (home) planOptions.home = home;
-      if (stores) planOptions.stores = stores;
-      if (options.activePath && options.activePath.length > 0) planOptions.activePaths = options.activePath;
-      if (options.retentionProof && options.retentionProof.length > 0) planOptions.activeRecordProofs = options.retentionProof;
-
-      let plan;
+      let policy;
       try {
-        plan = planSecureLocalStoreLifecycle(planOptions);
+        policy = secureLocalStorePolicy(stores);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         reportCliError(options, `secure-local-store failed: ${message}`, { code: "secure_local_store_error" });
         return;
       }
-      const result = options.apply
-        ? await applySecureLocalStorePlan(plan, {
-            applyRetention: Boolean(options.applyRetention),
-            applySqliteMaintenance: Boolean(options.applySqliteMaintenance)
-          })
-        : plan;
-
       if (options.json) {
-        console.log(JSON.stringify(result, null, 2));
+        console.log(JSON.stringify(policy, null, 2));
       } else {
-        printSecureLocalStoreText(result);
-      }
-      if (!result.ok) {
-        process.exitCode = 1;
+        printSecureLocalStoreText(policy);
       }
     });
 

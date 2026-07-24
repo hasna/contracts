@@ -15,6 +15,7 @@ import { isAbsolute, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { CONTRACTS_PACKAGE_VERSION } from "../src/schemas.js";
+import { scanNoCloudTarget } from "../src/no-cloud.js";
 
 const root = join(import.meta.dir, "..");
 const expectedUnreleasedVersion = "0.7.0";
@@ -514,9 +515,16 @@ describe("published package hostname and provenance boundary", () => {
 
     const rawMembers = readRawTarMembers(packedArchivePath);
     expect(rawMembers.length).toBeGreaterThan(0);
+    expect(new Set(rawMembers.map((member) => member.path)).size).toBe(rawMembers.length);
     expect(
       rawMembers.filter((member) => member.path === "package/dist/cli/index.js").length,
-    ).toBeGreaterThanOrEqual(1);
+    ).toBe(1);
+  });
+
+  test("actual packed archive passes the no-cloud runtime boundary", () => {
+    const evidence = scanNoCloudTarget(packedArchivePath);
+    expect(evidence.verdict).toBe("passed");
+    expect(evidence.findings).toEqual([]);
   });
 
   test("raw-member scan catches an encoded duplicate that extraction overwrites", () => {

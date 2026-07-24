@@ -5042,6 +5042,9 @@ export const ServiceSurfaceSchema = z
         if (!value.health) {
           ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported API surfaces require a health endpoint", path: ["health"] });
         }
+        if (!value.readiness) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported API surfaces require a readiness endpoint", path: ["readiness"] });
+        }
         if (!value.version) {
           ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported API surfaces require a version endpoint", path: ["version"] });
         }
@@ -5066,11 +5069,20 @@ export const ServiceSurfaceSchema = z
     if (value.health && value.health.path !== "/health") {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Health endpoint must be /health", path: ["health", "path"] });
     }
+    if (value.health && value.health.method !== "GET") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Health endpoint must use GET", path: ["health", "method"] });
+    }
     if (value.readiness && value.readiness.path !== "/ready") {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Readiness endpoint must be /ready", path: ["readiness", "path"] });
     }
+    if (value.readiness && value.readiness.method !== "GET") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Readiness endpoint must use GET", path: ["readiness", "method"] });
+    }
     if (value.version && value.version.path !== "/version") {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Version endpoint must be /version", path: ["version", "path"] });
+    }
+    if (value.version && value.version.method !== "GET") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Version endpoint must use GET", path: ["version", "method"] });
     }
   });
 export type ServiceSurface = z.infer<typeof ServiceSurfaceSchema>;
@@ -5486,8 +5498,17 @@ export const ServiceContractManifestSchema = z
     if (value.class === "saas") {
       if (!value.storage) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "saas repos must declare storage", path: ["storage"] });
-      } else if (value.storage.mode !== "cloud") {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "saas repos must use cloud storage mode", path: ["storage", "mode"] });
+      } else {
+        if (value.storage.mode !== "cloud") {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: "saas repos must use cloud storage mode", path: ["storage", "mode"] });
+        }
+        if (!value.storage.envPrefix) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "saas storage requires envPrefix for the public DATABASE_URL contract",
+            path: ["storage", "envPrefix"]
+          });
+        }
       }
       if (!hasBin("-serve")) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `saas repos must ship the "${value.name}-serve" bin`, path: ["bins"] });

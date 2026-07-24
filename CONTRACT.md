@@ -149,10 +149,12 @@ it.
 
 ## 7. Self-host artifact
 
-Every `service` and `saas` repo **MUST** ship a `docker-compose.yml` at the repo
-root as the canonical self-host artifact. It brings up an app-owned Postgres and
-the app in `cloud` mode pointed at it. See this repo's `docker-compose.yml` for
-the reference template.
+Every `service`, `saas`, and `cli-with-store` repo that ships a `<name>-serve`
+bin **MUST** ship at least one root self-host artifact: `docker-compose.yml`,
+`docker-compose.yaml`, `compose.yml`, `compose.yaml`, or `Dockerfile`. A Compose
+file is the preferred complete reference because it can bring up an app-owned
+Postgres and the app in `cloud` mode pointed at it. See this repo's
+`docker-compose.yml` for the reference template.
 
 ---
 
@@ -175,14 +177,21 @@ A CLI that owns local (and optionally cloud) data.
 - **MUST** declare `storage.pgTestGate`.
 - **MUST** ship the `<name>` bin.
 - SHOULD ship a `<name>-mcp` bin for agent access.
+- A CLI-only repo is required to declare only its supported CLI surface;
+  conformance does **not** force API, SDK, or MCP surfaces onto it.
+- If it ships `<name>-serve`, it becomes service-capable for conformance and
+  **MUST** declare supported API, SDK, MCP, and CLI surfaces, expose
+  `GET /health`, `GET /ready`, and `GET /version`, and ship a root self-host
+  artifact.
 
 ### `service`
 A long-running HTTP/MCP service.
 - **MUST** declare `storage`.
 - **MUST** declare both `sqlite` and `postgres` in `storage.engines`.
 - **MUST** declare `storage.pgTestGate`.
-- **MUST** ship a `<name>-serve` bin and expose `/health`, `/ready`, `/version`.
-- **MUST** ship a root `docker-compose.yml`.
+- **MUST** ship a `<name>-serve` bin and expose `GET /health`, `GET /ready`,
+  and `GET /version`.
+- **MUST** ship a root self-host artifact.
 - SHOULD ship a `<name>-mcp` bin.
 
 ### `saas`
@@ -191,8 +200,9 @@ A Hasna-operated managed service.
 - **MUST** declare `storage` with `storage.mode` = `cloud`.
 - **MUST** declare `storage.envPrefix`; concrete database secret bindings stay
   in private deployment configuration, not the public manifest.
-- **MUST** ship a `<name>-serve` bin and expose `/health`, `/ready`, `/version`.
-- **MUST** ship a root `docker-compose.yml` for parity/self-host.
+- **MUST** ship a `<name>-serve` bin and expose `GET /health`, `GET /ready`,
+  and `GET /version`.
+- **MUST** ship a root self-host artifact for parity/self-host.
 
 All classes **MUST** pass the no-cloud guard: no dependency on a shared cloud
 runtime (`FORBIDDEN_SHARED_CLOUD_RUNTIMES`). App-owned cloud is declared per app
@@ -213,7 +223,7 @@ separate axes:
   "name": "todos",
   "class": "cli-with-store",
   "contractVersion": "v1",
-  "kitVersion": "0.6.0",
+  "kitVersion": "0.7.0",
   "bins": ["todos", "todos-mcp", "todos-serve"],
   "hosting": ["user-hosted", "hasna-saas"],
   "deploymentModes": ["local", "self_hosted", "cloud"],
@@ -281,11 +291,12 @@ separate axes:
 - `storage.mode` — active storage router (`local | cloud`), distinct from
   placement.
 - `storage.engines` — supported persistence engines.
-- `serviceSurfaces` — API, SDK, MCP, and CLI declarations. A supported SDK
-  names a real package `exports` key via `exportSubpath`, and the export target
-  must exist in the built package or have a corresponding source entry before
-  build. Generated clients reference the API's `openApiPath` via
-  `generatedFrom`.
+- `serviceSurfaces` — supported product-surface declarations. Service-capable
+  repos declare API, SDK, MCP, and CLI; a CLI-only `cli-with-store` declares
+  only its CLI. A supported SDK names a real package `exports` key via
+  `exportSubpath`, and the export target must exist in the built package or
+  have a corresponding source entry before build. Generated clients reference
+  the API's `openApiPath` via `generatedFrom`.
 
 Libraries may waive only API and MCP because they remain responsible for their
 SDK and CLI surfaces. Exceptional non-Node monorepos may waive any inapplicable
@@ -308,8 +319,8 @@ surface only when they declare the explicit `non-node-monorepo` waiver profile:
 ```
 
 A waiver is typed, unique per surface kind, and must carry a non-empty reason.
-`service`, `saas`, and `cli-with-store` repos without the non-Node profile
-cannot use waivers to bypass required supported surfaces.
+`service`, `saas`, and service-capable `cli-with-store` repos without the
+non-Node profile cannot use waivers to bypass required supported surfaces.
 
 ---
 
@@ -335,19 +346,25 @@ Checks:
 1. `manifest_valid` — `hasna.contract.json` present and valid (class rules enforced).
 2. `bins_allowlisted` — declared bins are in the allowlist.
 3. `bins_match_package` — declared bins match `package.json` `bin`.
-4. `surface_matrix` — required API, SDK, MCP, and CLI kinds are declared or
-   explicitly waived.
+4. `surface_matrix` — the class-appropriate supported surface kinds are
+   declared or explicitly waived. CLI-only `cli-with-store` repos require only
+   CLI; service-capable repos require API, SDK, MCP, and CLI.
 5. `surface_bindings` — surface bins and SDK export subpaths exist in
    `package.json`; generated SDKs reference a declared OpenAPI path.
-6. `storage_capabilities` — store-owning cores declare SQLite + PostgreSQL and
-   a live-PG test gate.
-7. `public_manifest_safety` — public manifests contain no secret or credential
+6. `service_api_topology` — service-capable repos declare supported
+   `GET /health`, `GET /ready`, and `GET /version` endpoints.
+7. `self_host_artifact` — service-capable repos ship a root Compose file or
+   `Dockerfile`.
+8. `storage_capabilities` — store-owning cores declare SQLite + PostgreSQL,
+   `storage.envPrefix`, and a live-PG test gate; SaaS declares its public
+   PostgreSQL env prefix.
+9. `public_manifest_safety` — public manifests contain no secret or credential
    refs, credential-shaped values, internal hosts, ARNs, or account IDs.
-8. `hosting_story` — public OSS cores include the user-hosted product story;
+10. `hosting_story` — public OSS cores include the user-hosted product story;
    `saas` repos include the `hasna-saas` story.
-9. `mode_enum_compliance` — any `HASNA_<NAME>_STORAGE_MODE` env normalizes to `local|cloud`.
-10. `health_shape` — when a serve bin exists, a sampled `/health` payload matches `{ status, version, mode }`.
-11. `no_cloud_guard` — no forbidden shared cloud runtime edges (reuses `scanNoCloudTarget`).
+11. `mode_enum_compliance` — any `HASNA_<NAME>_STORAGE_MODE` env normalizes to `local|cloud`.
+12. `health_shape` — when a serve bin exists, a sampled `/health` payload matches `{ status, version, mode }`.
+13. `no_cloud_guard` — no forbidden shared cloud runtime edges (reuses `scanNoCloudTarget`).
 
 The kit is dev-dependency friendly: `@hasna/contracts` can be a `devDependency`
 and the checks run under `bun test` with no runtime footprint in the app.
@@ -360,9 +377,11 @@ The shared secure local-store policy is `hasna.secure_local_store_policy.v1`
 (`SecureLocalStorePolicySchema`) and the helper module is
 `@hasna/contracts/secure-local-store`.
 
-This policy applies to local operator state under `.hasna` and `.codewith`.
+This policy describes local operator state under `.hasna` and `.codewith`.
 The default inventory is explicit by package: Codewith, Todos, Conversations,
-Mementos, Knowledge, Projects, Browser, Terminal, Logs, and Loops.
+Mementos, Knowledge, Projects, Browser, Terminal, Logs, and Loops. It is a
+declarative contract only: `@hasna/contracts` does not inspect or mutate any of
+those stores.
 
 Local stores **MUST** use owner-only defaults:
 
@@ -372,7 +391,8 @@ Local stores **MUST** use owner-only defaults:
 - Backup, export, report, session, snapshot, tmp, and log artifacts: `0600`
   unless a package records a narrower non-secret exception.
 
-Lifecycle cleanup **MUST** default to dry-run. Destructive retention requires:
+An owning package that implements lifecycle cleanup **MUST** default to dry-run.
+Destructive retention requires:
 
 1. Explicit apply intent.
 2. A package-owned retention adapter.
@@ -383,40 +403,50 @@ Lifecycle cleanup **MUST** default to dry-run. Destructive retention requires:
 
 SQLite maintenance **MUST NOT** run against active stores. WAL checkpoint,
 incremental vacuum, optimize, or vacuum operations are allowed only when the
-caller explicitly proves exclusive/offline access for that package store. The
-contracts helper plans maintenance and can apply it only when the caller opts in
-to both apply mode and SQLite maintenance.
+owning package explicitly proves exclusive/offline access for that store.
+Contracts retains the policy/profile/proof declarations but does not open
+SQLite, run maintenance, scan paths, change permissions, or delete files.
 
 The CLI surface:
 
 ```bash
 contracts secure-local-store --json
-contracts secure-local-store "$HOME" --json --plan --store todos
-contracts secure-local-store "$HOME" --json --apply --store todos
-contracts secure-local-store "$HOME" --json --plan --retention --store todos --retention-proof todos-exports-backups
+contracts secure-local-store --json --store todos
 ```
 
-The CLI and helper report paths, modes, counts, statuses, store ids, and adapter
-ids only. They do not read or print file contents.
+The CLI only prints the validated declarative policy, optionally filtered by
+store id. It never accepts a filesystem root and never plans or applies
+permissions, retention, deletion, or SQLite operations. Execution and redacted
+proof remain the responsibility of each owning package.
 
 ---
 
 ## 12. Migration from 0.4.x/0.5.x manifests
 
-The v1 schema additions are backward-compatible at parse time. Existing
-`deploymentModes: ["self-hosted"]` values normalize to `self_hosted`; missing
-`hosting`, `deploymentModes`, and `serviceSurfaces` still receive compatible
-defaults. The only intentional schema-level rejection is a declared
-`storage.sqlitePath` that does not end in `.db`.
+Existing `deploymentModes: ["self-hosted"]` values normalize to `self_hosted`;
+missing `hosting`, `deploymentModes`, and `serviceSurfaces` still receive
+compatible defaults, so legacy manifests such as OpenLoops remain
+schema-readable. The current schema intentionally rejects a declared
+non-`.db` `storage.sqlitePath`, a SaaS store without `storage.envPrefix`, and a
+declared supported API that omits the health/readiness/version endpoints or
+uses a method other than `GET`.
 
 Conformance is stricter than schema parsing. A legacy service manifest can
 remain schema-valid while failing new checks until it:
 
-1. declares API, SDK, MCP, and CLI surfaces or scoped waivers;
-2. points SDK declarations at real package exports;
-3. declares SQLite + PostgreSQL capabilities and a `pgTestGate`;
-4. removes private infrastructure references from the public manifest; and
-5. writes canonical `self_hosted` runtime placement spelling.
+1. declares the class-appropriate surfaces: CLI for a CLI-only
+   `cli-with-store`, or API, SDK, MCP, and CLI for service-capable repos;
+2. declares `GET /health`, `GET /ready`, and `GET /version` for each supported
+   service API;
+3. points SDK declarations at real package exports;
+4. declares SQLite + PostgreSQL capabilities, `storage.envPrefix`, and a
+   `pgTestGate` where required;
+5. adds a root self-host artifact when it ships a service;
+6. removes private infrastructure references from the public manifest; and
+7. writes canonical `self_hosted` runtime placement spelling.
+
+Conformance treats `pgTestGate.command` and every other manifest command as
+data only; it never executes them.
 
 These additive v1 capability declarations do not consume the separately
 planned `hasna.service_contract.v2`. V2 remains reserved for breaking API-base,

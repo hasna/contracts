@@ -31,6 +31,27 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["schema", "name", "class", "contractVersion", "kitVersion"],
+  allOf: [
+    {
+      if: {
+        required: ["class"],
+        properties: {
+          class: { const: "saas" }
+        }
+      },
+      then: {
+        required: ["storage"],
+        properties: {
+          storage: {
+            required: ["mode", "envPrefix"],
+            properties: {
+              mode: { const: "cloud" }
+            }
+          }
+        }
+      }
+    }
+  ],
   properties: {
     $schema: { type: "string", description: "Optional editor hint pointing at this JSON Schema." },
     schema: { const: SCHEMA_IDS.serviceContract },
@@ -74,6 +95,20 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
         type: "object",
         additionalProperties: false,
         required: ["name", "status", "authMode", "deploymentModes"],
+        allOf: [
+          {
+            if: {
+              required: ["status"],
+              properties: {
+                status: { const: "supported" },
+                kind: { const: "api" }
+              }
+            },
+            then: {
+              required: ["bin", "health", "readiness", "version"]
+            }
+          }
+        ],
         properties: {
           name: { type: "string", minLength: 1 },
           kind: { enum: ["api", "sdk", "mcp", "cli"] },
@@ -92,7 +127,7 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
             additionalProperties: false,
             required: ["method", "path"],
             properties: {
-              method: { enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+              method: { const: "GET" },
               path: { type: "string", pattern: "^/[A-Za-z0-9_./:*-]*$" },
               public: { type: "boolean" },
               description: { type: "string", minLength: 1 }
@@ -103,7 +138,7 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
             additionalProperties: false,
             required: ["method", "path"],
             properties: {
-              method: { enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+              method: { const: "GET" },
               path: { type: "string", pattern: "^/[A-Za-z0-9_./:*-]*$" },
               public: { type: "boolean" },
               description: { type: "string", minLength: 1 }
@@ -114,7 +149,7 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
             additionalProperties: false,
             required: ["method", "path"],
             properties: {
-              method: { enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+              method: { const: "GET" },
               path: { type: "string", pattern: "^/[A-Za-z0-9_./:*-]*$" },
               public: { type: "boolean" },
               description: { type: "string", minLength: 1 }

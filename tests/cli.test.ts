@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -47,55 +47,19 @@ describe("contracts CLI", () => {
     expect(result.stderr.toString()).toBe("");
   });
 
-  test("plans secure local-store chmod repairs without reading file contents", () => {
-    const dir = mkdtempSync(join(tmpdir(), "contracts-secure-cli-"));
-    try {
-      const todosDir = join(dir, ".hasna", "todos");
-      mkdirSync(todosDir, { recursive: true });
-      const db = join(todosDir, "todos.db");
-      writeFileSync(db, "redacted fixture\n");
-      chmodSync(todosDir, 0o755);
-      chmodSync(db, 0o644);
-      const result = runContracts(["secure-local-store", dir, "--json", "--plan", "--store", "todos"]);
-      expect(result.exitCode).toBe(0);
+  test("rejects removed secure local-store execution flags", () => {
+    for (const flag of [
+      "--plan",
+      "--apply",
+      "--retention",
+      "--sqlite-maintenance"
+    ]) {
+      const result = runContracts(["secure-local-store", "--json", flag]);
+      expect(result.exitCode).not.toBe(0);
       const payload = parseStdoutJson(result);
-      expect(payload.mode).toBe("dry-run");
-      expect(payload.actions.some((action: { kind: string; path: string }) => action.kind === "chmod_file" && action.path === db)).toBe(true);
-      expect(JSON.stringify(payload)).not.toContain("redacted fixture");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("requires retention proof before planning retention deletes", () => {
-    const dir = mkdtempSync(join(tmpdir(), "contracts-secure-cli-"));
-    try {
-      const backupDir = join(dir, ".hasna", "todos", "backups");
-      mkdirSync(backupDir, { recursive: true });
-      const backup = join(backupDir, "old.jsonl");
-      writeFileSync(backup, "redacted backup fixture\n");
-      const old = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000);
-      utimesSync(backup, old, old);
-
-      const blocked = runContracts(["secure-local-store", dir, "--json", "--plan", "--retention", "--store", "todos"]);
-      expect(blocked.exitCode).toBe(1);
-      expect(parseStdoutJson(blocked).actions.some((action: { kind: string }) => action.kind === "blocked")).toBe(true);
-
-      const planned = runContracts([
-        "secure-local-store",
-        dir,
-        "--json",
-        "--plan",
-        "--retention",
-        "--store",
-        "todos",
-        "--retention-proof",
-        "todos-exports-backups"
-      ]);
-      expect(planned.exitCode).toBe(0);
-      expect(parseStdoutJson(planned).actions.some((action: { kind: string; status: string; path: string }) => action.kind === "retention_delete" && action.status === "planned" && action.path === backup)).toBe(true);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
+      expect(payload.ok).toBe(false);
+      expect(payload.code).toBe("commander.unknownOption");
+      expect(result.stderr.toString()).toBe("");
     }
   });
 
@@ -530,6 +494,7 @@ describe("contracts CLI", () => {
       writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/contracts", version: "0.4.1" }));
       writeFileSync(join(dir, "dist", "mode.js"), declarationText);
       writeFileSync(join(dir, "dist", "service-contract.js"), declarationText);
+      writeFileSync(join(dir, "dist", "secure-local-store.js"), declarationText);
       writeFileSync(join(dir, "dist", "conformance.js"), declarationText);
 
       const result = runContracts(["no-cloud-scan", "--json", dir]);

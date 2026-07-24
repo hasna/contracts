@@ -24,18 +24,40 @@ All notable changes to `@hasna/contracts` are documented here.
 - Reject leading-zero, zero, and out-of-range explicit ports before WHATWG URL
   normalization, preserving canonical DNS, IPv4, bracketed IPv6, loopback,
   default, and boundary ports.
+- Reject `Host`, `:authority`, `Forwarded`, `X-Forwarded-Host`, and
+  `X-Original-Host` overrides case-insensitively in default and per-call
+  authenticated headers before auth assembly or fetch.
 - Fail closed on authenticated redirects: every 3xx is surfaced as a terminal
   `HasnaHttpError` so API keys, bearer credentials, headers, and bodies stay on
   the validated origin.
 - Compose the cloud host from `HASNA_FLEET_API_DOMAIN` with a neutral,
   non-resolving placeholder fallback that marks the config `misconfigured`.
 
+### Current-main repair
+
+- Make `secure-local-store` execution-free. The package and CLI expose only
+  declarative policy/profile/proof metadata; filesystem scanning, permission
+  changes, retention, deletion, SQLite access, and maintenance stay with each
+  owning package.
+- Close composed-path public-manifest bypasses such as nested `api.key`,
+  `access.key`, and `database.url` while preserving redacted structural
+  diagnostics and flattened separator variants.
+- Require supported service APIs to declare `GET /health`, `GET /ready`, and
+  `GET /version`; require a root self-host artifact for service, SaaS, and
+  `cli-with-store` repos that ship a serve bin; require SaaS
+  `storage.envPrefix`.
+- Keep CLI-only `cli-with-store` repos CLI-only for surface conformance instead
+  of forcing API, SDK, or MCP declarations.
+- Ship `contracts` and `contracts-cli` through distinct packed member paths so
+  the package tar has no duplicate raw/effective path.
+
 ### Compatibility
 
-- Existing v1 manifests remain schema-readable; the only intentional tightening
-  is rejecting a declared non-`.db` SQLite path. Conformance is intentionally
-  stricter than schema parsing and reports migration gaps without executing
-  manifest commands.
+- Legacy v1 manifests without explicit surfaces remain schema-readable. The
+  intentional schema tightenings reject a declared non-`.db` SQLite path, SaaS
+  storage without `envPrefix`, and supported APIs without the three canonical
+  GET endpoints. Conformance is intentionally stricter than schema parsing and
+  reports migration gaps without executing manifest commands.
 
 ## [0.6.1] - 2026-07-24
 
