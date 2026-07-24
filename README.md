@@ -185,6 +185,10 @@ header or `Authorization: Bearer <key>`.
   configuration `misconfigured`. The high-level client throws before
   constructing an authenticated transport, so an API key is never sent to the
   placeholder or to a parser-confused authority.
+- Authenticated client requests never follow HTTP redirects. Every 3xx response,
+  including a same-origin redirect, is returned as a fail-closed
+  `HasnaHttpError`; API keys, bearer credentials, custom headers, and request
+  bodies remain confined to the explicitly validated API origin.
 
 The short aliases `<APP>_API_URL` and `<APP>_API_KEY` remain supported after the
 canonical `HASNA_` names. Client configuration uses an HTTP API URL, never a

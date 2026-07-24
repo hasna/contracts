@@ -472,7 +472,7 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
   };
 }
 
-/** Thrown when a cloud HTTP request returns a non-2xx status. */
+/** Thrown when a cloud HTTP request returns a non-2xx status, including redirects. */
 export class HasnaHttpError extends Error {
   readonly status: number;
   readonly method: string;
@@ -586,6 +586,9 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
  * API key on every request as BOTH `x-api-key` and `Authorization: Bearer`
  * (serve apps accept either), returns parsed JSON, times out, and retries
  * transient failures with exponential backoff + jitter. Never logs the key.
+ * Redirects are never followed: every 3xx response fails closed at the validated
+ * base origin so credentials and request bodies cannot cross an authority
+ * boundary through runtime-specific redirect behavior.
  *
  * Retry safety: idempotent methods (GET/HEAD/PUT/DELETE/OPTIONS) are always
  * retried on transient failure; POST/PATCH are retried ONLY when an
@@ -625,7 +628,14 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
       ...(opts.headers ?? {}),
     };
     if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
-    const init: RequestInit = { method, headers };
+    const init: RequestInit = {
+      method,
+      headers,
+      // Authentication is attached before fetch. Following here would let the
+      // runtime decide which custom credentials or bodies cross the redirect
+      // boundary, so every redirect is surfaced to the caller instead.
+      redirect: "manual",
+    };
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(body);
@@ -662,6 +672,16 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
       }
     }
     if (!response.ok) {
+      // A caller-provided retry status list must not turn a redirect into
+      // repeated authenticated requests. Redirects are terminal regardless of
+      // retry policy.
+      if (response.status >= 300 && response.status < 400) {
+        return {
+          ok: false,
+          retryable: false,
+          error: new HasnaHttpError(method, rel, response.status, parsed),
+        };
+      }
       const retry = resolveRetry(opts.retry);
       const retryable = retry ? retry.retryStatuses.includes(response.status) : false;
       return { ok: false, retryable, error: new HasnaHttpError(method, rel, response.status, parsed) };
