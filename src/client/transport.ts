@@ -7,7 +7,7 @@
 //
 // This module makes the client actually talk to the cloud. Given an app name and
 // the environment it decides whether reads AND writes should be routed to the
-// app's cloud HTTP API (`<API_URL>/v1`, default `https://<app>.hasna.xyz/v1`)
+// app's cloud HTTP API (`<API_URL>/v1`, default `https://<app>.<HASNA_FLEET_API_DOMAIN>/v1`)
 // with the API key, or fall through to the local store.
 //
 // THE CLIENT-FLIP CONTRACT (env vars). For app `<NAME>` = envToken(name):
@@ -18,7 +18,7 @@
 //     <NAME>_STORAGE_MODE                                             (alias)
 //     <NAME>_MODE                                                     (alias)
 //   API base URL (optional; `/v1` is appended automatically):
-//     HASNA_<NAME>_API_URL = https://<app>.hasna.xyz
+//     HASNA_<NAME>_API_URL = https://<app>.your-deployment.example
 //     <NAME>_API_URL                                                  (alias)
 //   API key (bearer / x-api-key):
 //     HASNA_<NAME>_API_KEY -> value from the app-owned vault
@@ -28,21 +28,151 @@
 // key is present. The mode is `cloud` when either (a) an explicit mode env resolves
 // to cloud, OR (b) no mode env is set but BOTH the API URL and API key are present —
 // the fleet env-flip writes exactly those two vars (no STORAGE_MODE), so their joint
-// presence is inferred as self_hosted intent. The base URL defaults to
-// `https://<app>.hasna.xyz` when a key is present but no URL is set. If mode is
-// `cloud` but the API key is MISSING, we do NOT silently serve wrong local data — we
-// return `local` with a loud `warning` and `misconfigured: true` so the caller can
-// hard-fail instead of drifting.
+// presence is inferred as self_hosted intent. When a key is present but no explicit
+// URL is set, the base URL falls back to `https://<app>.<domain>` where `<domain>`
+// comes from `HASNA_FLEET_API_DOMAIN` (REQUIRED for a real deployment) or else a
+// neutral, non-resolving placeholder — this published package never bakes in a real
+// internal hostname. Missing, malformed, or app-prefix-incompatible fleet-domain
+// configuration resolves to that app-specific placeholder with
+// `misconfigured: true`; callers fail before constructing an authenticated
+// client. If mode is `cloud` but the API key is MISSING, we do NOT silently serve
+// wrong local data — we return `local` with a loud warning and `misconfigured:
+// true` so the caller can hard-fail instead of drifting.
 //
 // SAFETY: this module never returns, logs, or embeds the API key value. Callers
 // receive only presence flags and env-key names.
 
 import { normalizeStorageMode, envToken, type Env } from "../mode.js";
 import type { StorageMode } from "../schemas.js";
+import { isIP } from "node:net";
+
+const FLEET_API_DOMAIN_ENV_KEY = "HASNA_FLEET_API_DOMAIN";
+const NEUTRAL_FLEET_API_DOMAIN = "your-deployment.example";
+const ASCII_CONTROL_PATTERN = /[\u0000-\u001f\u007f]/;
+const DNS_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+
+interface FleetApiDomainResolution {
+  domain: string;
+  source: typeof FLEET_API_DOMAIN_ENV_KEY | "default";
+  misconfigured: boolean;
+  warning: string | null;
+}
+
+interface DefaultCloudBaseUrlResolution {
+  baseUrl: string;
+  source: FleetApiDomainResolution["source"];
+  misconfigured: boolean;
+  warning: string | null;
+}
+
+function isValidDnsDomain(value: string): boolean {
+  if (
+    value.length === 0 ||
+    value.length > 253 ||
+    ASCII_CONTROL_PATTERN.test(value) ||
+    /[^\x00-\x7f]/.test(value)
+  ) {
+    return false;
+  }
+  return value
+    .split(".")
+    .every(
+      (label) =>
+        label.length <= 63 &&
+        !label.startsWith("xn--") &&
+        DNS_LABEL_PATTERN.test(label),
+    );
+}
+
+function resolveFleetApiDomain(env: Env): FleetApiDomainResolution {
+  const raw = env[FLEET_API_DOMAIN_ENV_KEY];
+  if (raw === undefined) {
+    return {
+      domain: NEUTRAL_FLEET_API_DOMAIN,
+      source: "default",
+      misconfigured: true,
+      warning: `${FLEET_API_DOMAIN_ENV_KEY} is not set; using the non-resolving ${NEUTRAL_FLEET_API_DOMAIN} fallback.`,
+    };
+  }
+
+  const configured = raw.trim().toLowerCase();
+  if (ASCII_CONTROL_PATTERN.test(raw) || !isValidDnsDomain(configured)) {
+    return {
+      domain: NEUTRAL_FLEET_API_DOMAIN,
+      source: FLEET_API_DOMAIN_ENV_KEY,
+      misconfigured: true,
+      warning: `${FLEET_API_DOMAIN_ENV_KEY} is blank or invalid; using the non-resolving ${NEUTRAL_FLEET_API_DOMAIN} fallback.`,
+    };
+  }
+
+  return {
+    domain: configured,
+    source: FLEET_API_DOMAIN_ENV_KEY,
+    misconfigured: false,
+    warning: null,
+  };
+}
+
+function validateAppSlug(name: string): string {
+  if (name.length > 63 || !DNS_LABEL_PATTERN.test(name)) {
+    throw new Error("App name must be one lowercase DNS label.");
+  }
+  return name;
+}
+
+function composeCloudHostname(name: string, domain: string): string {
+  const hostname = `${validateAppSlug(name)}.${domain}`;
+  if (!isValidDnsDomain(hostname)) {
+    throw new Error("Composed cloud hostname must be a valid DNS domain");
+  }
+  return hostname;
+}
+
+function resolveDefaultCloudBaseUrl(
+  name: string,
+  env: Env,
+): DefaultCloudBaseUrlResolution {
+  const appSlug = validateAppSlug(name);
+  const fleetDomain = resolveFleetApiDomain(env);
+  const configuredHostname = `${appSlug}.${fleetDomain.domain}`;
+  if (isValidDnsDomain(configuredHostname)) {
+    return {
+      baseUrl: `https://${configuredHostname}`,
+      source: fleetDomain.source,
+      misconfigured: fleetDomain.misconfigured,
+      warning: fleetDomain.warning,
+    };
+  }
+
+  const fallbackHostname = composeCloudHostname(
+    appSlug,
+    NEUTRAL_FLEET_API_DOMAIN,
+  );
+  return {
+    baseUrl: `https://${fallbackHostname}`,
+    source: fleetDomain.source,
+    misconfigured: true,
+    warning: `${FLEET_API_DOMAIN_ENV_KEY} cannot form a valid composed cloud hostname for app '${appSlug}'; using the non-resolving ${NEUTRAL_FLEET_API_DOMAIN} fallback.`,
+  };
+}
+
+/**
+ * Fleet API domain suffix. This published package never ships a real internal
+ * hostname: override with `HASNA_FLEET_API_DOMAIN` (REQUIRED in a real
+ * deployment) or set an explicit `HASNA_<NAME>_API_URL` per app. Absent both,
+ * this falls back to a neutral placeholder that intentionally does not
+ * resolve to any service. Blank, malformed, and suffixes that cannot form a
+ * valid total hostname with the app prefix use the same deterministic
+ * placeholder; `resolveClientTransport()` marks that fallback misconfigured so
+ * authenticated clients fail before making a request.
+ */
+export function fleetApiDomain(env: Env = process.env as Env): string {
+  return resolveFleetApiDomain(env).domain;
+}
 
 /** Default cloud host template. `<app>` is the app slug. */
-export function defaultCloudBaseUrl(name: string): string {
-  return `https://${name}.hasna.xyz`;
+export function defaultCloudBaseUrl(name: string, env: Env = process.env as Env): string {
+  return resolveDefaultCloudBaseUrl(name, env).baseUrl;
 }
 
 export interface ClientTransportEnvKeys {
@@ -69,25 +199,128 @@ export function clientTransportEnvKeys(name: string): ClientTransportEnvKeys {
   };
 }
 
-function firstEnv(env: Env, keys: readonly string[]): { key: string; value: string } | null {
+function firstEnv(
+  env: Env,
+  keys: readonly string[],
+  options: { preserveRaw?: boolean } = {},
+): { key: string; value: string } | null {
   for (const key of keys) {
-    const value = env[key]?.trim();
-    if (value) return { key, value };
+    const raw = env[key];
+    const value = raw?.trim();
+    if (value) return { key, value: options.preserveRaw ? raw! : value };
   }
   return null;
 }
 
-/** Normalize a base URL to `<origin>/v1` (dropping any trailing slash or existing /v1). */
+function rawAuthority(value: string): string {
+  const match = /^[a-z][a-z0-9+.-]*:\/\//i.exec(value);
+  if (!match) throw new Error("API URL must be absolute.");
+  const afterScheme = value.slice(match[0].length);
+  const boundary = afterScheme.search(/[/?#]/);
+  const authority = boundary === -1 ? afterScheme : afterScheme.slice(0, boundary);
+  if (!authority) throw new Error("API URL must include a hostname.");
+  return authority;
+}
+
+function canonicalAuthorityHostname(authority: string): string {
+  let rawHostname: string;
+  if (authority.startsWith("[")) {
+    const closingBracket = authority.indexOf("]");
+    if (closingBracket === -1) {
+      throw new Error("API URL authority must contain a canonical hostname.");
+    }
+    rawHostname = authority.slice(0, closingBracket + 1);
+    const portSuffix = authority.slice(closingBracket + 1);
+    if (portSuffix && !/^:[0-9]+$/.test(portSuffix)) {
+      throw new Error("API URL authority must contain a canonical hostname and port.");
+    }
+    if (isIP(rawHostname.slice(1, -1)) !== 6) {
+      throw new Error("API URL authority must contain a canonical IPv6 literal.");
+    }
+  } else {
+    const firstColon = authority.indexOf(":");
+    const lastColon = authority.lastIndexOf(":");
+    if (firstColon !== lastColon) {
+      throw new Error("IPv6 API URL authorities must use brackets.");
+    }
+    if (lastColon !== -1) {
+      const port = authority.slice(lastColon + 1);
+      if (!/^[0-9]+$/.test(port)) {
+        throw new Error("API URL authority must contain a canonical hostname and port.");
+      }
+      rawHostname = authority.slice(0, lastColon);
+    } else {
+      rawHostname = authority;
+    }
+    const ipVersion = isIP(rawHostname);
+    const numericAddressParts = rawHostname.split(".");
+    const looksLikeNonCanonicalIpv4 =
+      numericAddressParts.every((part) =>
+        /^(?:0x[0-9a-f]+|[0-9]+)$/i.test(part)
+      );
+    if (
+      (ipVersion !== 4 && looksLikeNonCanonicalIpv4) ||
+      (ipVersion !== 4 && !isValidDnsDomain(rawHostname.toLowerCase()))
+    ) {
+      throw new Error("API URL authority must contain a canonical ASCII hostname.");
+    }
+  }
+  return rawHostname.toLowerCase();
+}
+
+function isDeliberateLoopbackHttpAuthority(authority: string): boolean {
+  return /^(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]+)?$/i.test(authority);
+}
+
+/**
+ * Normalize an explicit API base URL to `<origin>/v1`.
+ *
+ * HTTPS may target any explicit ASCII hostname. HTTP is restricted to exact
+ * loopback authorities for local development. Paths and ports are preserved;
+ * query strings, fragments, credentials, controls, IDNs, and punycode are
+ * rejected rather than silently normalized.
+ */
 export function toV1BaseUrl(apiUrl: string): string {
-  const url = new URL(apiUrl);
+  if (ASCII_CONTROL_PATTERN.test(apiUrl)) {
+    throw new Error("API URL must not contain ASCII control characters.");
+  }
+  const input = apiUrl.trim();
+  const authority = rawAuthority(input);
+  if (
+    authority.includes("@") ||
+    authority.includes("\\") ||
+    authority.includes("%") ||
+    /[^\x00-\x7f]/.test(authority)
+  ) {
+    throw new Error("API URL authority must be canonical ASCII without credentials.");
+  }
+
+  const canonicalHostname = canonicalAuthorityHostname(authority);
+  const url = new URL(input);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("API URL must use http or https.");
+  }
+  if (url.username || url.password) {
+    throw new Error("API URL must not include credentials.");
+  }
+  if (!url.hostname || url.hostname.endsWith(".")) {
+    throw new Error("API URL must include a canonical hostname.");
+  }
+  if (url.hostname.toLowerCase() !== canonicalHostname) {
+    throw new Error("API URL authority must not rely on parser hostname normalization.");
+  }
+  if (url.hostname.split(".").some((label) => label.toLowerCase().startsWith("xn--"))) {
+    throw new Error("API URL must not use IDN or punycode hostnames.");
+  }
+  if (url.protocol === "http:" && !isDeliberateLoopbackHttpAuthority(authority)) {
+    throw new Error("API URL may use http only for an exact loopback authority.");
+  }
+  if (url.search || url.hash) {
+    throw new Error("API URL must not include a query string or fragment.");
   }
   let path = url.pathname.replace(/\/+$/, "");
   if (path.endsWith("/v1")) path = path.slice(0, -"/v1".length);
   url.pathname = `${path}/v1`;
-  url.search = "";
-  url.hash = "";
   return url.toString().replace(/\/+$/, "");
 }
 
@@ -104,16 +337,16 @@ export interface ClientTransportResolution {
   modeSource: string;
   /** `<origin>/v1` base for the cloud API when transport is cloud-http, else null. */
   baseUrl: string | null;
-  /** Env key the API URL came from, `"default"` (host template), or null. */
+  /** Env key the API URL/domain came from, `"default"` (neutral placeholder), or null. */
   apiUrlSource: string | null;
   /** Whether an API key is present (value never exposed). */
   apiKeyPresent: boolean;
   /** Env key the API key came from, or null. */
   apiKeySource: string | null;
   /**
-   * True when the operator asked for cloud but the config is incomplete (no API
-   * key), so we fell back to local. Callers SHOULD treat this as an error rather
-   * than silently reading local data.
+   * True when the operator asked for cloud but the config is incomplete. Missing
+   * keys fall back to local; missing or malformed default-domain config resolves
+   * to a neutral placeholder. Callers SHOULD treat either result as an error.
    */
   misconfigured: boolean;
   /** Human-readable warning, or null. Never contains secret values. */
@@ -129,7 +362,7 @@ export interface ClientTransportResolution {
 export function resolveClientTransport(name: string, env: Env = process.env): ClientTransportResolution {
   const keys = clientTransportEnvKeys(name);
   const modeHit = firstEnv(env, keys.modeKeys);
-  const urlHit = firstEnv(env, keys.apiUrlKeys);
+  const urlHit = firstEnv(env, keys.apiUrlKeys, { preserveRaw: true });
   const keyHit = firstEnv(env, keys.apiKeyKeys);
 
   let mode: StorageMode = "local";
@@ -192,10 +425,19 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     };
   }
 
-  const rawUrl = urlHit?.value ?? defaultCloudBaseUrl(name);
-  const apiUrlSource = urlHit ? urlHit.key : "default";
+  let defaultBaseUrl: DefaultCloudBaseUrlResolution | null = null;
+  let apiUrlSource: string =
+    urlHit?.key ??
+    (env[FLEET_API_DOMAIN_ENV_KEY] === undefined
+      ? "default"
+      : FLEET_API_DOMAIN_ENV_KEY);
   let baseUrl: string;
   try {
+    if (!urlHit) {
+      defaultBaseUrl = resolveDefaultCloudBaseUrl(name, env);
+      apiUrlSource = defaultBaseUrl.source;
+    }
+    const rawUrl = urlHit?.value ?? defaultBaseUrl!.baseUrl;
     baseUrl = toV1BaseUrl(rawUrl);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -214,6 +456,8 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     };
   }
 
+  if (defaultBaseUrl?.warning) warnings.push(defaultBaseUrl.warning);
+
   return {
     transport: "cloud-http",
     mode,
@@ -223,12 +467,12 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     apiUrlSource,
     apiKeyPresent: true,
     apiKeySource: keyHit.key,
-    misconfigured: false,
+    misconfigured: defaultBaseUrl?.misconfigured ?? false,
     warning: warnings.length > 0 ? warnings.join(" ") : null,
   };
 }
 
-/** Thrown when a cloud HTTP request returns a non-2xx status. */
+/** Thrown when a cloud HTTP request returns a non-2xx status, including redirects. */
 export class HasnaHttpError extends Error {
   readonly status: number;
   readonly method: string;
@@ -342,6 +586,9 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
  * API key on every request as BOTH `x-api-key` and `Authorization: Bearer`
  * (serve apps accept either), returns parsed JSON, times out, and retries
  * transient failures with exponential backoff + jitter. Never logs the key.
+ * Redirects are never followed: every 3xx response fails closed at the validated
+ * base origin so credentials and request bodies cannot cross an authority
+ * boundary through runtime-specific redirect behavior.
  *
  * Retry safety: idempotent methods (GET/HEAD/PUT/DELETE/OPTIONS) are always
  * retried on transient failure; POST/PATCH are retried ONLY when an
@@ -349,7 +596,7 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
  */
 export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): HasnaHttpTransport {
   const fetchImpl: FetchLike = options.fetchImpl ?? ((input, init) => fetch(input, init));
-  const base = options.baseUrl.replace(/\/+$/, "");
+  const base = toV1BaseUrl(options.baseUrl);
   const timeoutMs = options.timeoutMs ?? 30_000;
   const sleep = options.sleepImpl ?? defaultSleep;
   const defaultRetry = options.retry;
@@ -381,7 +628,14 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
       ...(opts.headers ?? {}),
     };
     if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
-    const init: RequestInit = { method, headers };
+    const init: RequestInit = {
+      method,
+      headers,
+      // Authentication is attached before fetch. Following here would let the
+      // runtime decide which custom credentials or bodies cross the redirect
+      // boundary, so every redirect is surfaced to the caller instead.
+      redirect: "manual",
+    };
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(body);
@@ -418,6 +672,16 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
       }
     }
     if (!response.ok) {
+      // A caller-provided retry status list must not turn a redirect into
+      // repeated authenticated requests. Redirects are terminal regardless of
+      // retry policy.
+      if (response.status >= 300 && response.status < 400) {
+        return {
+          ok: false,
+          retryable: false,
+          error: new HasnaHttpError(method, rel, response.status, parsed),
+        };
+      }
       const retry = resolveRetry(opts.retry);
       const retryable = retry ? retry.retryStatuses.includes(response.status) : false;
       return { ok: false, retryable, error: new HasnaHttpError(method, rel, response.status, parsed) };
