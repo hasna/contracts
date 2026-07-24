@@ -78,6 +78,73 @@ describe("contracts CLI", () => {
     ).toBe(true);
   });
 
+  test("runs repo conformance with stable capability check ids", () => {
+    const result = runContracts(["repo-conformance", "--json", "."]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr.toString()).toBe("");
+    const payload = parseStdoutJson(result);
+    expect(payload.ok).toBe(true);
+    expect(payload.checks.map((check: { id: string }) => check.id)).toEqual(
+      expect.arrayContaining([
+        "manifest_valid",
+        "surface_matrix",
+        "surface_bindings",
+        "storage_capabilities",
+        "public_manifest_safety",
+        "hosting_story"
+      ])
+    );
+  });
+
+  test("repo conformance exits 1 with clear missing-surface diagnostics", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-repo-conformance-"));
+    try {
+      writeFileSync(
+        join(dir, "package.json"),
+        JSON.stringify({
+          name: "@hasna/demo",
+          version: "1.0.0",
+          bin: { demo: "dist/cli.js" },
+          exports: { ".": "./dist/index.js" }
+        })
+      );
+      writeFileSync(
+        join(dir, "hasna.contract.json"),
+        JSON.stringify({
+          schema: "hasna.service_contract.v1",
+          name: "demo",
+          class: "library",
+          contractVersion: "v1",
+          kitVersion: "0.6.0",
+          bins: ["demo"],
+          hosting: ["user-hosted"],
+          serviceSurfaces: [
+            {
+              name: "cli",
+              kind: "cli",
+              status: "supported",
+              bin: "demo",
+              authMode: "local-only",
+              deploymentModes: ["local"]
+            }
+          ]
+        })
+      );
+
+      const result = runContracts(["repo-conformance", "--json", dir]);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr.toString()).toBe("");
+      const payload = parseStdoutJson(result);
+      const surface = payload.checks.find((check: { id: string }) => check.id === "surface_matrix");
+      expect(surface.status).toBe("fail");
+      expect(surface.detail).toContain("api");
+      expect(surface.detail).toContain("sdk");
+      expect(surface.detail).toContain("mcp");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("fails conformance on malformed invalid fixture JSON", () => {
     const dir = mkdtempSync(join(tmpdir(), "contracts-cli-"));
     try {
