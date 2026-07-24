@@ -1,0 +1,6069 @@
+{
+  "operations": [
+    {
+      "action": "health",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "authority",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.service.health",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.empty.v1",
+      "requiredScopes": [
+        "todos:authority:read"
+      ],
+      "resource": "service",
+      "responseSchemaId": "hasna.todos.response.service_status.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos service health",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/service/health",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_service_health"
+        },
+        "sdk": {
+          "method": "service.health",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "ready",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "authority",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.service.ready",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.empty.v1",
+      "requiredScopes": [
+        "todos:authority:read"
+      ],
+      "resource": "service",
+      "responseSchemaId": "hasna.todos.response.service_status.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos service ready",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/service/ready",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_service_ready"
+        },
+        "sdk": {
+          "method": "service.ready",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "version",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "authority",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.service.version",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.empty.v1",
+      "requiredScopes": [
+        "todos:authority:read"
+      ],
+      "resource": "service",
+      "responseSchemaId": "hasna.todos.response.artifact_document.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos service version",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/service/version",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_service_version"
+        },
+        "sdk": {
+          "method": "service.version",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "authority",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.authority.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.empty.v1",
+      "requiredScopes": [
+        "todos:authority:read"
+      ],
+      "resource": "authority",
+      "responseSchemaId": "hasna.todos.response.authority.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos authority get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/authority",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_authority_get"
+        },
+        "sdk": {
+          "method": "authority.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "authority",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.manifest.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.empty.v1",
+      "requiredScopes": [
+        "todos:authority:read"
+      ],
+      "resource": "manifest",
+      "responseSchemaId": "hasna.todos.response.artifact_document.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos manifest get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/manifest",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_manifest_get"
+        },
+        "sdk": {
+          "method": "manifest.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "authority",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.openapi.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.empty.v1",
+      "requiredScopes": [
+        "todos:authority:read"
+      ],
+      "resource": "openapi",
+      "responseSchemaId": "hasna.todos.response.artifact_document.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos openapi get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/openapi",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_openapi_get"
+        },
+        "sdk": {
+          "method": "openapi.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "authority",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.capabilities.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:authority:read"
+      ],
+      "resource": "capabilities",
+      "responseSchemaId": "hasna.todos.response.capability_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos capabilities list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/capabilities",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_capabilities_list"
+        },
+        "sdk": {
+          "method": "capabilities.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "authority",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.capabilities.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:authority:read"
+      ],
+      "resource": "capabilities",
+      "responseSchemaId": "hasna.todos.response.capability.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos capabilities get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/capabilities/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_capabilities_get"
+        },
+        "sdk": {
+          "method": "capabilities.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:tasks:read"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.task_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/tasks",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_list"
+        },
+        "sdk": {
+          "method": "tasks.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "count",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.count",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:tasks:read"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.count.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks count",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/tasks/count",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_count"
+        },
+        "sdk": {
+          "method": "tasks.count",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "exists_many",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.exists_many",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.exists_many.v1",
+      "requiredScopes": [
+        "todos:tasks:read"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.exists_many.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks exists-many",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/tasks/exists-many",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_exists_many"
+        },
+        "sdk": {
+          "method": "tasks.existsMany",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "create",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.create",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_create.v1",
+      "requiredScopes": [
+        "todos:tasks:write"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.task.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/tasks",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_create"
+        },
+        "sdk": {
+          "method": "tasks.create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "upsert",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.upsert",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_upsert.v1",
+      "requiredScopes": [
+        "todos:tasks:write"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.task.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks upsert",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "PUT",
+          "path": "/v1/tasks/upsert",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_upsert"
+        },
+        "sdk": {
+          "method": "tasks.upsert",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:tasks:read"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.task.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/tasks/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_get"
+        },
+        "sdk": {
+          "method": "tasks.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "update",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.update",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_update.v1",
+      "requiredScopes": [
+        "todos:tasks:write"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.task.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks update",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "PATCH",
+          "path": "/v1/tasks/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_update"
+        },
+        "sdk": {
+          "method": "tasks.update",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "delete",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.delete",
+      "idempotency": "required",
+      "mutability": "delete",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.versioned_ref.v1",
+      "requiredScopes": [
+        "todos:tasks:write"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.mutation.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks delete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "DELETE",
+          "path": "/v1/tasks/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_delete"
+        },
+        "sdk": {
+          "method": "tasks.delete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "batch",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "precondition",
+      "concurrencyFields": [
+        "operations"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.batch",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_batch.v1",
+      "requiredScopes": [
+        "todos:tasks:write"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.batch.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks batch",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/tasks/batch",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_batch"
+        },
+        "sdk": {
+          "method": "tasks.batch",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "start",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.start",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_start.v1",
+      "requiredScopes": [
+        "todos:tasks:write"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.task.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks start",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/tasks/{ref}/start",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_start"
+        },
+        "sdk": {
+          "method": "tasks.start",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": {
+        "machine": "task_status",
+        "targetStatus": "in_progress"
+      }
+    },
+    {
+      "action": "complete",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.complete",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_complete.v1",
+      "requiredScopes": [
+        "todos:tasks:write"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.task.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks complete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/tasks/{ref}/complete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_complete"
+        },
+        "sdk": {
+          "method": "tasks.complete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": {
+        "machine": "task_status",
+        "targetStatus": "completed"
+      }
+    },
+    {
+      "action": "fail",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.fail",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_fail.v1",
+      "requiredScopes": [
+        "todos:tasks:write"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.task.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks fail",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/tasks/{ref}/fail",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_fail"
+        },
+        "sdk": {
+          "method": "tasks.fail",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": {
+        "machine": "task_status",
+        "targetStatus": "failed"
+      }
+    },
+    {
+      "action": "claim_next",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "lock",
+      "concurrencyFields": [
+        "agentId"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.claim_next",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_claim.v1",
+      "requiredScopes": [
+        "todos:tasks:write"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.task.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks claim-next",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/tasks/claim-next",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_claim_next"
+        },
+        "sdk": {
+          "method": "tasks.claimNext",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "next",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.next",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:tasks:read"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.task.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks next",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/tasks/next",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_next"
+        },
+        "sdk": {
+          "method": "tasks.next",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list_ready",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.list_ready",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:tasks:read"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.task_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks list-ready",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/tasks/ready",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_list_ready"
+        },
+        "sdk": {
+          "method": "tasks.listReady",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list_active",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.list_active",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:tasks:read"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.task_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks list-active",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/tasks/active",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_list_active"
+        },
+        "sdk": {
+          "method": "tasks.listActive",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list_changed",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.list_changed",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.task_changed.v1",
+      "requiredScopes": [
+        "todos:tasks:read"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.task_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks list-changed",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/tasks/changed",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_list_changed"
+        },
+        "sdk": {
+          "method": "tasks.listChanged",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "lock",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "lock",
+      "concurrencyFields": [
+        "ownerRef",
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.lock",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_lock.v1",
+      "requiredScopes": [
+        "todos:tasks:write"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.mutation.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks lock",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/tasks/{ref}/lock",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_lock"
+        },
+        "sdk": {
+          "method": "tasks.lock",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "unlock",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "lock",
+      "concurrencyFields": [
+        "ownerRef",
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.unlock",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_lock.v1",
+      "requiredScopes": [
+        "todos:tasks:write"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.mutation.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks unlock",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "DELETE",
+          "path": "/v1/tasks/{ref}/lock",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_unlock"
+        },
+        "sdk": {
+          "method": "tasks.unlock",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get_context",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "tasks",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.tasks.get_context",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:tasks:read"
+      ],
+      "resource": "tasks",
+      "responseSchemaId": "hasna.todos.response.task_context.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos tasks get-context",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/tasks/{ref}/context",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_tasks_get_context"
+        },
+        "sdk": {
+          "method": "tasks.getContext",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "activity",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.history.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.ref_list.v1",
+      "requiredScopes": [
+        "todos:activity:read"
+      ],
+      "resource": "history",
+      "responseSchemaId": "hasna.todos.response.activity_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos history list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/tasks/{ref}/history",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_history_list"
+        },
+        "sdk": {
+          "method": "history.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "comments",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.comments.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.ref_list.v1",
+      "requiredScopes": [
+        "todos:comments:read"
+      ],
+      "resource": "comments",
+      "responseSchemaId": "hasna.todos.response.comment_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos comments list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/tasks/{ref}/comments",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_comments_list"
+        },
+        "sdk": {
+          "method": "comments.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "create",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "comments",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.comments.create",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.comment_create.v1",
+      "requiredScopes": [
+        "todos:comments:write"
+      ],
+      "resource": "comments",
+      "responseSchemaId": "hasna.todos.response.comment.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos comments create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/tasks/{taskRef}/comments",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_comments_create"
+        },
+        "sdk": {
+          "method": "comments.create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "dependencies",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.dependencies.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.ref_list.v1",
+      "requiredScopes": [
+        "todos:dependencies:read"
+      ],
+      "resource": "dependencies",
+      "responseSchemaId": "hasna.todos.response.dependency_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos dependencies list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/tasks/{ref}/dependencies",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_dependencies_list"
+        },
+        "sdk": {
+          "method": "dependencies.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list_all",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "dependencies",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.dependencies.list_all",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:dependencies:read"
+      ],
+      "resource": "dependencies",
+      "responseSchemaId": "hasna.todos.response.dependency_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos dependencies list-all",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/dependencies",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_dependencies_list_all"
+        },
+        "sdk": {
+          "method": "dependencies.listAll",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "create",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "dependencies",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.dependencies.create",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.dependency_create.v1",
+      "requiredScopes": [
+        "todos:dependencies:write"
+      ],
+      "resource": "dependencies",
+      "responseSchemaId": "hasna.todos.response.dependency.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos dependencies create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/dependencies",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_dependencies_create"
+        },
+        "sdk": {
+          "method": "dependencies.create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "delete",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "dependencies",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.dependencies.delete",
+      "idempotency": "required",
+      "mutability": "delete",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.dependency_delete.v1",
+      "requiredScopes": [
+        "todos:dependencies:write"
+      ],
+      "resource": "dependencies",
+      "responseSchemaId": "hasna.todos.response.mutation.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos dependencies delete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "DELETE",
+          "path": "/v1/dependencies/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_dependencies_delete"
+        },
+        "sdk": {
+          "method": "dependencies.delete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "projects",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.projects.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:projects:read"
+      ],
+      "resource": "projects",
+      "responseSchemaId": "hasna.todos.response.project_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos projects list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/projects",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_projects_list"
+        },
+        "sdk": {
+          "method": "projects.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "create",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "projects",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.projects.create",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.project_create.v1",
+      "requiredScopes": [
+        "todos:projects:write"
+      ],
+      "resource": "projects",
+      "responseSchemaId": "hasna.todos.response.project.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos projects create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/projects",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_projects_create"
+        },
+        "sdk": {
+          "method": "projects.create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "projects",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.projects.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:projects:read"
+      ],
+      "resource": "projects",
+      "responseSchemaId": "hasna.todos.response.project.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos projects get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/projects/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_projects_get"
+        },
+        "sdk": {
+          "method": "projects.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "update",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "projects",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.projects.update",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.project_update.v1",
+      "requiredScopes": [
+        "todos:projects:write"
+      ],
+      "resource": "projects",
+      "responseSchemaId": "hasna.todos.response.project.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos projects update",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "PATCH",
+          "path": "/v1/projects/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_projects_update"
+        },
+        "sdk": {
+          "method": "projects.update",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "rename",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "projects",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.projects.rename",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.project_rename.v1",
+      "requiredScopes": [
+        "todos:projects:write"
+      ],
+      "resource": "projects",
+      "responseSchemaId": "hasna.todos.response.project.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos projects rename",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/projects/{ref}/rename",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_projects_rename"
+        },
+        "sdk": {
+          "method": "projects.rename",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "delete",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "projects",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.projects.delete",
+      "idempotency": "required",
+      "mutability": "delete",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.versioned_ref.v1",
+      "requiredScopes": [
+        "todos:projects:write"
+      ],
+      "resource": "projects",
+      "responseSchemaId": "hasna.todos.response.mutation.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos projects delete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "DELETE",
+          "path": "/v1/projects/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_projects_delete"
+        },
+        "sdk": {
+          "method": "projects.delete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "task-lists",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_lists.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:task-lists:read"
+      ],
+      "resource": "task_lists",
+      "responseSchemaId": "hasna.todos.response.task_list_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-lists list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/task-lists",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_lists_list"
+        },
+        "sdk": {
+          "method": "taskLists.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "create",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "task-lists",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_lists.create",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_list_create.v1",
+      "requiredScopes": [
+        "todos:task-lists:write"
+      ],
+      "resource": "task_lists",
+      "responseSchemaId": "hasna.todos.response.task_list.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-lists create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/task-lists",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_lists_create"
+        },
+        "sdk": {
+          "method": "taskLists.create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "task-lists",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_lists.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:task-lists:read"
+      ],
+      "resource": "task_lists",
+      "responseSchemaId": "hasna.todos.response.task_list.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-lists get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/task-lists/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_lists_get"
+        },
+        "sdk": {
+          "method": "taskLists.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "update",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "task-lists",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_lists.update",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_list_update.v1",
+      "requiredScopes": [
+        "todos:task-lists:write"
+      ],
+      "resource": "task_lists",
+      "responseSchemaId": "hasna.todos.response.task_list.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-lists update",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "PATCH",
+          "path": "/v1/task-lists/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_lists_update"
+        },
+        "sdk": {
+          "method": "taskLists.update",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "delete",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "task-lists",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_lists.delete",
+      "idempotency": "required",
+      "mutability": "delete",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.versioned_ref.v1",
+      "requiredScopes": [
+        "todos:task-lists:write"
+      ],
+      "resource": "task_lists",
+      "responseSchemaId": "hasna.todos.response.mutation.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-lists delete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "DELETE",
+          "path": "/v1/task-lists/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_lists_delete"
+        },
+        "sdk": {
+          "method": "taskLists.delete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "plans",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.plans.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:plans:read"
+      ],
+      "resource": "plans",
+      "responseSchemaId": "hasna.todos.response.plan_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos plans list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/plans",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_plans_list"
+        },
+        "sdk": {
+          "method": "plans.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "create",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "plans",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.plans.create",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.plan_create.v1",
+      "requiredScopes": [
+        "todos:plans:write"
+      ],
+      "resource": "plans",
+      "responseSchemaId": "hasna.todos.response.plan.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos plans create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/plans",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_plans_create"
+        },
+        "sdk": {
+          "method": "plans.create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "plans",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.plans.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:plans:read"
+      ],
+      "resource": "plans",
+      "responseSchemaId": "hasna.todos.response.plan.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos plans get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/plans/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_plans_get"
+        },
+        "sdk": {
+          "method": "plans.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "update",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "plans",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.plans.update",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.plan_update.v1",
+      "requiredScopes": [
+        "todos:plans:write"
+      ],
+      "resource": "plans",
+      "responseSchemaId": "hasna.todos.response.plan.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos plans update",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "PATCH",
+          "path": "/v1/plans/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_plans_update"
+        },
+        "sdk": {
+          "method": "plans.update",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "delete",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "plans",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.plans.delete",
+      "idempotency": "required",
+      "mutability": "delete",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.versioned_ref.v1",
+      "requiredScopes": [
+        "todos:plans:write"
+      ],
+      "resource": "plans",
+      "responseSchemaId": "hasna.todos.response.mutation.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos plans delete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "DELETE",
+          "path": "/v1/plans/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_plans_delete"
+        },
+        "sdk": {
+          "method": "plans.delete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "agents",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.agents.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:agents:read"
+      ],
+      "resource": "agents",
+      "responseSchemaId": "hasna.todos.response.agent_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos agents list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/agents",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_agents_list"
+        },
+        "sdk": {
+          "method": "agents.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "register",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "agents",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.agents.register",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.agent_register.v1",
+      "requiredScopes": [
+        "todos:agents:write"
+      ],
+      "resource": "agents",
+      "responseSchemaId": "hasna.todos.response.agent.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos agents register",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/agents",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_agents_register"
+        },
+        "sdk": {
+          "method": "agents.register",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "agents",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.agents.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:agents:read"
+      ],
+      "resource": "agents",
+      "responseSchemaId": "hasna.todos.response.agent.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos agents get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/agents/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_agents_get"
+        },
+        "sdk": {
+          "method": "agents.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "heartbeat",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "agents",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.agents.heartbeat",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.agent_heartbeat.v1",
+      "requiredScopes": [
+        "todos:agents:write"
+      ],
+      "resource": "agents",
+      "responseSchemaId": "hasna.todos.response.agent.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos agents heartbeat",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/agents/{ref}/heartbeat",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_agents_heartbeat"
+        },
+        "sdk": {
+          "method": "agents.heartbeat",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "release",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "agents",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.agents.release",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.agent_release.v1",
+      "requiredScopes": [
+        "todos:agents:write"
+      ],
+      "resource": "agents",
+      "responseSchemaId": "hasna.todos.response.agent.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos agents release",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/agents/{ref}/release",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_agents_release"
+        },
+        "sdk": {
+          "method": "agents.release",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "activity",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.activity.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:activity:read"
+      ],
+      "resource": "activity",
+      "responseSchemaId": "hasna.todos.response.activity_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos activity list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/activity",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_activity_list"
+        },
+        "sdk": {
+          "method": "activity.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "activity",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.stats.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.empty.v1",
+      "requiredScopes": [
+        "todos:activity:read"
+      ],
+      "resource": "stats",
+      "responseSchemaId": "hasna.todos.response.stats.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos stats get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/stats",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_stats_get"
+        },
+        "sdk": {
+          "method": "stats.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "execute",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "search",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.search.execute",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.search.v1",
+      "requiredScopes": [
+        "todos:search:read"
+      ],
+      "resource": "search",
+      "responseSchemaId": "hasna.todos.response.task_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos search execute",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/search",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_search_execute"
+        },
+        "sdk": {
+          "method": "search.execute",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "saved-views",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.saved_views.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:saved-views:read"
+      ],
+      "resource": "saved_views",
+      "responseSchemaId": "hasna.todos.response.saved_view_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos saved-views list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/saved-views",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_saved_views_list"
+        },
+        "sdk": {
+          "method": "savedViews.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "create",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "saved-views",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.saved_views.create",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.saved_view_create.v1",
+      "requiredScopes": [
+        "todos:saved-views:write"
+      ],
+      "resource": "saved_views",
+      "responseSchemaId": "hasna.todos.response.saved_view.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos saved-views create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/saved-views",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_saved_views_create"
+        },
+        "sdk": {
+          "method": "savedViews.create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "saved-views",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.saved_views.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:saved-views:read"
+      ],
+      "resource": "saved_views",
+      "responseSchemaId": "hasna.todos.response.saved_view.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos saved-views get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/saved-views/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_saved_views_get"
+        },
+        "sdk": {
+          "method": "savedViews.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "update",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "saved-views",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.saved_views.update",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.saved_view_update.v1",
+      "requiredScopes": [
+        "todos:saved-views:write"
+      ],
+      "resource": "saved_views",
+      "responseSchemaId": "hasna.todos.response.saved_view.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos saved-views update",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "PATCH",
+          "path": "/v1/saved-views/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_saved_views_update"
+        },
+        "sdk": {
+          "method": "savedViews.update",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "delete",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "saved-views",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.saved_views.delete",
+      "idempotency": "required",
+      "mutability": "delete",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.versioned_ref.v1",
+      "requiredScopes": [
+        "todos:saved-views:write"
+      ],
+      "resource": "saved_views",
+      "responseSchemaId": "hasna.todos.response.mutation.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos saved-views delete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "DELETE",
+          "path": "/v1/saved-views/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_saved_views_delete"
+        },
+        "sdk": {
+          "method": "savedViews.delete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "execute",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "saved-views",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.saved_views.execute",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.saved_view_execute.v1",
+      "requiredScopes": [
+        "todos:saved-views:read"
+      ],
+      "resource": "saved_views",
+      "responseSchemaId": "hasna.todos.response.task_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos saved-views execute",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/saved-views/{ref}/execute",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_saved_views_execute"
+        },
+        "sdk": {
+          "method": "savedViews.execute",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "verification-evidence",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.verification_evidence.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:verification-evidence:read"
+      ],
+      "resource": "verification_evidence",
+      "responseSchemaId": "hasna.todos.response.verification_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos verification-evidence list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/verification-evidence",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_verification_evidence_list"
+        },
+        "sdk": {
+          "method": "verificationEvidence.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "create",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "verification-evidence",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.verification_evidence.create",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.verification_create.v1",
+      "requiredScopes": [
+        "todos:verification-evidence:write"
+      ],
+      "resource": "verification_evidence",
+      "responseSchemaId": "hasna.todos.response.verification.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos verification-evidence create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/verification-evidence",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_verification_evidence_create"
+        },
+        "sdk": {
+          "method": "verificationEvidence.create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "verification-evidence",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.verification_evidence.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:verification-evidence:read"
+      ],
+      "resource": "verification_evidence",
+      "responseSchemaId": "hasna.todos.response.verification.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos verification-evidence get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/verification-evidence/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_verification_evidence_get"
+        },
+        "sdk": {
+          "method": "verificationEvidence.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "export",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "verification-evidence",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.verification_evidence.export",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.verification_export.v1",
+      "requiredScopes": [
+        "todos:verification-evidence:read"
+      ],
+      "resource": "verification_evidence",
+      "responseSchemaId": "hasna.todos.response.verification_export.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos verification-evidence export",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/verification-evidence/export",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_verification_evidence_export"
+        },
+        "sdk": {
+          "method": "verificationEvidence.export",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "task-files",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_files.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:task-files:read"
+      ],
+      "resource": "task_files",
+      "responseSchemaId": "hasna.todos.response.task_file_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-files list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/task-files",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_files_list"
+        },
+        "sdk": {
+          "method": "taskFiles.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "record",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "task-files",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_files.record",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_file_record.v1",
+      "requiredScopes": [
+        "todos:task-files:write"
+      ],
+      "resource": "task_files",
+      "responseSchemaId": "hasna.todos.response.task_file.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-files record",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/task-files",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_files_record"
+        },
+        "sdk": {
+          "method": "taskFiles.record",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "runs",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.runs.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:runs:read"
+      ],
+      "resource": "runs",
+      "responseSchemaId": "hasna.todos.response.run_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos runs list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/runs",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_runs_list"
+        },
+        "sdk": {
+          "method": "runs.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "start",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "runs",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.runs.start",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.run_start.v1",
+      "requiredScopes": [
+        "todos:runs:write"
+      ],
+      "resource": "runs",
+      "responseSchemaId": "hasna.todos.response.run.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos runs start",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/runs",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_runs_start"
+        },
+        "sdk": {
+          "method": "runs.start",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "runs",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.runs.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:runs:read"
+      ],
+      "resource": "runs",
+      "responseSchemaId": "hasna.todos.response.run.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos runs get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/runs/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_runs_get"
+        },
+        "sdk": {
+          "method": "runs.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "finish",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "runs",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.runs.finish",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.run_finish.v1",
+      "requiredScopes": [
+        "todos:runs:write"
+      ],
+      "resource": "runs",
+      "responseSchemaId": "hasna.todos.response.run.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos runs finish",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/runs/{ref}/finish",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_runs_finish"
+        },
+        "sdk": {
+          "method": "runs.finish",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get_ledger",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "runs",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.runs.get_ledger",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:runs:read"
+      ],
+      "resource": "runs",
+      "responseSchemaId": "hasna.todos.response.run_ledger.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos runs get-ledger",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/runs/{ref}/ledger",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_runs_get_ledger"
+        },
+        "sdk": {
+          "method": "runs.getLedger",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "runs",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.run_events.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.ref_list.v1",
+      "requiredScopes": [
+        "todos:runs:read"
+      ],
+      "resource": "run_events",
+      "responseSchemaId": "hasna.todos.response.run_event_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos run-events list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/runs/{ref}/events",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_run_events_list"
+        },
+        "sdk": {
+          "method": "runEvents.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "create",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "runs",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.run_events.create",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.run_event_create.v1",
+      "requiredScopes": [
+        "todos:runs:write"
+      ],
+      "resource": "run_events",
+      "responseSchemaId": "hasna.todos.response.run_event.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos run-events create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/runs/{runId}/events",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_run_events_create"
+        },
+        "sdk": {
+          "method": "runEvents.create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "runs",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.run_commands.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.ref_list.v1",
+      "requiredScopes": [
+        "todos:runs:read"
+      ],
+      "resource": "run_commands",
+      "responseSchemaId": "hasna.todos.response.run_command_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos run-commands list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/runs/{ref}/commands",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_run_commands_list"
+        },
+        "sdk": {
+          "method": "runCommands.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "create",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "runs",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.run_commands.create",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.run_command_create.v1",
+      "requiredScopes": [
+        "todos:runs:write"
+      ],
+      "resource": "run_commands",
+      "responseSchemaId": "hasna.todos.response.run_command.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos run-commands create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/runs/{runId}/commands",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_run_commands_create"
+        },
+        "sdk": {
+          "method": "runCommands.create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "runs",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.run_files.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.ref_list.v1",
+      "requiredScopes": [
+        "todos:runs:read"
+      ],
+      "resource": "run_files",
+      "responseSchemaId": "hasna.todos.response.run_file_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos run-files list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/runs/{ref}/files",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_run_files_list"
+        },
+        "sdk": {
+          "method": "runFiles.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "create",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "runs",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.run_files.create",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.run_file_create.v1",
+      "requiredScopes": [
+        "todos:runs:write"
+      ],
+      "resource": "run_files",
+      "responseSchemaId": "hasna.todos.response.run_file.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos run-files create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/runs/{runId}/files",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_run_files_create"
+        },
+        "sdk": {
+          "method": "runFiles.create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "runs",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.run_artifacts.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.ref_list.v1",
+      "requiredScopes": [
+        "todos:runs:read"
+      ],
+      "resource": "run_artifacts",
+      "responseSchemaId": "hasna.todos.response.run_artifact_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos run-artifacts list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/runs/{ref}/artifacts",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_run_artifacts_list"
+        },
+        "sdk": {
+          "method": "runArtifacts.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "create",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "runs",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.run_artifacts.create",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.run_artifact_create.v1",
+      "requiredScopes": [
+        "todos:runs:write"
+      ],
+      "resource": "run_artifacts",
+      "responseSchemaId": "hasna.todos.response.run_artifact.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos run-artifacts create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/runs/{runId}/artifacts",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_run_artifacts_create"
+        },
+        "sdk": {
+          "method": "runArtifacts.create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "verify",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "runs",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.run_artifacts.verify",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.run_artifact_verify.v1",
+      "requiredScopes": [
+        "todos:runs:write"
+      ],
+      "resource": "run_artifacts",
+      "responseSchemaId": "hasna.todos.response.run_artifact.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos run-artifacts verify",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/runs/{runId}/artifacts/{ref}/verify",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_run_artifacts_verify"
+        },
+        "sdk": {
+          "method": "runArtifacts.verify",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "git-traceability",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.git_commits.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:git-traceability:read"
+      ],
+      "resource": "git_commits",
+      "responseSchemaId": "hasna.todos.response.git_commit_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos git-commits list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/git/commits",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_git_commits_list"
+        },
+        "sdk": {
+          "method": "gitCommits.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "link",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "git-traceability",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.git_commits.link",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.git_commit_link.v1",
+      "requiredScopes": [
+        "todos:git-traceability:write"
+      ],
+      "resource": "git_commits",
+      "responseSchemaId": "hasna.todos.response.git_commit.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos git-commits link",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/git/commits",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_git_commits_link"
+        },
+        "sdk": {
+          "method": "gitCommits.link",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "unlink",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "git-traceability",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.git_commits.unlink",
+      "idempotency": "required",
+      "mutability": "delete",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.git_commit_unlink.v1",
+      "requiredScopes": [
+        "todos:git-traceability:write"
+      ],
+      "resource": "git_commits",
+      "responseSchemaId": "hasna.todos.response.mutation.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos git-commits unlink",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "DELETE",
+          "path": "/v1/git/commits/{commitRef}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_git_commits_unlink"
+        },
+        "sdk": {
+          "method": "gitCommits.unlink",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "find",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "git-traceability",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.git_commits.find",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.git_commit_find.v1",
+      "requiredScopes": [
+        "todos:git-traceability:read"
+      ],
+      "resource": "git_commits",
+      "responseSchemaId": "hasna.todos.response.git_commit.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos git-commits find",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/git/commits/find",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_git_commits_find"
+        },
+        "sdk": {
+          "method": "gitCommits.find",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "git-traceability",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.git_refs.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:git-traceability:read"
+      ],
+      "resource": "git_refs",
+      "responseSchemaId": "hasna.todos.response.git_ref_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos git-refs list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/git/refs",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_git_refs_list"
+        },
+        "sdk": {
+          "method": "gitRefs.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "link",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "git-traceability",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.git_refs.link",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.git_ref_link.v1",
+      "requiredScopes": [
+        "todos:git-traceability:write"
+      ],
+      "resource": "git_refs",
+      "responseSchemaId": "hasna.todos.response.git_ref.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos git-refs link",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/git/refs",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_git_refs_link"
+        },
+        "sdk": {
+          "method": "gitRefs.link",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "find",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "git-traceability",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.git_refs.find",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.git_ref_find.v1",
+      "requiredScopes": [
+        "todos:git-traceability:read"
+      ],
+      "resource": "git_refs",
+      "responseSchemaId": "hasna.todos.response.git_ref.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos git-refs find",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/git/refs/find",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_git_refs_find"
+        },
+        "sdk": {
+          "method": "gitRefs.find",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "git-traceability",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.traceability.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:git-traceability:read"
+      ],
+      "resource": "traceability",
+      "responseSchemaId": "hasna.todos.response.traceability.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos traceability get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/traceability/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_traceability_get"
+        },
+        "sdk": {
+          "method": "traceability.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "task-to-pr-projection",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_to_pr_projection.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:task-to-pr-projection:read"
+      ],
+      "resource": "task_to_pr_projection",
+      "responseSchemaId": "hasna.todos.response.projection_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-to-pr-projection list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/task-to-pr-projections",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_to_pr_projection_list"
+        },
+        "sdk": {
+          "method": "taskToPrProjection.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "task-to-pr-projection",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_to_pr_projection.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:task-to-pr-projection:read"
+      ],
+      "resource": "task_to_pr_projection",
+      "responseSchemaId": "hasna.todos.response.projection.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-to-pr-projection get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/task-to-pr-projections/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_to_pr_projection_get"
+        },
+        "sdk": {
+          "method": "taskToPrProjection.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "export",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "transfer",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.transfer.export",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.transfer_export.v1",
+      "requiredScopes": [
+        "todos:transfer:read"
+      ],
+      "resource": "transfer",
+      "responseSchemaId": "hasna.todos.response.transfer_bundle.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos transfer export",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/transfer/export",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_transfer_export"
+        },
+        "sdk": {
+          "method": "transfer.export",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "validate",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "transfer",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.transfer.validate",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.transfer_validate.v1",
+      "requiredScopes": [
+        "todos:transfer:read"
+      ],
+      "resource": "transfer",
+      "responseSchemaId": "hasna.todos.response.transfer_validation.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos transfer validate",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/transfer/validate",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_transfer_validate"
+        },
+        "sdk": {
+          "method": "transfer.validate",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "import_preview",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "transfer",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.transfer.import_preview",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.transfer_import_preview.v1",
+      "requiredScopes": [
+        "todos:transfer:read"
+      ],
+      "resource": "transfer",
+      "responseSchemaId": "hasna.todos.response.transfer_import_preview.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos transfer import-preview",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/transfer/import/preview",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_transfer_import_preview"
+        },
+        "sdk": {
+          "method": "transfer.importPreview",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "import_execute",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "transfer",
+      "classification": "shared_customer",
+      "concurrency": "precondition",
+      "concurrencyFields": [
+        "importPlanId",
+        "importPlanDigest"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.transfer.import_execute",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.transfer_import_execute.v1",
+      "requiredScopes": [
+        "todos:transfer:write"
+      ],
+      "resource": "transfer",
+      "responseSchemaId": "hasna.todos.response.migration_receipt.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos transfer import-execute",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/transfer/import/execute",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_transfer_import_execute"
+        },
+        "sdk": {
+          "method": "transfer.importExecute",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "transfer",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.migration_receipts.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:transfer:read"
+      ],
+      "resource": "migration_receipts",
+      "responseSchemaId": "hasna.todos.response.migration_receipt_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos migration-receipts list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/migration-receipts",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_migration_receipts_list"
+        },
+        "sdk": {
+          "method": "migrationReceipts.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "transfer",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.migration_receipts.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:transfer:read"
+      ],
+      "resource": "migration_receipts",
+      "responseSchemaId": "hasna.todos.response.migration_receipt.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos migration-receipts get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/migration-receipts/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_migration_receipts_get"
+        },
+        "sdk": {
+          "method": "migrationReceipts.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "deletion-history",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.deletion_records.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:deletion-history:read"
+      ],
+      "resource": "deletion_records",
+      "responseSchemaId": "hasna.todos.response.deletion_record_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos deletion-records list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/deletion-records",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_deletion_records_list"
+        },
+        "sdk": {
+          "method": "deletionRecords.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "core",
+      "capabilityId": "deletion-history",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.deletion_records.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:deletion-history:read"
+      ],
+      "resource": "deletion_records",
+      "responseSchemaId": "hasna.todos.response.deletion_record.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos deletion-records get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/deletion-records/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_deletion_records_get"
+        },
+        "sdk": {
+          "method": "deletionRecords.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "tenant_admin",
+      "availability": "gated",
+      "capabilityId": "approvals",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.approvals.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:approvals:admin"
+      ],
+      "resource": "approvals",
+      "responseSchemaId": "hasna.todos.response.approval_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos approvals list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/approvals",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_approvals_list"
+        },
+        "sdk": {
+          "method": "approvals.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "tenant_admin",
+      "availability": "gated",
+      "capabilityId": "approvals",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.approvals.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:approvals:admin"
+      ],
+      "resource": "approvals",
+      "responseSchemaId": "hasna.todos.response.approval.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos approvals get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/approvals/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_approvals_get"
+        },
+        "sdk": {
+          "method": "approvals.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "request",
+      "audience": "tenant_admin",
+      "availability": "gated",
+      "capabilityId": "approvals",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.approvals.request",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.approval_request.v1",
+      "requiredScopes": [
+        "todos:approvals:admin"
+      ],
+      "resource": "approvals",
+      "responseSchemaId": "hasna.todos.response.approval.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos approvals request",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/approvals",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_approvals_request"
+        },
+        "sdk": {
+          "method": "approvals.request",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "approve",
+      "audience": "tenant_admin",
+      "availability": "gated",
+      "capabilityId": "approvals",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.approvals.approve",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.approval_decision.v1",
+      "requiredScopes": [
+        "todos:approvals:admin"
+      ],
+      "resource": "approvals",
+      "responseSchemaId": "hasna.todos.response.approval.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos approvals approve",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/approvals/{ref}/approve",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_approvals_approve"
+        },
+        "sdk": {
+          "method": "approvals.approve",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "reject",
+      "audience": "tenant_admin",
+      "availability": "gated",
+      "capabilityId": "approvals",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.approvals.reject",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.approval_decision.v1",
+      "requiredScopes": [
+        "todos:approvals:admin"
+      ],
+      "resource": "approvals",
+      "responseSchemaId": "hasna.todos.response.approval.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos approvals reject",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/approvals/{ref}/reject",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_approvals_reject"
+        },
+        "sdk": {
+          "method": "approvals.reject",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "expire",
+      "audience": "tenant_admin",
+      "availability": "gated",
+      "capabilityId": "approvals",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.approvals.expire",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.approval_expire.v1",
+      "requiredScopes": [
+        "todos:approvals:admin"
+      ],
+      "resource": "approvals",
+      "responseSchemaId": "hasna.todos.response.approval.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos approvals expire",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/approvals/{ref}/expire",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_approvals_expire"
+        },
+        "sdk": {
+          "method": "approvals.expire",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "list",
+      "audience": "customer",
+      "availability": "gated",
+      "capabilityId": "task-templates",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_templates.list",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "cursor",
+      "requestSchemaId": "hasna.todos.request.list.v1",
+      "requiredScopes": [
+        "todos:task-templates:read"
+      ],
+      "resource": "task_templates",
+      "responseSchemaId": "hasna.todos.response.task_template_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-templates list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/task-templates",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_templates_list"
+        },
+        "sdk": {
+          "method": "taskTemplates.list",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "create",
+      "audience": "customer",
+      "availability": "gated",
+      "capabilityId": "task-templates",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_templates.create",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_template_create.v1",
+      "requiredScopes": [
+        "todos:task-templates:write"
+      ],
+      "resource": "task_templates",
+      "responseSchemaId": "hasna.todos.response.task_template.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-templates create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/task-templates",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_templates_create"
+        },
+        "sdk": {
+          "method": "taskTemplates.create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "get",
+      "audience": "customer",
+      "availability": "gated",
+      "capabilityId": "task-templates",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_templates.get",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.ref.v1",
+      "requiredScopes": [
+        "todos:task-templates:read"
+      ],
+      "resource": "task_templates",
+      "responseSchemaId": "hasna.todos.response.task_template.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-templates get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "GET",
+          "path": "/v1/task-templates/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_templates_get"
+        },
+        "sdk": {
+          "method": "taskTemplates.get",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "update",
+      "audience": "customer",
+      "availability": "gated",
+      "capabilityId": "task-templates",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_templates.update",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_template_update.v1",
+      "requiredScopes": [
+        "todos:task-templates:write"
+      ],
+      "resource": "task_templates",
+      "responseSchemaId": "hasna.todos.response.task_template.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-templates update",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "PATCH",
+          "path": "/v1/task-templates/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_templates_update"
+        },
+        "sdk": {
+          "method": "taskTemplates.update",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "delete",
+      "audience": "customer",
+      "availability": "gated",
+      "capabilityId": "task-templates",
+      "classification": "shared_customer",
+      "concurrency": "version",
+      "concurrencyFields": [
+        "expectedVersion"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_templates.delete",
+      "idempotency": "required",
+      "mutability": "delete",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.versioned_ref.v1",
+      "requiredScopes": [
+        "todos:task-templates:write"
+      ],
+      "resource": "task_templates",
+      "responseSchemaId": "hasna.todos.response.mutation.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-templates delete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "DELETE",
+          "path": "/v1/task-templates/{ref}",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_templates_delete"
+        },
+        "sdk": {
+          "method": "taskTemplates.delete",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "instantiate",
+      "audience": "customer",
+      "availability": "gated",
+      "capabilityId": "task-templates",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_templates.instantiate",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.task_template_instantiate.v1",
+      "requiredScopes": [
+        "todos:task-templates:write"
+      ],
+      "resource": "task_templates",
+      "responseSchemaId": "hasna.todos.response.task_page.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-templates instantiate",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/task-templates/{ref}/instantiate",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_templates_instantiate"
+        },
+        "sdk": {
+          "method": "taskTemplates.instantiate",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "generate",
+      "audience": "customer",
+      "availability": "gated",
+      "capabilityId": "reports",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.reports.generate",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.report_generate.v1",
+      "requiredScopes": [
+        "todos:reports:write"
+      ],
+      "resource": "reports",
+      "responseSchemaId": "hasna.todos.response.report.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos reports generate",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/reports/generate",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_reports_generate"
+        },
+        "sdk": {
+          "method": "reports.generate",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "bootstrap",
+      "audience": "tenant_admin",
+      "availability": "core",
+      "capabilityId": "projects",
+      "classification": "local_topology_only",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.workspace.bootstrap",
+      "idempotency": "required",
+      "mutability": "topology",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.workspace_bootstrap.v1",
+      "requiredScopes": [
+        "todos:projects:admin"
+      ],
+      "resource": "workspace",
+      "responseSchemaId": "hasna.todos.response.project.v1",
+      "supportedModes": [
+        "local"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos workspace bootstrap",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": null,
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_workspace_bootstrap"
+        },
+        "sdk": {
+          "method": "workspace.bootstrap",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "start",
+      "audience": "tenant_admin",
+      "availability": "core",
+      "capabilityId": "authority",
+      "classification": "local_topology_only",
+      "concurrency": "precondition",
+      "concurrencyFields": [
+        "expectedState"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.server.start",
+      "idempotency": "required",
+      "mutability": "topology",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.server_start.v1",
+      "requiredScopes": [
+        "todos:authority:admin"
+      ],
+      "resource": "server",
+      "responseSchemaId": "hasna.todos.response.server_start.v1",
+      "supportedModes": [
+        "local"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos server start",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": null,
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_server_start"
+        },
+        "sdk": {
+          "method": "server.start",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "backup",
+      "audience": "tenant_admin",
+      "availability": "core",
+      "capabilityId": "transfer",
+      "classification": "local_topology_only",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.database.backup",
+      "idempotency": "required",
+      "mutability": "topology",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.database_backup.v1",
+      "requiredScopes": [
+        "todos:transfer:admin"
+      ],
+      "resource": "database",
+      "responseSchemaId": "hasna.todos.response.artifact_document.v1",
+      "supportedModes": [
+        "local"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos database backup",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": null,
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_database_backup"
+        },
+        "sdk": {
+          "method": "database.backup",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "restore",
+      "audience": "tenant_admin",
+      "availability": "core",
+      "capabilityId": "transfer",
+      "classification": "local_topology_only",
+      "concurrency": "precondition",
+      "concurrencyFields": [
+        "expectedCurrentDigest"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.database.restore",
+      "idempotency": "required",
+      "mutability": "topology",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.database_restore.v1",
+      "requiredScopes": [
+        "todos:transfer:admin"
+      ],
+      "resource": "database",
+      "responseSchemaId": "hasna.todos.response.mutation.v1",
+      "supportedModes": [
+        "local"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos database restore",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": null,
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_database_restore"
+        },
+        "sdk": {
+          "method": "database.restore",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "check",
+      "audience": "tenant_admin",
+      "availability": "core",
+      "capabilityId": "transfer",
+      "classification": "local_topology_only",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.database.check",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.database_check.v1",
+      "requiredScopes": [
+        "todos:transfer:admin"
+      ],
+      "resource": "database",
+      "responseSchemaId": "hasna.todos.response.artifact_document.v1",
+      "supportedModes": [
+        "local"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos database check",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": null,
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_database_check"
+        },
+        "sdk": {
+          "method": "database.check",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "compact",
+      "audience": "tenant_admin",
+      "availability": "core",
+      "capabilityId": "transfer",
+      "classification": "local_topology_only",
+      "concurrency": "precondition",
+      "concurrencyFields": [
+        "expectedCurrentDigest"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.database.compact",
+      "idempotency": "required",
+      "mutability": "topology",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.database_compact.v1",
+      "requiredScopes": [
+        "todos:transfer:admin"
+      ],
+      "resource": "database",
+      "responseSchemaId": "hasna.todos.response.mutation.v1",
+      "supportedModes": [
+        "local"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos database compact",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": null,
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_database_compact"
+        },
+        "sdk": {
+          "method": "database.compact",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "validate",
+      "audience": "tenant_admin",
+      "availability": "core",
+      "capabilityId": "authority",
+      "classification": "local_topology_only",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.offline_upgrade.validate",
+      "idempotency": "none",
+      "mutability": "read",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.upgrade_validate.v1",
+      "requiredScopes": [
+        "todos:authority:admin"
+      ],
+      "resource": "offline_upgrade",
+      "responseSchemaId": "hasna.todos.response.artifact_document.v1",
+      "supportedModes": [
+        "local"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos offline-upgrade validate",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": null,
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_offline_upgrade_validate"
+        },
+        "sdk": {
+          "method": "offlineUpgrade.validate",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "execute",
+      "audience": "tenant_admin",
+      "availability": "core",
+      "capabilityId": "authority",
+      "classification": "local_topology_only",
+      "concurrency": "precondition",
+      "concurrencyFields": [
+        "validationDigest"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.offline_upgrade.execute",
+      "idempotency": "required",
+      "mutability": "topology",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.upgrade_execute.v1",
+      "requiredScopes": [
+        "todos:authority:admin"
+      ],
+      "resource": "offline_upgrade",
+      "responseSchemaId": "hasna.todos.response.mutation.v1",
+      "supportedModes": [
+        "local"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos offline-upgrade execute",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": null,
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_offline_upgrade_execute"
+        },
+        "sdk": {
+          "method": "offlineUpgrade.execute",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
+      "action": "rebuild",
+      "audience": "tenant_admin",
+      "availability": "core",
+      "capabilityId": "task-to-pr-projection",
+      "classification": "local_topology_only",
+      "concurrency": "precondition",
+      "concurrencyFields": [
+        "expectedManifestDigest"
+      ],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.task_to_pr_projection.rebuild",
+      "idempotency": "required",
+      "mutability": "topology",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.projection_rebuild.v1",
+      "requiredScopes": [
+        "todos:task-to-pr-projection:admin"
+      ],
+      "resource": "task_to_pr_projection",
+      "responseSchemaId": "hasna.todos.response.batch.v1",
+      "supportedModes": [
+        "local"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos task-to-pr-projection rebuild",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": null,
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_task_to_pr_projection_rebuild"
+        },
+        "sdk": {
+          "method": "taskToPrProjection.rebuild",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    }
+  ],
+  "provenance": {
+    "schema": "hasna.todos.contract_provenance.v1",
+    "sourceFreeze": {
+      "contracts": {
+        "commitSha": "0c8c5b4205ceaf16b1cee26c30199249055c934e",
+        "repository": "hasna/contracts",
+        "role": "contract_base"
+      },
+      "e00115": {
+        "commitSha": "142e650c7f13d05ac145bd37e986e68909d571d2",
+        "repository": "hasna/contracts",
+        "role": "e_00115_projection_evidence"
+      },
+      "openTodos": {
+        "commitSha": "a18a8b797eb1b05e92964dbf8b036dde972c2314",
+        "repository": "hasna/todos",
+        "role": "open_todos_evidence"
+      },
+      "platformTodos": {
+        "commitSha": "3d0bb21d586eed553e9010fc1187b19415958394",
+        "repository": "hasna/platform-todos",
+        "role": "platform_todos_evidence"
+      }
+    },
+    "surfaceMappings": {
+      "evidenceUse": "design_input_only",
+      "localTopologyHttpSurface": null,
+      "operatorAudienceIncluded": false,
+      "producerImplementationStatus": "not_attested",
+      "sharedHttpPrefix": "/v1",
+      "status": "required_target"
+    }
+  },
+  "schema": "hasna.todos.operation_manifest.v1",
+  "version": "1"
+}

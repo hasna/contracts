@@ -1,0 +1,53 @@
+{
+  "descriptor": {
+    "authorityInvariant": {
+      "count": 1
+    },
+    "capabilityManifestDigest": "38457fb1001062d279e6b90a53bd5e126fc62afe2a3cb6eff6145842341fa2a3",
+    "contractVersion": "1.0.0",
+    "generatorIdentityDigest": "d62a5857dc57afce5caf0d978a5607ab5f8c7215677c5df6325d4e329307225e",
+    "invariantRegistryDigest": "12da98adc6f79a8f0118760df2b8641e4905eba6b12205ad8a580c7aa108f646",
+    "manifestDigest": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+    "manifestVersion": "1",
+    "namespace": "hasna.todos",
+    "provenance": {
+      "schema": "hasna.todos.contract_provenance.v1",
+      "sourceFreeze": {
+        "contracts": {
+          "commitSha": "0c8c5b4205ceaf16b1cee26c30199249055c934e",
+          "repository": "hasna/contracts",
+          "role": "contract_base"
+        },
+        "e00115": {
+          "commitSha": "142e650c7f13d05ac145bd37e986e68909d571d2",
+          "repository": "hasna/contracts",
+          "role": "e_00115_projection_evidence"
+        },
+        "openTodos": {
+          "commitSha": "a18a8b797eb1b05e92964dbf8b036dde972c2314",
+          "repository": "hasna/todos",
+          "role": "open_todos_evidence"
+        },
+        "platformTodos": {
+          "commitSha": "3d0bb21d586eed553e9010fc1187b19415958394",
+          "repository": "hasna/platform-todos",
+          "role": "platform_todos_evidence"
+        }
+      },
+      "surfaceMappings": {
+        "evidenceUse": "design_input_only",
+        "localTopologyHttpSurface": null,
+        "operatorAudienceIncluded": false,
+        "producerImplementationStatus": "not_attested",
+        "sharedHttpPrefix": "/v1",
+        "status": "required_target"
+      }
+    },
+    "provenanceDigest": "2e75eb8006d785e7c11c358425c3ea928cf4cbb9e2d66fa7a4f72664b1f97eaf",
+    "publicSubpath": "@hasna/contracts/todos",
+    "rootExported": false,
+    "schema": "hasna.todos.contract.v1",
+    "schemaBundleDigest": "b65d185367e004fd24ad42ff1da041a440c6ee9675b17ed44712948b438c21c4"
+  },
+  "digest": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820"
+}

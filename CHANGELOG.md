@@ -2,7 +2,7 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
-## [0.5.4] - 2026-07-24
+## [0.6.1] - 2026-07-24
 
 ### Security — remove internal infra hostnames from the published package
 
@@ -29,10 +29,11 @@ The published bundle baked a real internal-infra hostname template
   output, and the actual packed tarball (across case/percent/unicode/hex/base64/
   UTF-16 encodings and raw tar members) for forbidden internal domains, and
   asserts source/dist/packed version provenance.
-- Bumped `0.5.3 -> 0.5.4`: `0.5.3` is reserved for the reconcile-only release
-  below (documented but not yet published); this security fix ships as `0.5.4`,
-  strictly above the published npm `latest` (`0.5.2`). `kitVersion` in
-  `hasna.contract.json` is synced to `0.5.4` to match `package.json`.
+- Bumped to `0.6.1`: `0.5.3` is reserved for the reconcile-only release below and
+  `0.6.0` for the feature line already on `main` (both documented but not yet
+  published; npm `latest` is `0.5.2`). This security fix ships as `0.6.1`,
+  strictly above every reserved version. `kitVersion` in `hasna.contract.json` is
+  synced to `0.6.1` to match `package.json`.
 
 ## [0.5.3] - 2026-07-24
 

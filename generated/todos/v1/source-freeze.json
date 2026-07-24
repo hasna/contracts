@@ -1,0 +1,22 @@
+{
+  "contracts": {
+    "commitSha": "0c8c5b4205ceaf16b1cee26c30199249055c934e",
+    "repository": "hasna/contracts",
+    "role": "contract_base"
+  },
+  "e00115": {
+    "commitSha": "142e650c7f13d05ac145bd37e986e68909d571d2",
+    "repository": "hasna/contracts",
+    "role": "e_00115_projection_evidence"
+  },
+  "openTodos": {
+    "commitSha": "a18a8b797eb1b05e92964dbf8b036dde972c2314",
+    "repository": "hasna/todos",
+    "role": "open_todos_evidence"
+  },
+  "platformTodos": {
+    "commitSha": "3d0bb21d586eed553e9010fc1187b19415958394",
+    "repository": "hasna/platform-todos",
+    "role": "platform_todos_evidence"
+  }
+}
