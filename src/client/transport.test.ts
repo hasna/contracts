@@ -72,6 +72,8 @@ describe("resolveClientTransport — the client-flip contract", () => {
     expect(r.deprecatedAlias).toBe("self_hosted");
     expect(r.baseUrl).toBe("https://knowledge.your-deployment.example/v1");
     expect(r.apiUrlSource).toBe("default");
+    expect(r.misconfigured).toBe(true);
+    expect(r.warning).toContain("HASNA_FLEET_API_DOMAIN");
   });
 
   test("explicit per-app API URL wins over a malformed fleet domain", () => {
@@ -113,26 +115,220 @@ describe("resolveClientTransport — the client-flip contract", () => {
     });
     expect(r.transport).toBe("cloud-http");
     expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
-    expect(r.apiUrlSource).toBe("default");
+    expect(r.apiUrlSource).toBe("HASNA_FLEET_API_DOMAIN");
+    expect(r.misconfigured).toBe(true);
+    expect(r.warning).toContain("HASNA_FLEET_API_DOMAIN");
   });
 
-  test("malformed fleet domains fail closed instead of becoming request URLs", () => {
+  test("malformed fleet domains deterministically use the neutral fallback and stay explicitly misconfigured", () => {
     for (const malformedDomain of [
       "https://fleet.customer.example/path",
       "fleet.customer.example/path",
       "fleet..customer.example",
       "-fleet.customer.example",
+      "fleet.customer.example-",
+      "fléet.customer.example",
+      "xn--r8jz45g.customer.example",
+      "\nfleet.customer.example",
     ]) {
+      const env = { HASNA_FLEET_API_DOMAIN: malformedDomain };
+      expect(fleetApiDomain(env)).toBe("your-deployment.example");
+      expect(defaultCloudBaseUrl("todos", env)).toBe("https://todos.your-deployment.example");
+
       const r = resolveClientTransport("todos", {
         HASNA_TODOS_STORAGE_MODE: "cloud",
         HASNA_TODOS_API_KEY: "hasna_todos_invalid_domain",
         HASNA_FLEET_API_DOMAIN: malformedDomain,
       });
-      expect(r.transport).toBe("local");
-      expect(r.baseUrl).toBeNull();
+      expect(r.transport).toBe("cloud-http");
+      expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
+      expect(r.apiUrlSource).toBe("HASNA_FLEET_API_DOMAIN");
       expect(r.misconfigured).toBe(true);
       expect(r.warning).toContain("HASNA_FLEET_API_DOMAIN");
     }
+  });
+
+  test("hostile fleet-domain authority text cannot reach an authenticated fetch", () => {
+    const env = {
+      HASNA_TODOS_STORAGE_MODE: "cloud",
+      HASNA_TODOS_API_KEY: "x",
+      HASNA_FLEET_API_DOMAIN: "fleet.customer.example\n@evil.example",
+    };
+    const r = resolveClientTransport("todos", env);
+    expect(r.transport).toBe("cloud-http");
+    expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
+    expect(r.apiUrlSource).toBe("HASNA_FLEET_API_DOMAIN");
+    expect(r.misconfigured).toBe(true);
+
+    let fetched = false;
+    expect(() =>
+      createClientTransport("todos", env, {
+        fetchImpl: async () => {
+          fetched = true;
+          return Response.json({ ok: true });
+        },
+      }),
+    ).toThrow(/HASNA_FLEET_API_DOMAIN/);
+    expect(fetched).toBe(false);
+  });
+
+  test("unset fleet domain uses the app-specific neutral fallback and is explicitly misconfigured", () => {
+    const r = resolveClientTransport("todos", {
+      HASNA_TODOS_STORAGE_MODE: "cloud",
+      HASNA_TODOS_API_KEY: "x",
+    });
+    expect(r.transport).toBe("cloud-http");
+    expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
+    expect(r.apiUrlSource).toBe("default");
+    expect(r.misconfigured).toBe(true);
+    expect(r.warning).toContain("HASNA_FLEET_API_DOMAIN");
+    expect(() =>
+      createClientTransport("todos", {
+        HASNA_TODOS_STORAGE_MODE: "cloud",
+        HASNA_TODOS_API_KEY: "x",
+      }),
+    ).toThrow(/HASNA_FLEET_API_DOMAIN/);
+  });
+
+  test("explicit API URLs reject raw controls and userinfo before authority parsing", () => {
+    const unsafe = [
+      "https://api.customer.example\n@evil.example",
+      "https://api.customer.example\r@evil.example",
+      "https://api.customer.example\t@evil.example",
+      "https://api.customer.example@evil.example",
+      "https://evil.example@api.customer.example",
+      "https://user:password@api.customer.example",
+    ];
+
+    for (const apiUrl of unsafe) {
+      expect(() => toV1BaseUrl(apiUrl)).toThrow();
+      const env = {
+        HASNA_TODOS_STORAGE_MODE: "cloud",
+        HASNA_TODOS_API_URL: apiUrl,
+        HASNA_TODOS_API_KEY: "x",
+      };
+      const r = resolveClientTransport("todos", env);
+      expect(r.transport).toBe("local");
+      expect(r.baseUrl).toBeNull();
+      expect(r.misconfigured).toBe(true);
+      expect(() =>
+        createHasnaHttpTransport({
+          name: "todos",
+          baseUrl: apiUrl,
+          apiKey: "x",
+        }),
+      ).toThrow();
+
+      let fetched = false;
+      expect(() =>
+        createClientTransport("todos", env, {
+          fetchImpl: async () => {
+            fetched = true;
+            return Response.json({ ok: true });
+          },
+        }),
+      ).toThrow();
+      expect(fetched).toBe(false);
+    }
+  });
+
+  test("explicit API URLs reject Unicode, percent-normalized, and punycode authorities", () => {
+    for (const apiUrl of [
+      "https://例え.customer.example",
+      "https://éxample.customer.example",
+      "https://xn--r8jz45g.customer.example",
+      "https://%65xample.customer.example",
+    ]) {
+      expect(() => toV1BaseUrl(apiUrl)).toThrow();
+    }
+  });
+
+  test("explicit API URLs reject parser-normalized noncanonical authorities", () => {
+    for (const apiUrl of [
+      "https://api_customer.example",
+      "https://-bad.example",
+      "https://foo..bar",
+      "https://2130706433",
+    ]) {
+      expect(() => toV1BaseUrl(apiUrl)).toThrow();
+      expect(() =>
+        createHasnaHttpTransport({
+          name: "todos",
+          baseUrl: apiUrl,
+          apiKey: "x",
+        }),
+      ).toThrow();
+    }
+  });
+
+  test("explicit API URL policy preserves HTTPS paths and ports plus deliberate loopback HTTP", () => {
+    expect(toV1BaseUrl("  https://x.test:8443/contracts/  ")).toBe(
+      "https://x.test:8443/contracts/v1",
+    );
+    expect(toV1BaseUrl("http://127.0.0.1:43123")).toBe("http://127.0.0.1:43123/v1");
+    expect(toV1BaseUrl("http://localhost:43123/contracts")).toBe(
+      "http://localhost:43123/contracts/v1",
+    );
+    expect(toV1BaseUrl("http://[::1]:43123/contracts")).toBe(
+      "http://[::1]:43123/contracts/v1",
+    );
+    expect(() => toV1BaseUrl("http://api.customer.example/contracts")).toThrow();
+    expect(() => toV1BaseUrl("https://api.customer.example/contracts?tenant=one")).toThrow();
+    expect(() => toV1BaseUrl("https://api.customer.example/contracts#fragment")).toThrow();
+  });
+
+  test("default host app slug is one canonical DNS label", () => {
+    for (const valid of ["todos", "agent-registry", "app2", "2fa"]) {
+      expect(defaultCloudBaseUrl(valid)).toBe(`https://${valid}.your-deployment.example`);
+    }
+
+    for (const invalid of [
+      "",
+      "Todos",
+      " todos",
+      "todos ",
+      "todos/path",
+      "todos.path",
+      "todos.example",
+      "-todos",
+      "todos-",
+      "tódos",
+      "todos\npath",
+    ]) {
+      expect(() => defaultCloudBaseUrl(invalid)).toThrow();
+    }
+
+    const invalidResolution = resolveClientTransport("todos/path", {
+      "HASNA_TODOS/PATH_STORAGE_MODE": "cloud",
+      "HASNA_TODOS/PATH_API_KEY": "x",
+    });
+    expect(invalidResolution.transport).toBe("local");
+    expect(invalidResolution.baseUrl).toBeNull();
+    expect(invalidResolution.misconfigured).toBe(true);
+    expect(invalidResolution.warning).toContain("one lowercase DNS label");
+  });
+
+  test("default host validates the composed app-prefix and fleet-domain length", () => {
+    const maximumStandaloneDomain = [
+      "a".repeat(63),
+      "b".repeat(63),
+      "c".repeat(63),
+      "d".repeat(61),
+    ].join(".");
+    const env = { HASNA_FLEET_API_DOMAIN: maximumStandaloneDomain };
+    expect(maximumStandaloneDomain).toHaveLength(253);
+    expect(fleetApiDomain(env)).toBe(maximumStandaloneDomain);
+    expect(() => defaultCloudBaseUrl("todos", env)).toThrow(/composed cloud hostname/i);
+
+    const r = resolveClientTransport("todos", {
+      ...env,
+      HASNA_TODOS_STORAGE_MODE: "cloud",
+      HASNA_TODOS_API_KEY: "x",
+    });
+    expect(r.transport).toBe("local");
+    expect(r.baseUrl).toBeNull();
+    expect(r.misconfigured).toBe(true);
+    expect(r.warning).toMatch(/composed cloud hostname/i);
   });
 
   test("STORAGE_MODE=cloud (bare alias) is honored", () => {
