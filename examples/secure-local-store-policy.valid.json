@@ -1,0 +1,91 @@
+{
+  "schema": "hasna.secure_local_store_policy.v1",
+  "id": "secure_local_store_policy_example",
+  "createdAt": "2026-07-06T00:00:00.000Z",
+  "version": "2026-07-06",
+  "scope": [".hasna", ".codewith"],
+  "defaults": {
+    "directoryMode": "0700",
+    "fileMode": "0600",
+    "dryRunDefault": true,
+    "requireExplicitApply": true,
+    "includeSqliteSidecars": true,
+    "redactedEvidenceOnly": true
+  },
+  "stores": [
+    {
+      "storeId": "todos",
+      "packageName": "@hasna/todos",
+      "displayName": "Todos",
+      "root": ".hasna",
+      "relativePath": "todos",
+      "sqliteDatabaseGlobs": ["todos.db"],
+      "sensitiveFileGlobs": ["todos.db", "todos.db-wal", "todos.db-shm", "exports/**/*", "backups/**/*"],
+      "backupGlobs": ["backups/**/*"],
+      "exportGlobs": ["exports/**/*"],
+      "retentionAdapters": [
+        {
+          "id": "todos-exports-backups",
+          "description": "Redacted backup and export retention for Todos artifacts.",
+          "ttlDays": 14,
+          "artifactClasses": ["backup", "export"],
+          "allowlistGlobs": ["backups/**/*", "exports/**/*"],
+          "activeRecordExclusions": [
+            {
+              "id": "todos-active-evidence",
+              "source": "sqlite",
+              "table": "task_files",
+              "column": "path",
+              "description": "Exclude files still referenced by active tasks or verification evidence."
+            }
+          ],
+          "sqliteMaintenance": {
+            "safeWhen": "exclusive_access",
+            "operations": ["wal_checkpoint_truncate", "optimize"]
+          }
+        }
+      ]
+    },
+    {
+      "storeId": "codewith",
+      "packageName": "codewith",
+      "displayName": "Codewith native state",
+      "root": ".codewith",
+      "relativePath": ".",
+      "sqliteDatabaseGlobs": ["state_*.sqlite", "logs_*.sqlite", "goals_*.sqlite"],
+      "sensitiveFileGlobs": ["sessions/**/*.jsonl", "shell_snapshots/**/*", "*.sqlite"],
+      "backupGlobs": ["backups/**/*"],
+      "exportGlobs": ["exports/**/*"],
+      "retentionAdapters": [
+        {
+          "id": "codewith-session-snapshots",
+          "description": "Session and shell snapshot retention after package redaction.",
+          "ttlDays": 30,
+          "artifactClasses": ["session", "snapshot", "log"],
+          "allowlistGlobs": ["sessions/**/*.jsonl", "shell_snapshots/**/*", "logs/**/*"],
+          "activeRecordExclusions": [
+            {
+              "id": "codewith-active-session",
+              "source": "package_adapter",
+              "description": "Exclude active sessions, leased schedules, active monitors, and active goal rows."
+            }
+          ],
+          "sqliteMaintenance": {
+            "safeWhen": "exclusive_access",
+            "operations": ["wal_checkpoint_truncate", "optimize"]
+          }
+        }
+      ]
+    }
+  ],
+  "lifecycle": {
+    "retentionDryRunDefault": true,
+    "requireActiveRecordExclusionProof": true,
+    "requireArtifactAllowlist": true,
+    "sqliteMaintenanceRequiresExclusiveAccess": true
+  },
+  "warnings": [
+    "Retention defaults to dry-run and requires package-owned active-record checks.",
+    "SQLite maintenance requires explicit exclusive access."
+  ]
+}
