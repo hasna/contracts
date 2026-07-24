@@ -325,9 +325,9 @@ header or `Authorization: Bearer <key>`.
 
 The short aliases `<APP>_API_URL` and `<APP>_API_KEY` remain supported after the
 canonical `HASNA_` names. Client configuration uses an HTTP API URL, never a
-database DSN. When relying on the fleet-domain or placeholder fallback, set
-`HASNA_<APP>_STORAGE_MODE=cloud`; only an explicit URL + API-key pair infers
-cloud mode when the mode variable is absent.
+database DSN. When relying on the fleet-domain or placeholder default (no
+explicit per-app URL), set `HASNA_<APP>_STORAGE_MODE=cloud`; only an explicit
+URL + API-key pair infers cloud mode when the mode variable is absent.
 
 Scope grammar is `<app>:<action>` with wildcards (`*`, `<app>:*`, `*:<action>`).
 
