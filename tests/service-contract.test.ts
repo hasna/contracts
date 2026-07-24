@@ -165,6 +165,83 @@ describe("service contract manifest validation", () => {
     expect(validateServiceContractManifest({ ...svc, serviceSurfaces: [] }).success).toBe(false);
   });
 
+  test("supported API surfaces require GET health, readiness, and version endpoints", () => {
+    const service = {
+      schema: SCHEMA_IDS.serviceContract,
+      name: "loops",
+      class: "service",
+      contractVersion: SERVICE_CONTRACT_VERSION,
+      kitVersion: "0.7.0",
+      bins: ["loops", "loops-serve"],
+      storage: {
+        mode: "local",
+        engines: ["sqlite", "postgres"],
+        envPrefix: "HASNA_LOOPS_",
+        sqlitePath: "~/.hasna/loops/loops.db",
+        pgTestGate: {
+          envVar: "LOOPS_TEST_DATABASE_URL",
+          command: "bun test tests/postgres.test.ts"
+        }
+      },
+      serviceSurfaces: [
+        {
+          name: "http",
+          kind: "api",
+          status: "supported",
+          bin: "loops-serve",
+          authMode: "api-key",
+          deploymentModes: ["local"],
+          health: { method: "POST", path: "/health", public: true },
+          version: { method: "POST", path: "/version", public: true },
+          apiBasePath: "/v1",
+          openApiPath: "/openapi.json"
+        }
+      ]
+    };
+    const parsed = validateServiceContractManifest(service);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      const paths = parsed.error.issues.map((issue) => issue.path.join("."));
+      expect(paths).toContain("serviceSurfaces.0.health.method");
+      expect(paths).toContain("serviceSurfaces.0.readiness");
+      expect(paths).toContain("serviceSurfaces.0.version.method");
+    }
+  });
+
+  test("saas storage requires the public DATABASE_URL env prefix", () => {
+    const saas = {
+      schema: SCHEMA_IDS.serviceContract,
+      name: "mailery",
+      class: "saas",
+      contractVersion: SERVICE_CONTRACT_VERSION,
+      kitVersion: "0.7.0",
+      bins: ["mailery", "mailery-serve"],
+      hosting: ["hasna-saas"],
+      deploymentModes: ["cloud"],
+      storage: { mode: "cloud" },
+      serviceSurfaces: [
+        {
+          name: "http",
+          kind: "api",
+          status: "supported",
+          bin: "mailery-serve",
+          authMode: "api-key",
+          deploymentModes: ["cloud"],
+          health: { method: "GET", path: "/health", public: true },
+          readiness: { method: "GET", path: "/ready", public: false },
+          version: { method: "GET", path: "/version", public: true },
+          apiBasePath: "/v1",
+          openApiPath: "/openapi.json"
+        }
+      ]
+    };
+    const parsed = validateServiceContractManifest(saas);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues.some((issue) => issue.path.join(".") === "storage.envPrefix")).toBe(true);
+    }
+  });
+
   test("service storage capability declarations require both engines", () => {
     const service = {
       schema: SCHEMA_IDS.serviceContract,

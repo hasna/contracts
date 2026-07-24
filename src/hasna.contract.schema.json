@@ -12,6 +12,38 @@
     "contractVersion",
     "kitVersion"
   ],
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "class"
+        ],
+        "properties": {
+          "class": {
+            "const": "saas"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "storage"
+        ],
+        "properties": {
+          "storage": {
+            "required": [
+              "mode",
+              "envPrefix"
+            ],
+            "properties": {
+              "mode": {
+                "const": "cloud"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "$schema": {
       "type": "string",
@@ -89,6 +121,31 @@
           "authMode",
           "deploymentModes"
         ],
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "status"
+              ],
+              "properties": {
+                "status": {
+                  "const": "supported"
+                },
+                "kind": {
+                  "const": "api"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "bin",
+                "health",
+                "readiness",
+                "version"
+              ]
+            }
+          }
+        ],
         "properties": {
           "name": {
             "type": "string",
@@ -149,13 +206,7 @@
             ],
             "properties": {
               "method": {
-                "enum": [
-                  "GET",
-                  "POST",
-                  "PUT",
-                  "PATCH",
-                  "DELETE"
-                ]
+                "const": "GET"
               },
               "path": {
                 "type": "string",
@@ -179,13 +230,7 @@
             ],
             "properties": {
               "method": {
-                "enum": [
-                  "GET",
-                  "POST",
-                  "PUT",
-                  "PATCH",
-                  "DELETE"
-                ]
+                "const": "GET"
               },
               "path": {
                 "type": "string",
@@ -209,13 +254,7 @@
             ],
             "properties": {
               "method": {
-                "enum": [
-                  "GET",
-                  "POST",
-                  "PUT",
-                  "PATCH",
-                  "DELETE"
-                ]
+                "const": "GET"
               },
               "path": {
                 "type": "string",

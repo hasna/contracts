@@ -157,6 +157,14 @@ interface PublicManifestFinding {
   category: "secret-ref" | "credential-ref" | "credential-value" | "internal-host" | "arn" | "account-id";
 }
 
+const SELF_HOST_ARTIFACTS = [
+  "docker-compose.yml",
+  "docker-compose.yaml",
+  "compose.yml",
+  "compose.yaml",
+  "Dockerfile"
+] as const;
+
 function credentialKeyFinding(key: string): PublicManifestFinding["category"] | null {
   // Manifest metadata is open-ended, and producers use both nested objects and
   // flattened paths (`auth.credential.value`, `auth/token/reference`). Treat
@@ -216,7 +224,10 @@ function publicManifestFindings(value: unknown, path = "<root>"): PublicManifest
   if (value && typeof value === "object") {
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
       const childPath = path === "<root>" ? key : `${path}.${key}`;
-      const keyFinding = credentialKeyFinding(key);
+      // Classify the full logical path, not only the immediate leaf. That makes
+      // nested `{ api: { key: ... } }` equivalent to flattened `api.key`,
+      // including dotted, slash, underscore, and hyphen separators.
+      const keyFinding = credentialKeyFinding(childPath);
       if (keyFinding) findings.push({ path: childPath, category: keyFinding });
       findings.push(...publicManifestFindings(child, childPath));
     }
@@ -303,7 +314,11 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
   const waivedKinds = new Set(
     waivers.filter((waiver) => eligibleWaiverKinds.has(waiver.kind)).map((waiver) => waiver.kind)
   );
-  const missingKinds = SERVICE_SURFACE_KINDS.filter((kind) => !representedKinds.has(kind) && !waivedKinds.has(kind));
+  const requiredSurfaceKinds: readonly ServiceSurfaceKind[] =
+    manifest.class === "cli-with-store" && !hasServeBin
+      ? ["cli"]
+      : SERVICE_SURFACE_KINDS;
+  const missingKinds = requiredSurfaceKinds.filter((kind) => !representedKinds.has(kind) && !waivedKinds.has(kind));
   if (missingKinds.length > 0 || ineligibleWaivers.length > 0) {
     const failures: string[] = [];
     if (missingKinds.length > 0) {
@@ -370,8 +385,73 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
     detail: surfaceBindingFailures.length === 0 ? "declared surface bins and SDK exports match package.json" : surfaceBindingFailures.join("; ")
   });
 
+  const apiTopologyFailures: string[] = [];
+  if (requiresGeneratedServiceSdk) {
+    const apiSurfaces = manifest.serviceSurfaces.filter(
+      (surface) =>
+        surface.status === "supported" &&
+        (surface.kind === "api" ||
+          (!surface.kind &&
+            Boolean(surface.apiBasePath || surface.openApiPath || surface.health || surface.readiness || surface.version)))
+    );
+    if (apiSurfaces.length === 0) {
+      apiTopologyFailures.push("a supported API surface is required");
+    }
+    for (const [index, surface] of apiSurfaces.entries()) {
+      for (const [label, endpoint, path] of [
+        ["health", surface.health, "/health"],
+        ["readiness", surface.readiness, "/ready"],
+        ["version", surface.version, "/version"]
+      ] as const) {
+        if (!endpoint || endpoint.method !== "GET" || endpoint.path !== path) {
+          apiTopologyFailures.push(`supported API surface ${index} must declare GET ${path} (${label})`);
+        }
+      }
+    }
+  }
+  checks.push({
+    id: "service_api_topology",
+    status: requiresGeneratedServiceSdk
+      ? apiTopologyFailures.length === 0
+        ? "pass"
+        : "fail"
+      : "skip",
+    detail: requiresGeneratedServiceSdk
+      ? apiTopologyFailures.length === 0
+        ? "supported API declares GET /health, GET /ready, and GET /version"
+        : apiTopologyFailures.join("; ")
+      : `${manifest.class} repo has no required service API topology`
+  });
+
+  if (requiresGeneratedServiceSdk) {
+    const presentArtifacts = SELF_HOST_ARTIFACTS.filter((artifact) => isFile(join(repoRoot, artifact)));
+    checks.push({
+      id: "self_host_artifact",
+      status: presentArtifacts.length > 0 ? "pass" : "fail",
+      detail:
+        presentArtifacts.length > 0
+          ? `self-host deployment artifact present: ${presentArtifacts.join(", ")}`
+          : `service-class repos require one self-host deployment artifact: ${SELF_HOST_ARTIFACTS.join(", ")}`
+    });
+  } else {
+    checks.push({
+      id: "self_host_artifact",
+      status: "skip",
+      detail: `${manifest.class} repo has no required self-host service artifact`
+    });
+  }
+
   // Check 4: storage capability matrix and PostgreSQL runtime proof.
-  if (manifest.class !== "service" && manifest.class !== "cli-with-store") {
+  if (manifest.class === "saas") {
+    const failures = manifest.storage?.envPrefix
+      ? []
+      : ["storage.envPrefix is required for the public SaaS DATABASE_URL contract"];
+    checks.push({
+      id: "storage_capabilities",
+      status: failures.length === 0 ? "pass" : "fail",
+      detail: failures.length === 0 ? "SaaS PostgreSQL env contract declared" : failures.join("; ")
+    });
+  } else if (manifest.class !== "service" && manifest.class !== "cli-with-store") {
     checks.push({ id: "storage_capabilities", status: "skip", detail: `${manifest.class} repo is outside the dual-storage core gate` });
   } else {
     const engines = new Set(manifest.storage?.engines ?? []);

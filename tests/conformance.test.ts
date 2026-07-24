@@ -93,7 +93,8 @@ const completePackage = {
 function withRepoFixture(
   manifest: Record<string, unknown>,
   pkg: Record<string, unknown>,
-  run: (root: string) => void
+  run: (root: string) => void,
+  options: { selfHostArtifact?: boolean } = {}
 ): void {
   const root = mkdtempSync(join(tmpdir(), "contracts-conformance-"));
   try {
@@ -103,6 +104,9 @@ function withRepoFixture(
     mkdirSync(dist);
     for (const file of ["index.js", "index.d.ts", "sdk.js", "sdk.d.ts"]) {
       writeFileSync(join(dist, file), file.endsWith(".d.ts") ? "export {};\n" : "export {};\n");
+    }
+    if (options.selfHostArtifact !== false) {
+      writeFileSync(join(root, "docker-compose.yml"), "services: {}\n");
     }
     run(root);
   } finally {
@@ -204,6 +208,62 @@ describe("repo conformance kit", () => {
       expect(surface?.status).toBe("fail");
       expect(surface?.detail).toContain("sdk");
       expect(report.ok).toBe(false);
+    });
+  });
+
+  test("does not force API, SDK, or MCP onto a CLI-only cli-with-store repo", () => {
+    const manifest: ServiceContractManifestInput = {
+      schema: SCHEMA_IDS.serviceContract,
+      name: "demo",
+      class: "cli-with-store",
+      contractVersion: SERVICE_CONTRACT_VERSION,
+      kitVersion: "0.7.0",
+      bins: ["demo"],
+      hosting: ["user-hosted"],
+      deploymentModes: ["local"],
+      storage: {
+        mode: "local",
+        engines: ["sqlite", "postgres"],
+        envPrefix: "HASNA_DEMO_",
+        sqlitePath: "~/.hasna/demo/demo.db",
+        pgTestGate: {
+          envVar: "DEMO_TEST_DATABASE_URL",
+          command: "bun test tests/postgres.test.ts"
+        }
+      },
+      serviceSurfaces: [
+        {
+          name: "cli",
+          kind: "cli",
+          status: "supported",
+          bin: "demo",
+          authMode: "local-only",
+          deploymentModes: ["local"]
+        }
+      ]
+    };
+    const pkg = {
+      name: "@hasna/demo",
+      version: "1.0.0",
+      bin: { demo: "dist/cli.js" },
+      exports: { ".": "./dist/index.js" }
+    };
+
+    withRepoFixture(manifest, pkg, (root) => {
+      const report = runRepoConformance(root, {
+        env: {},
+        skipNoCloudScan: true
+      });
+      expect(
+        report.checks.find((check) => check.id === "surface_matrix")?.status
+      ).toBe("pass");
+      expect(
+        report.checks.find((check) => check.id === "service_api_topology")?.status
+      ).toBe("skip");
+      expect(
+        report.checks.find((check) => check.id === "self_host_artifact")?.status
+      ).toBe("skip");
+      expect(report.ok).toBe(true);
     });
   });
 
@@ -424,6 +484,21 @@ describe("repo conformance kit", () => {
         metadata: { auth: { credential: { value: jwtFixture } } },
         expectedFinding: "metadata.auth.credential.value (credential-value)",
         redactedValue: jwtFixture
+      },
+      {
+        metadata: { api: { key: "provider-entry" } },
+        expectedFinding: "metadata.api.key (credential-value)",
+        redactedValue: "provider-entry"
+      },
+      {
+        metadata: { access: { key: "provider-entry" } },
+        expectedFinding: "metadata.access.key (credential-value)",
+        redactedValue: "provider-entry"
+      },
+      {
+        metadata: { database: { url: "postgres://db.example.invalid/app" } },
+        expectedFinding: "metadata.database.url (credential-value)",
+        redactedValue: "postgres://db.example.invalid/app"
       }
     ];
 
@@ -455,6 +530,41 @@ describe("repo conformance kit", () => {
         expect(report.checks.find((check) => check.id === "public_manifest_safety")?.status).toBe("pass");
       }
     );
+  });
+
+  test("requires a self-host deployment artifact for service-class repositories", () => {
+    withRepoFixture(
+      completeServiceManifest(),
+      completePackage,
+      (root) => {
+        const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+        const artifact = report.checks.find((check) => check.id === "self_host_artifact");
+        expect(artifact?.status).toBe("fail");
+        expect(artifact?.detail).toContain("docker-compose.yml");
+        expect(report.ok).toBe(false);
+      },
+      { selfHostArtifact: false }
+    );
+  });
+
+  test("requires SaaS storage to declare its public DATABASE_URL env prefix", () => {
+    const manifest = completeServiceManifest();
+    manifest.class = "saas";
+    manifest.hosting = ["hasna-saas"];
+    manifest.deploymentModes = ["cloud"];
+    manifest.storage = { mode: "cloud" };
+    manifest.serviceSurfaces = (manifest.serviceSurfaces ?? []).map((surface) => ({
+      ...surface,
+      deploymentModes: ["cloud"]
+    }));
+
+    withRepoFixture(manifest, completePackage, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      const manifestCheck = report.checks.find((check) => check.id === "manifest_valid");
+      expect(manifestCheck?.status).toBe("fail");
+      expect(manifestCheck?.detail).toContain("storage.envPrefix");
+      expect(report.ok).toBe(false);
+    });
   });
 
   test("requires a saas manifest to declare the hasna-saas hosting story", () => {
