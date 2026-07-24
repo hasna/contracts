@@ -117,8 +117,8 @@ In exact text:
 ## Current implemented schema inventory and source alignment
 
 `@hasna/contracts` source package version at this base is `0.7.1` (`CONTRACTS_PACKAGE_VERSION`).
-`npm view @hasna/contracts version dist-tags time --json` reports latest/released `0.7.0`, published `2026-07-24T13:41:24.268Z`, and no `0.7.1` registry artifact or tag in this evidence snapshot.
-PR #26 is source release intent only, and published `0.7.0` predates PR #24/#25.
+`npm view @hasna/contracts version dist-tags time --json` reports registry `latest` = `0.7.1` (published `2026-07-24T15:53:22.773Z`), following `0.7.0` (published `2026-07-24T13:41:24.268Z`). PR #26 published `0.7.1` from snapshot main to the registry.
+Semver note: PR #24 (`restore execution-free contracts boundary`) removed execution-ful `secure-local-store` exports, so `0.7.1` is a **breaking change relative to `0.7.0`** yet shipped as a patch bump. Registry `latest` therefore carries a breaking-as-patch artifact; a `0.8.0` reconcile is warranted for dependents, and `0.7.x` must not be republished.
 Provider merge/version evidence is not itself release authority; this section remains evidence-only and non-authoritative.
 None of the nine provisional schema names, fields, or
 mappings is canonical for Factory adoption until the complete task chain is
