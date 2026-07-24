@@ -8,12 +8,16 @@ const { CONTRACTS_PACKAGE_VERSION } = await import("../dist/schemas.js");
 const { scanNoCloudTarget } = await import("../dist/no-cloud.js");
 const { createHasnaHttpTransport, HasnaHttpError } = await import("../dist/client/transport.js");
 const todos = await import("../dist/todos/index.js");
+const { secureLocalStorePolicy } = await import("../dist/secure-local-store.js");
 
 if (typeof scanNoCloudTarget !== "function") {
   throw new Error("dist/no-cloud.js did not export scanNoCloudTarget");
 }
 if (typeof createHasnaHttpTransport !== "function") {
   throw new Error("dist/client/transport.js did not export createHasnaHttpTransport");
+}
+if (typeof secureLocalStorePolicy !== "function") {
+  throw new Error("dist/secure-local-store.js did not export secureLocalStorePolicy");
 }
 
 type CommandResult = ReturnType<typeof Bun.spawnSync>;
@@ -89,6 +93,13 @@ requireExit(conformance, 0, "conformance");
 const conformancePayload = parseJson(conformance, "conformance");
 if (conformancePayload.ok !== true || conformancePayload.failed !== 0 || Number(conformancePayload.checked) <= 0) {
   throw new Error("conformance did not report a non-empty passing fixture set");
+}
+
+const secureStore = run(["secure-local-store", "--json", "--store", "todos"]);
+requireExit(secureStore, 0, "secure-local-store");
+const secureStorePayload = parseJson(secureStore, "secure-local-store");
+if (secureStorePayload.schema !== "hasna.secure_local_store_policy.v1") {
+  throw new Error("secure-local-store did not emit the secure local-store policy schema");
 }
 
 const noCloudDir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-dist-"));

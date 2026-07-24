@@ -198,6 +198,24 @@ contracts no-cloud-scan --manifest app-cloud.manifest.json .
 contracts no-cloud-scan --json hasna-todos-0.11.62.tgz
 ```
 
+Print the shared secure local-store policy for `.hasna` and `.codewith`, or
+produce a dry-run lifecycle plan for owner-only permissions and package-owned
+retention adapters:
+
+```bash
+contracts secure-local-store --json
+contracts secure-local-store --json --store todos
+contracts secure-local-store "$HOME" --json --plan --store todos
+contracts secure-local-store "$HOME" --json --apply --store todos
+contracts secure-local-store "$HOME" --json --plan --retention --store todos --retention-proof todos-exports-backups
+```
+
+`secure-local-store` never reads file contents. The contract covers `0700`
+directories, `0600` files, SQLite DB/WAL/SHM sidecars, backups, exports, active
+record exclusions, artifact allowlists, and SQLite maintenance gates. Retention
+and SQLite maintenance are dry-run by default and require explicit package
+adapter proof before deletion or compaction.
+
 ## Storage Kit (vendored codegen)
 
 `vendor-kit` stamps a canonical, self-contained Postgres storage kit into a
@@ -467,6 +485,10 @@ defaults are applied; output aliases such as `EvidenceRef` describe parsed data.
   NOT an identity schema: canonical app identity lives in `hasna.app.v1`, and
   this v1 manifest keeps `appId` as a non-empty reference string for
   compatibility; new manifests should use the stable `hasna.app.v1` slug.
+- `hasna.secure_local_store_policy.v1`: shared `.hasna`/`.codewith` secure
+  local-store lifecycle policy with owner-only modes, package inventory,
+  retention adapters, active-record exclusions, artifact allowlists, and SQLite
+  maintenance safety gates.
 - `hasna.no_cloud_evidence_pack.v1`: prepublish/CI evidence pack for package
   manifest, lockfile, source/runtime config, packed artifact, published
   metadata, and app-cloud-manifest scans.

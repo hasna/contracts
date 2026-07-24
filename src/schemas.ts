@@ -27,6 +27,7 @@ export const SCHEMA_IDS = {
   scaffoldInstallRecord: "hasna.scaffold_install_record.v1",
   appCloudManifest: "hasna.app_cloud_manifest.v1",
   noCloudEvidencePack: "hasna.no_cloud_evidence_pack.v1",
+  secureLocalStorePolicy: "hasna.secure_local_store_policy.v1",
   serviceContract: "hasna.service_contract.v1",
   commsEventEnvelope: "hasna.comms_event_envelope.v1",
   commsChannelMetadata: "hasna.comms_channel_metadata.v1",
@@ -5109,6 +5110,167 @@ export const StorageContractSchema = z
   .strict();
 export type StorageContract = z.infer<typeof StorageContractSchema>;
 
+export const OwnerOnlyFileModeSchema = z.enum(["0600"]);
+export type OwnerOnlyFileMode = z.infer<typeof OwnerOnlyFileModeSchema>;
+
+export const OwnerOnlyDirectoryModeSchema = z.enum(["0700"]);
+export type OwnerOnlyDirectoryMode = z.infer<typeof OwnerOnlyDirectoryModeSchema>;
+
+export const LocalStoreRootSchema = z.enum([".hasna", ".codewith"]);
+export type LocalStoreRoot = z.infer<typeof LocalStoreRootSchema>;
+
+export const SecureLocalStoreArtifactClassSchema = z.enum([
+  "directory",
+  "file",
+  "sqlite_db",
+  "sqlite_wal",
+  "sqlite_shm",
+  "backup",
+  "export",
+  "report",
+  "tmp",
+  "log",
+  "session",
+  "snapshot"
+]);
+export type SecureLocalStoreArtifactClass = z.infer<typeof SecureLocalStoreArtifactClassSchema>;
+
+export const SecureLocalStorePathPatternSchema = RelativeProjectPathSchema.refine(
+  (value) => !value.startsWith("~"),
+  "Local store path patterns must be relative to their declared root"
+);
+
+export const SecureLocalStoreActiveRecordExclusionSchema = z
+  .object({
+    id: z.string().min(1),
+    source: z.enum(["sqlite", "manifest", "index", "runtime", "package_adapter"]),
+    table: z.string().min(1).optional(),
+    column: z.string().min(1).optional(),
+    description: z.string().min(1),
+    required: z.boolean().default(true)
+  })
+  .strict();
+export type SecureLocalStoreActiveRecordExclusion = z.infer<typeof SecureLocalStoreActiveRecordExclusionSchema>;
+
+export const SecureLocalStoreSqliteMaintenanceSchema = z
+  .object({
+    safeWhen: z.enum(["exclusive_access", "offline_only", "never"]),
+    operations: z
+      .array(z.enum(["wal_checkpoint_truncate", "incremental_vacuum", "optimize", "vacuum"]))
+      .default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.safeWhen === "never" && value.operations.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "sqliteMaintenance.safeWhen=never cannot declare operations",
+        path: ["operations"]
+      });
+    }
+  });
+export type SecureLocalStoreSqliteMaintenance = z.infer<typeof SecureLocalStoreSqliteMaintenanceSchema>;
+
+export const SecureLocalStoreRetentionAdapterSchema = z
+  .object({
+    id: z.string().min(1),
+    description: z.string().min(1),
+    ttlDays: z.number().int().nonnegative().optional(),
+    artifactClasses: z.array(SecureLocalStoreArtifactClassSchema).min(1),
+    allowlistGlobs: z.array(SecureLocalStorePathPatternSchema).min(1),
+    activeRecordExclusions: z.array(SecureLocalStoreActiveRecordExclusionSchema).default([]),
+    sqliteMaintenance: SecureLocalStoreSqliteMaintenanceSchema.optional()
+  })
+  .strict();
+export type SecureLocalStoreRetentionAdapter = z.infer<typeof SecureLocalStoreRetentionAdapterSchema>;
+
+export const SecureLocalStoreDefinitionSchema = z
+  .object({
+    storeId: z.string().regex(/^[a-z][a-z0-9-]*$/),
+    packageName: z.string().min(1),
+    displayName: z.string().min(1),
+    root: LocalStoreRootSchema,
+    relativePath: SecureLocalStorePathPatternSchema,
+    directoryMode: OwnerOnlyDirectoryModeSchema.default("0700"),
+    fileMode: OwnerOnlyFileModeSchema.default("0600"),
+    sqliteDatabaseGlobs: z.array(SecureLocalStorePathPatternSchema).default([]),
+    sensitiveFileGlobs: z.array(SecureLocalStorePathPatternSchema).default([]),
+    backupGlobs: z.array(SecureLocalStorePathPatternSchema).default([]),
+    exportGlobs: z.array(SecureLocalStorePathPatternSchema).default([]),
+    retentionAdapters: z.array(SecureLocalStoreRetentionAdapterSchema).default([]),
+    notes: z.array(z.string().min(1)).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.relativePath.includes("*")) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "store relativePath must be a concrete directory; use glob fields for files",
+        path: ["relativePath"]
+      });
+    }
+    const adapterIds = new Set<string>();
+    for (const [index, adapter] of value.retentionAdapters.entries()) {
+      if (adapterIds.has(adapter.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "retention adapter ids must be unique within a store",
+          path: ["retentionAdapters", index, "id"]
+        });
+      }
+      adapterIds.add(adapter.id);
+    }
+  });
+export type SecureLocalStoreDefinition = z.infer<typeof SecureLocalStoreDefinitionSchema>;
+
+export const SecureLocalStorePolicySchema = contractBaseSchema(SCHEMA_IDS.secureLocalStorePolicy)
+  .extend({
+    version: z.string().min(1),
+    scope: z.array(LocalStoreRootSchema).min(1),
+    defaults: z
+      .object({
+        directoryMode: OwnerOnlyDirectoryModeSchema.default("0700"),
+        fileMode: OwnerOnlyFileModeSchema.default("0600"),
+        dryRunDefault: z.literal(true),
+        requireExplicitApply: z.literal(true),
+        includeSqliteSidecars: z.literal(true),
+        redactedEvidenceOnly: z.literal(true)
+      })
+      .strict(),
+    stores: z.array(SecureLocalStoreDefinitionSchema).min(1),
+    lifecycle: z
+      .object({
+        retentionDryRunDefault: z.literal(true),
+        requireActiveRecordExclusionProof: z.literal(true),
+        requireArtifactAllowlist: z.literal(true),
+        sqliteMaintenanceRequiresExclusiveAccess: z.literal(true)
+      })
+      .strict(),
+    warnings: z.array(z.string().min(1)).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const stores = new Set<string>();
+    for (const [index, store] of value.stores.entries()) {
+      if (stores.has(store.storeId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "store ids must be unique",
+          path: ["stores", index, "storeId"]
+        });
+      }
+      stores.add(store.storeId);
+      if (!value.scope.includes(store.root)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "store root must be listed in policy scope",
+          path: ["stores", index, "root"]
+        });
+      }
+    }
+  });
+export type SecureLocalStorePolicy = z.infer<typeof SecureLocalStorePolicySchema>;
+
 export const ServiceContractManifestSchema = z
   .object({
     /** Optional editor hint pointing at the JSON Schema; ignored at runtime. */
@@ -5638,6 +5800,7 @@ export const ContractSchemaRegistry = {
   [SCHEMA_IDS.scaffoldInstallRecord]: ScaffoldInstallRecordSchema,
   [SCHEMA_IDS.appCloudManifest]: AppCloudManifestSchema,
   [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePackSchema,
+  [SCHEMA_IDS.secureLocalStorePolicy]: SecureLocalStorePolicySchema,
   [SCHEMA_IDS.serviceContract]: ServiceContractManifestSchema,
   [SCHEMA_IDS.commsEventEnvelope]: CommsEventEnvelopeSchema,
   [SCHEMA_IDS.commsChannelMetadata]: CommsChannelMetadataSchema,
@@ -5674,6 +5837,7 @@ export type ContractBySchemaId = {
   [SCHEMA_IDS.scaffoldInstallRecord]: ScaffoldInstallRecord;
   [SCHEMA_IDS.appCloudManifest]: AppCloudManifest;
   [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePack;
+  [SCHEMA_IDS.secureLocalStorePolicy]: SecureLocalStorePolicy;
   [SCHEMA_IDS.serviceContract]: ServiceContractManifest;
   [SCHEMA_IDS.commsEventEnvelope]: CommsEventEnvelope;
   [SCHEMA_IDS.commsChannelMetadata]: CommsChannelMetadata;
@@ -5707,6 +5871,7 @@ export type ScaffoldManifestInput = z.input<typeof ScaffoldManifestSchema>;
 export type ScaffoldInstallRecordInput = z.input<typeof ScaffoldInstallRecordSchema>;
 export type AppCloudManifestInput = z.input<typeof AppCloudManifestSchema>;
 export type NoCloudEvidencePackInput = z.input<typeof NoCloudEvidencePackSchema>;
+export type SecureLocalStorePolicyInput = z.input<typeof SecureLocalStorePolicySchema>;
 export type ServiceContractManifestInput = z.input<typeof ServiceContractManifestSchema>;
 export type CommsEventEnvelopeInput = z.input<typeof CommsEventEnvelopeSchema>;
 export type CommsChannelMetadataInput = z.input<typeof CommsChannelMetadataSchema>;
@@ -5743,6 +5908,7 @@ export type ContractInputBySchemaId = {
   [SCHEMA_IDS.scaffoldInstallRecord]: ScaffoldInstallRecordInput;
   [SCHEMA_IDS.appCloudManifest]: AppCloudManifestInput;
   [SCHEMA_IDS.noCloudEvidencePack]: NoCloudEvidencePackInput;
+  [SCHEMA_IDS.secureLocalStorePolicy]: SecureLocalStorePolicyInput;
   [SCHEMA_IDS.serviceContract]: ServiceContractManifestInput;
   [SCHEMA_IDS.commsEventEnvelope]: CommsEventEnvelopeInput;
   [SCHEMA_IDS.commsChannelMetadata]: CommsChannelMetadataInput;
