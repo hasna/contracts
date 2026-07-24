@@ -2403,6 +2403,7 @@ export const TaskToPrAttemptSchema = z
     ref: taskToPrRefFor("attempt"),
     nonce: TaskToPrAttemptNonceSchema,
     admissionRef: taskToPrRefFor("admission"),
+    admissionWriterGenerationRef: taskToPrRefFor("writer_generation"),
     workerActorRef: taskToPrRefFor("worker_actor"),
     workerRef: taskToPrRefFor("worker"),
     runtimeRef: taskToPrRefFor("runtime"),
@@ -4231,6 +4232,17 @@ export const TaskToPrProjectionSchema = z
     }
     if (value.state === "repairing" && value.repair.cycle === 0) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Repairing projections require a non-zero repair cycle", path: ["repair", "cycle"] });
+    }
+    if (
+      value.merge &&
+      (value.merge.guard.decision === "eligible" || value.merge.guard.decision === "consumed") &&
+      !sameTaskToPrRef(value.attempt.admissionWriterGenerationRef, value.attempt.writerGenerationRef)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Merge eligibility requires admission from the current writer generation",
+        path: ["attempt", "admissionWriterGenerationRef"]
+      });
     }
     if (value.state === "merge_ready" && value.merge?.guard.decision !== "eligible") {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Merge-ready projections require an eligible guard", path: ["merge"] });

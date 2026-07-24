@@ -50,6 +50,13 @@
       "digest": "1313131313131313131313131313131313131313131313131313131313131313",
       "redaction": "partial"
     },
+    "admissionWriterGenerationRef": {
+      "role": "writer_generation",
+      "authority": "todos",
+      "id": "writer_generation:todos:opaque-88888888888888888888888888888888",
+      "digest": "8888888888888888888888888888888888888888888888888888888888888888",
+      "redaction": "none"
+    },
     "workerActorRef": {
       "role": "worker_actor",
       "authority": "codewith",

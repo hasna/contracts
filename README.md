@@ -435,7 +435,7 @@ payload.
 | `workRunRef` | exactly 1 | Codewith; points to the existing `WorkRun` receipt |
 | `rootRequestRef` / `prGroupRef` / `leafTaskRef` | exactly 1 each | Todos; immutable canonical identities |
 | `attempt.ref` / `attempt.nonce` | exactly 1 each | Todos attempt identity; every retry uses a fresh nonce |
-| admission / worker actor / worker assignment / runtime refs | exactly 1 each | distinct redacted Codewith owner records; every successor attempt rotates admission and assignment in addition to the attempt-scoped runtime identity |
+| admission / worker actor / worker assignment / runtime refs | exactly 1 each | distinct redacted Codewith owner records; admission carries an exact writer-generation binding, and every successor attempt rotates admission and assignment in addition to the attempt-scoped runtime identity |
 | writer generation / lease / fence refs | exactly 1 each | generation is Todos-bound; lease/fence are redacted Repos refs, never a fence value |
 | provider profile / route refs | exactly 1 each | redacted opaque Codewith refs; never provider account or credential data |
 | repo / worktree / branch plus base and branch heads | exactly 1 binding | canonical Repos refs with exact Git object ids |
@@ -487,7 +487,11 @@ snapshot or carry merge-guard review refs. Same-head reviews can only be appende
 prefix; reordering or prepending invalidates the transition. This schema has no review
 supersession field, so producers must advance the reviewed head before emitting
 a replacement review set. `merge_ready` is the only state that can carry an
-`eligible` guard. A terminal merge outcome requires the same guard authority
+`eligible` guard. Eligible and consumed guards require
+`attempt.admissionWriterGenerationRef` to exactly equal the current
+`attempt.writerGenerationRef`, so a stale admission cannot survive writer
+generation rollover into merge readiness or a terminal merge outcome. A
+terminal merge outcome requires the same guard authority
 facts in `consumed` state; because guard owner records are immutable, consumption or
 revocation uses a fresh guard ref/digest while preserving the eligible guard's
 exact PR, base/head, review/proof, operator, provider-receipt, and mechanism

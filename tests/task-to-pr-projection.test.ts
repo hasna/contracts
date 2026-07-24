@@ -222,6 +222,7 @@ function validProjection() {
       ref: currentAttempt,
       nonce: attemptNonce("valid-attempt"),
       admissionRef: ref("admission", "codewith", "1", "partial"),
+      admissionWriterGenerationRef: currentGeneration,
       workerActorRef: ref("worker_actor", "codewith", "stable-worker", "partial"),
       workerRef: ref("worker", "codewith", "2", "partial"),
       runtimeRef: ref("runtime", "codewith", "3", "partial"),
@@ -1644,6 +1645,7 @@ describe("task-to-PR projection v1", () => {
       ref: ref("attempt", "todos", "a"),
       nonce: attemptNonce("next"),
       admissionRef: ref("admission", "codewith", "next", "partial"),
+      admissionWriterGenerationRef: ref("writer_generation", "todos", "5"),
       workerRef: ref("worker", "codewith", "next", "partial"),
       runtimeRef: ref("runtime", "codewith", "b", "partial"),
       writerGenerationRef: ref("writer_generation", "todos", "5"),
@@ -1992,6 +1994,7 @@ describe("task-to-PR projection v1", () => {
         ref: ref("attempt", "todos", seeds.attempt),
         nonce: attemptNonce(`${label}`),
         admissionRef: ref("admission", "codewith", `${label}-admission`, "partial"),
+        admissionWriterGenerationRef: ref("writer_generation", "todos", seeds.generation),
         workerRef: ref("worker", "codewith", `${label}-worker`, "partial"),
         runtimeRef: ref("runtime", "codewith", seeds.runtime, "partial"),
         writerGenerationRef: ref("writer_generation", "todos", seeds.generation),
@@ -2157,6 +2160,7 @@ describe("task-to-PR projection v1", () => {
         ref: ref("attempt", "todos", `lineage-${label}`),
         nonce: attemptNonce(`lineage-${label}`),
         admissionRef: ref("admission", "codewith", `lineage-${label}`, "partial"),
+        admissionWriterGenerationRef: ref("writer_generation", "todos", `lineage-${label}`),
         workerRef: ref("worker", "codewith", `lineage-${label}`, "partial"),
         runtimeRef: ref("runtime", "codewith", `lineage-${label}`, "partial"),
         writerGenerationRef: ref("writer_generation", "todos", `lineage-${label}`),
@@ -3377,6 +3381,7 @@ describe("task-to-PR projection v1", () => {
         ref: ref("attempt", "todos", "a"),
         nonce: attemptNonce("review-recovery"),
         admissionRef: ref("admission", "codewith", "review-recovery", "partial"),
+        admissionWriterGenerationRef: ref("writer_generation", "todos", "5"),
         workerRef: ref("worker", "codewith", "review-recovery", "partial"),
         runtimeRef: ref("runtime", "codewith", "b", "partial"),
         writerGenerationRef: ref("writer_generation", "todos", "5"),
@@ -4182,6 +4187,40 @@ describe("task-to-PR projection v1", () => {
     ).toBe(false);
   });
 
+  test("rejects merge readiness and consumed outcomes when admission predates the writer generation", () => {
+    const projection = validProjection();
+    const staleAdmissionAfterRollover = withActiveProvenance({
+      ...projection,
+      state: "merge_ready" as const,
+      attempt: {
+        ...projection.attempt,
+        writerGenerationRef: ref("writer_generation", "todos", "rolled-over")
+      },
+      handoff: undefined,
+      merge: {
+        guard: {
+          ...projection.merge.guard,
+          decision: "eligible" as const
+        }
+      },
+      terminalDispositionRef: undefined,
+      cleanup: undefined,
+      provenanceLedger: []
+    });
+
+    expect(TaskToPrProjectionSchema.safeParse(staleAdmissionAfterRollover).success).toBe(false);
+
+    const staleAdmissionAtConsumedOutcome = withActiveProvenance({
+      ...projection,
+      attempt: {
+        ...projection.attempt,
+        writerGenerationRef: ref("writer_generation", "todos", "consumed-rollover")
+      },
+      provenanceLedger: []
+    });
+    expect(TaskToPrProjectionSchema.safeParse(staleAdmissionAtConsumedOutcome).success).toBe(false);
+  });
+
   test("preserves eligible merge-guard lineage through revocation or consumption", () => {
     const terminalProjection = validProjection();
     const previous = parseProjection({
@@ -4304,6 +4343,7 @@ describe("task-to-PR projection v1", () => {
       ref: ref("attempt", "todos", "terminal-recovery-next"),
       nonce: attemptNonce("terminal-recovery-next"),
       admissionRef: ref("admission", "codewith", "terminal-recovery-next", "partial"),
+      admissionWriterGenerationRef: ref("writer_generation", "todos", "terminal-recovery-next"),
       workerRef: ref("worker", "codewith", "terminal-recovery-next", "partial"),
       runtimeRef: ref("runtime", "codewith", "terminal-recovery-next", "partial"),
       writerGenerationRef: ref("writer_generation", "todos", "terminal-recovery-next"),
