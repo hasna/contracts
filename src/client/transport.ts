@@ -32,53 +32,111 @@
 // URL is set, the base URL falls back to `https://<app>.<domain>` where `<domain>`
 // comes from `HASNA_FLEET_API_DOMAIN` (REQUIRED for a real deployment) or else a
 // neutral, non-resolving placeholder — this published package never bakes in a real
-// internal hostname. If mode is `cloud` but the API key is MISSING, we do NOT
-// silently serve wrong local data — we return `local` with a loud `warning` and
-// `misconfigured: true` so the caller can hard-fail instead of drifting.
+// internal hostname. Missing or malformed fleet-domain configuration resolves to
+// that app-specific placeholder with `misconfigured: true`; callers fail before
+// constructing an authenticated client. If mode is `cloud` but the API key is
+// MISSING, we do NOT silently serve wrong local data — we return `local` with a
+// loud warning and `misconfigured: true` so the caller can hard-fail instead of
+// drifting.
 //
 // SAFETY: this module never returns, logs, or embeds the API key value. Callers
 // receive only presence flags and env-key names.
 
 import { normalizeStorageMode, envToken, type Env } from "../mode.js";
 import type { StorageMode } from "../schemas.js";
+import { isIP } from "node:net";
 
 const FLEET_API_DOMAIN_ENV_KEY = "HASNA_FLEET_API_DOMAIN";
 const NEUTRAL_FLEET_API_DOMAIN = "your-deployment.example";
+const ASCII_CONTROL_PATTERN = /[\u0000-\u001f\u007f]/;
+const DNS_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+
+interface FleetApiDomainResolution {
+  domain: string;
+  source: typeof FLEET_API_DOMAIN_ENV_KEY | "default";
+  misconfigured: boolean;
+  warning: string | null;
+}
+
+function isValidDnsDomain(value: string): boolean {
+  if (
+    value.length === 0 ||
+    value.length > 253 ||
+    ASCII_CONTROL_PATTERN.test(value) ||
+    /[^\x00-\x7f]/.test(value)
+  ) {
+    return false;
+  }
+  return value
+    .split(".")
+    .every(
+      (label) =>
+        label.length <= 63 &&
+        !label.startsWith("xn--") &&
+        DNS_LABEL_PATTERN.test(label),
+    );
+}
+
+function resolveFleetApiDomain(env: Env): FleetApiDomainResolution {
+  const raw = env[FLEET_API_DOMAIN_ENV_KEY];
+  if (raw === undefined) {
+    return {
+      domain: NEUTRAL_FLEET_API_DOMAIN,
+      source: "default",
+      misconfigured: true,
+      warning: `${FLEET_API_DOMAIN_ENV_KEY} is not set; using the non-resolving ${NEUTRAL_FLEET_API_DOMAIN} fallback.`,
+    };
+  }
+
+  const configured = raw.trim().toLowerCase();
+  if (ASCII_CONTROL_PATTERN.test(raw) || !isValidDnsDomain(configured)) {
+    return {
+      domain: NEUTRAL_FLEET_API_DOMAIN,
+      source: FLEET_API_DOMAIN_ENV_KEY,
+      misconfigured: true,
+      warning: `${FLEET_API_DOMAIN_ENV_KEY} is blank or invalid; using the non-resolving ${NEUTRAL_FLEET_API_DOMAIN} fallback.`,
+    };
+  }
+
+  return {
+    domain: configured,
+    source: FLEET_API_DOMAIN_ENV_KEY,
+    misconfigured: false,
+    warning: null,
+  };
+}
+
+function validateAppSlug(name: string): string {
+  if (name.length > 63 || !DNS_LABEL_PATTERN.test(name)) {
+    throw new Error("App name must be one lowercase DNS label.");
+  }
+  return name;
+}
+
+function composeCloudHostname(name: string, domain: string): string {
+  const hostname = `${validateAppSlug(name)}.${domain}`;
+  if (!isValidDnsDomain(hostname)) {
+    throw new Error("Composed cloud hostname must be a valid DNS domain");
+  }
+  return hostname;
+}
 
 /**
  * Fleet API domain suffix. This published package never ships a real internal
  * hostname: override with `HASNA_FLEET_API_DOMAIN` (REQUIRED in a real
  * deployment) or set an explicit `HASNA_<NAME>_API_URL` per app. Absent both,
  * this falls back to a neutral placeholder that intentionally does not
- * resolve to any service. Non-blank malformed values throw so callers can fail
- * closed instead of constructing a request URL from invalid input.
+ * resolve to any service. Blank and malformed values use the same deterministic
+ * placeholder; `resolveClientTransport()` marks that fallback misconfigured so
+ * authenticated clients fail before making a request.
  */
 export function fleetApiDomain(env: Env = process.env as Env): string {
-  const configured = env[FLEET_API_DOMAIN_ENV_KEY]?.trim();
-  if (!configured) return NEUTRAL_FLEET_API_DOMAIN;
-
-  const normalized = configured.toLowerCase();
-  if (normalized.length > 253) {
-    throw new Error(`${FLEET_API_DOMAIN_ENV_KEY} must be a valid DNS domain.`);
-  }
-
-  const labels = normalized.split(".");
-  const valid = labels.every(
-    (label) =>
-      label.length > 0 &&
-      label.length <= 63 &&
-      /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label),
-  );
-  if (!valid) {
-    throw new Error(`${FLEET_API_DOMAIN_ENV_KEY} must be a valid DNS domain.`);
-  }
-
-  return normalized;
+  return resolveFleetApiDomain(env).domain;
 }
 
 /** Default cloud host template. `<app>` is the app slug. */
 export function defaultCloudBaseUrl(name: string, env: Env = process.env as Env): string {
-  return `https://${name}.${fleetApiDomain(env)}`;
+  return `https://${composeCloudHostname(name, fleetApiDomain(env))}`;
 }
 
 export interface ClientTransportEnvKeys {
@@ -105,25 +163,119 @@ export function clientTransportEnvKeys(name: string): ClientTransportEnvKeys {
   };
 }
 
-function firstEnv(env: Env, keys: readonly string[]): { key: string; value: string } | null {
+function firstEnv(
+  env: Env,
+  keys: readonly string[],
+  options: { preserveRaw?: boolean } = {},
+): { key: string; value: string } | null {
   for (const key of keys) {
-    const value = env[key]?.trim();
-    if (value) return { key, value };
+    const raw = env[key];
+    const value = raw?.trim();
+    if (value) return { key, value: options.preserveRaw ? raw! : value };
   }
   return null;
 }
 
-/** Normalize a base URL to `<origin>/v1` (dropping any trailing slash or existing /v1). */
+function rawAuthority(value: string): string {
+  const match = /^[a-z][a-z0-9+.-]*:\/\//i.exec(value);
+  if (!match) throw new Error("API URL must be absolute.");
+  const afterScheme = value.slice(match[0].length);
+  const boundary = afterScheme.search(/[/?#]/);
+  const authority = boundary === -1 ? afterScheme : afterScheme.slice(0, boundary);
+  if (!authority) throw new Error("API URL must include a hostname.");
+  return authority;
+}
+
+function canonicalAuthorityHostname(authority: string): string {
+  let rawHostname: string;
+  if (authority.startsWith("[")) {
+    const closingBracket = authority.indexOf("]");
+    if (closingBracket === -1) {
+      throw new Error("API URL authority must contain a canonical hostname.");
+    }
+    rawHostname = authority.slice(0, closingBracket + 1);
+    const portSuffix = authority.slice(closingBracket + 1);
+    if (portSuffix && !/^:[0-9]+$/.test(portSuffix)) {
+      throw new Error("API URL authority must contain a canonical hostname and port.");
+    }
+    if (isIP(rawHostname.slice(1, -1)) !== 6) {
+      throw new Error("API URL authority must contain a canonical IPv6 literal.");
+    }
+  } else {
+    const firstColon = authority.indexOf(":");
+    const lastColon = authority.lastIndexOf(":");
+    if (firstColon !== lastColon) {
+      throw new Error("IPv6 API URL authorities must use brackets.");
+    }
+    if (lastColon !== -1) {
+      const port = authority.slice(lastColon + 1);
+      if (!/^[0-9]+$/.test(port)) {
+        throw new Error("API URL authority must contain a canonical hostname and port.");
+      }
+      rawHostname = authority.slice(0, lastColon);
+    } else {
+      rawHostname = authority;
+    }
+    if (!isValidDnsDomain(rawHostname.toLowerCase())) {
+      throw new Error("API URL authority must contain a canonical ASCII hostname.");
+    }
+  }
+  return rawHostname.toLowerCase();
+}
+
+function isDeliberateLoopbackHttpAuthority(authority: string): boolean {
+  return /^(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]+)?$/i.test(authority);
+}
+
+/**
+ * Normalize an explicit API base URL to `<origin>/v1`.
+ *
+ * HTTPS may target any explicit ASCII hostname. HTTP is restricted to exact
+ * loopback authorities for local development. Paths and ports are preserved;
+ * query strings, fragments, credentials, controls, IDNs, and punycode are
+ * rejected rather than silently normalized.
+ */
 export function toV1BaseUrl(apiUrl: string): string {
-  const url = new URL(apiUrl);
+  if (ASCII_CONTROL_PATTERN.test(apiUrl)) {
+    throw new Error("API URL must not contain ASCII control characters.");
+  }
+  const input = apiUrl.trim();
+  const authority = rawAuthority(input);
+  if (
+    authority.includes("@") ||
+    authority.includes("\\") ||
+    authority.includes("%") ||
+    /[^\x00-\x7f]/.test(authority)
+  ) {
+    throw new Error("API URL authority must be canonical ASCII without credentials.");
+  }
+
+  const url = new URL(input);
+  const canonicalHostname = canonicalAuthorityHostname(authority);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("API URL must use http or https.");
+  }
+  if (url.username || url.password) {
+    throw new Error("API URL must not include credentials.");
+  }
+  if (!url.hostname || url.hostname.endsWith(".")) {
+    throw new Error("API URL must include a canonical hostname.");
+  }
+  if (url.hostname.toLowerCase() !== canonicalHostname) {
+    throw new Error("API URL authority must not rely on parser hostname normalization.");
+  }
+  if (url.hostname.split(".").some((label) => label.toLowerCase().startsWith("xn--"))) {
+    throw new Error("API URL must not use IDN or punycode hostnames.");
+  }
+  if (url.protocol === "http:" && !isDeliberateLoopbackHttpAuthority(authority)) {
+    throw new Error("API URL may use http only for an exact loopback authority.");
+  }
+  if (url.search || url.hash) {
+    throw new Error("API URL must not include a query string or fragment.");
   }
   let path = url.pathname.replace(/\/+$/, "");
   if (path.endsWith("/v1")) path = path.slice(0, -"/v1".length);
   url.pathname = `${path}/v1`;
-  url.search = "";
-  url.hash = "";
   return url.toString().replace(/\/+$/, "");
 }
 
@@ -147,9 +299,9 @@ export interface ClientTransportResolution {
   /** Env key the API key came from, or null. */
   apiKeySource: string | null;
   /**
-   * True when the operator asked for cloud but the config is incomplete (no API
-   * key), so we fell back to local. Callers SHOULD treat this as an error rather
-   * than silently reading local data.
+   * True when the operator asked for cloud but the config is incomplete. Missing
+   * keys fall back to local; missing or malformed default-domain config resolves
+   * to a neutral placeholder. Callers SHOULD treat either result as an error.
    */
   misconfigured: boolean;
   /** Human-readable warning, or null. Never contains secret values. */
@@ -165,7 +317,7 @@ export interface ClientTransportResolution {
 export function resolveClientTransport(name: string, env: Env = process.env): ClientTransportResolution {
   const keys = clientTransportEnvKeys(name);
   const modeHit = firstEnv(env, keys.modeKeys);
-  const urlHit = firstEnv(env, keys.apiUrlKeys);
+  const urlHit = firstEnv(env, keys.apiUrlKeys, { preserveRaw: true });
   const keyHit = firstEnv(env, keys.apiKeyKeys);
 
   let mode: StorageMode = "local";
@@ -228,15 +380,13 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     };
   }
 
-  const configuredFleetDomain = env[FLEET_API_DOMAIN_ENV_KEY]?.trim();
-  const apiUrlSource = urlHit
-    ? urlHit.key
-    : configuredFleetDomain
-      ? FLEET_API_DOMAIN_ENV_KEY
-      : "default";
+  const fleetDomain = urlHit ? null : resolveFleetApiDomain(env);
+  const apiUrlSource = urlHit ? urlHit.key : fleetDomain!.source;
   let baseUrl: string;
   try {
-    const rawUrl = urlHit?.value ?? defaultCloudBaseUrl(name, env);
+    const rawUrl =
+      urlHit?.value ??
+      `https://${composeCloudHostname(name, fleetDomain!.domain)}`;
     baseUrl = toV1BaseUrl(rawUrl);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -255,6 +405,8 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     };
   }
 
+  if (fleetDomain?.warning) warnings.push(fleetDomain.warning);
+
   return {
     transport: "cloud-http",
     mode,
@@ -264,7 +416,7 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     apiUrlSource,
     apiKeyPresent: true,
     apiKeySource: keyHit.key,
-    misconfigured: false,
+    misconfigured: fleetDomain?.misconfigured ?? false,
     warning: warnings.length > 0 ? warnings.join(" ") : null,
   };
 }
@@ -390,7 +542,7 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
  */
 export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): HasnaHttpTransport {
   const fetchImpl: FetchLike = options.fetchImpl ?? ((input, init) => fetch(input, init));
-  const base = options.baseUrl.replace(/\/+$/, "");
+  const base = toV1BaseUrl(options.baseUrl);
   const timeoutMs = options.timeoutMs ?? 30_000;
   const sleep = options.sleepImpl ?? defaultSleep;
   const defaultRetry = options.retry;

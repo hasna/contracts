@@ -171,12 +171,20 @@ header or `Authorization: Bearer <key>`.
 **Client env vars (self_hosted mode):**
 
 - `HASNA_<APP>_API_URL` + `HASNA_<APP>_API_KEY` — the explicit per-app URL
-  always wins and is normalized to `/v1`.
+  always wins and is normalized to `/v1`. Explicit URLs require canonical ASCII
+  authorities without credentials, controls, IDN/punycode, query strings, or
+  fragments, parser-normalized host forms, or invalid DNS labels. HTTPS paths
+  and ports are preserved; HTTP is accepted only for an exact loopback authority
+  used by local development.
 - If the per-app URL is blank or absent, a valid `HASNA_FLEET_API_DOMAIN`
   supplies the domain suffix for `https://<app>.<domain>/v1`.
-- If both URL settings are blank or absent, the client uses the neutral,
-  non-resolving `your-deployment.example` placeholder. A non-blank malformed
-  fleet domain fails closed instead of producing a request URL.
+- The composed `<app>.<domain>` host must remain within DNS label and total-name
+  limits.
+- If the fleet domain is missing, blank, or malformed, resolution uses the
+  app-specific neutral, non-resolving `https://<app>.your-deployment.example/v1`
+  placeholder and marks the configuration `misconfigured`. The high-level
+  client throws before constructing an authenticated transport, so an API key
+  is never sent to the placeholder or to a parser-confused authority.
 
 The short aliases `<APP>_API_URL` and `<APP>_API_KEY` remain supported after the
 canonical `HASNA_` names. Client configuration uses an HTTP API URL, never a
