@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const CONTRACTS_PACKAGE_NAME = "@hasna/contracts";
-export const CONTRACTS_PACKAGE_VERSION = "0.5.1";
+export const CONTRACTS_PACKAGE_VERSION = "0.6.0";
 
 export const SCHEMA_IDS = {
   actorRef: "hasna.actor_ref.v1",
@@ -2058,12 +2058,12 @@ export type AgentTrajectory = z.infer<typeof AgentTrajectorySchema>;
 // Hasna Service Contract v1 (`hasna.contract.json` repo self-description)
 //
 // A repo's `hasna.contract.json` declares its name, repo class, the contract
-// version it targets, the contract-kit version it tracks, its declared bins,
-// and its storage boundary. Storage runtime enum is `local | cloud` ONLY per
-// Amendment A1 (PURE REMOTE): `cloud` sends reads AND writes straight to a
-// cloud Postgres owned by the app; there is no sync engine, no cache-as-mode,
-// and no hybrid/remote/self_hosted runtime. Those legacy words are accepted
-// only as deprecated *aliases* that normalize to `cloud` (see src/mode.ts).
+// version it targets, the contract-kit version it tracks, its customer-facing
+// hosting stories, runtime placements, four product surfaces, declared bins,
+// and its storage boundary. Runtime placement (`local | self_hosted | cloud`)
+// is intentionally separate from storage routing (`local | cloud`): a
+// self-hosted server uses the cloud storage router against operator-owned
+// Postgres, while `cloud` placement is reserved for Hasna SaaS.
 // ---------------------------------------------------------------------------
 
 export const SERVICE_CONTRACT_VERSION = "v1";
@@ -2071,9 +2071,20 @@ export const SERVICE_CONTRACT_VERSION = "v1";
 export const RepoClassSchema = z.enum(["library", "cli-with-store", "service", "saas"]);
 export type RepoClass = z.infer<typeof RepoClassSchema>;
 
-export const DEPLOYMENT_MODES = ["local", "self-hosted", "cloud"] as const;
-export const DeploymentModeSchema = z.enum(DEPLOYMENT_MODES);
+export const DEPLOYMENT_MODES = ["local", "self_hosted", "cloud"] as const;
+export const DEPRECATED_DEPLOYMENT_MODE_ALIASES = ["self-hosted"] as const;
+export const DeploymentModeSchema = z
+  .enum([...DEPLOYMENT_MODES, ...DEPRECATED_DEPLOYMENT_MODE_ALIASES])
+  .transform((value) => (value === "self-hosted" ? "self_hosted" : value));
 export type DeploymentMode = z.infer<typeof DeploymentModeSchema>;
+
+export const HOSTING_MODES = ["user-hosted", "hasna-saas"] as const;
+export const HostingModeSchema = z.enum(HOSTING_MODES);
+export type HostingMode = z.infer<typeof HostingModeSchema>;
+
+export const SERVICE_SURFACE_KINDS = ["api", "sdk", "mcp", "cli"] as const;
+export const ServiceSurfaceKindSchema = z.enum(SERVICE_SURFACE_KINDS);
+export type ServiceSurfaceKind = z.infer<typeof ServiceSurfaceKindSchema>;
 
 export const ServiceSurfaceStatusSchema = z.enum(["supported", "deferred", "unsupported"]);
 export type ServiceSurfaceStatus = z.infer<typeof ServiceSurfaceStatusSchema>;
@@ -2116,6 +2127,7 @@ export type DeploymentReadinessGate = z.infer<typeof DeploymentReadinessGateSche
 export const ServiceSurfaceSchema = z
   .object({
     name: z.string().min(1),
+    kind: ServiceSurfaceKindSchema.optional(),
     status: ServiceSurfaceStatusSchema,
     bin: z.string().min(1).optional(),
     mcpBin: z.string().min(1).optional(),
@@ -2126,20 +2138,34 @@ export const ServiceSurfaceSchema = z
     version: ServiceEndpointSchema.optional(),
     apiBasePath: z.string().regex(/^\/v[0-9]+$/, "Stable API base path must be /vN").optional(),
     openApiPath: z.string().regex(/^\/[A-Za-z0-9_./:-]*$/).optional(),
+    exportSubpath: z.string().regex(/^\.(?:\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*)?$/, "SDK export subpaths must be package export keys such as . or ./sdk").optional(),
+    generatedFrom: z.string().regex(/^\/[A-Za-z0-9_./:-]*$/, "SDK generatedFrom must reference an absolute OpenAPI path").optional(),
+    clientClassName: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/).optional(),
     deferReason: z.string().min(1).optional(),
     readinessGates: z.array(DeploymentReadinessGateSchema).default([])
   })
   .strict()
   .superRefine((value, ctx) => {
     if (value.status === "supported") {
-      if (!value.bin) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported service surfaces require a serve bin", path: ["bin"] });
+      if (!value.kind || value.kind === "api") {
+        if (!value.bin) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported API surfaces require a serve bin", path: ["bin"] });
+        }
+        if (!value.health) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported API surfaces require a health endpoint", path: ["health"] });
+        }
+        if (!value.version) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported API surfaces require a version endpoint", path: ["version"] });
+        }
       }
-      if (!value.health) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported service surfaces require a health endpoint", path: ["health"] });
+      if (value.kind === "cli" && !value.bin) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported CLI surfaces require a bin", path: ["bin"] });
       }
-      if (!value.version) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported service surfaces require a version endpoint", path: ["version"] });
+      if (value.kind === "mcp" && !value.mcpBin) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported MCP surfaces require an mcpBin", path: ["mcpBin"] });
+      }
+      if (value.kind === "sdk" && !value.exportSubpath) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Supported SDK surfaces require an exportSubpath", path: ["exportSubpath"] });
       }
     }
     if ((value.status === "deferred" || value.status === "unsupported") && !value.deferReason) {
@@ -2161,10 +2187,34 @@ export const ServiceSurfaceSchema = z
   });
 export type ServiceSurface = z.infer<typeof ServiceSurfaceSchema>;
 
+export const SurfaceConformanceWaiverSchema = z
+  .object({
+    kind: ServiceSurfaceKindSchema,
+    reason: z.string().trim().min(1)
+  })
+  .strict();
+export type SurfaceConformanceWaiver = z.infer<typeof SurfaceConformanceWaiverSchema>;
+
+export const ServiceContractMetadataSchema = z
+  .object({
+    conformance: z
+      .object({
+        waivedSurfaces: z.array(SurfaceConformanceWaiverSchema).default([])
+      })
+      .catchall(z.unknown())
+      .optional()
+  })
+  .catchall(z.unknown());
+export type ServiceContractMetadata = z.infer<typeof ServiceContractMetadataSchema>;
+
 /** Runtime storage enum. `local | cloud` ONLY (Amendment A1: PURE REMOTE). */
 export const STORAGE_MODES = ["local", "cloud"] as const;
 export const StorageModeSchema = z.enum(STORAGE_MODES);
 export type StorageMode = z.infer<typeof StorageModeSchema>;
+
+export const STORAGE_ENGINES = ["sqlite", "postgres"] as const;
+export const StorageEngineSchema = z.enum(STORAGE_ENGINES);
+export type StorageEngine = z.infer<typeof StorageEngineSchema>;
 
 /** Deprecated storage-mode aliases accepted at parse time and mapped to cloud. */
 export const DEPRECATED_STORAGE_MODE_ALIASES = ["remote", "hybrid", "self_hosted"] as const;
@@ -2194,7 +2244,12 @@ export function allowedBinsForName(name: string): string[] {
   return ALLOWED_BIN_SUFFIXES.map((suffix) => `${name}${suffix}`);
 }
 
-/** Canonical secret ref for an app database URL: `hasna/oss/<name>/database-url`. */
+/**
+ * Legacy/private-tier secret ref helper.
+ *
+ * Public OSS manifests must not persist this value; use `storage.envPrefix`
+ * there and keep concrete secret bindings in private deployment config.
+ */
 export function databaseUrlSecretRefFor(name: string): string {
   return `hasna/oss/${name}/database-url`;
 }
@@ -2207,19 +2262,45 @@ export function defaultSqlitePathFor(name: string): string {
 export const StorageContractSchema = z
   .object({
     mode: StorageModeSchema,
+    /** Supported storage engines. This capability matrix is independent of runtime mode. */
+    engines: z.array(StorageEngineSchema).min(1).optional(),
     /** Primary env prefix, e.g. `HASNA_TODOS_`. Defaults to `HASNA_<NAME>_`. */
     envPrefix: z.string().regex(/^HASNA_[A-Z][A-Z0-9]*_$/).optional(),
     /** Optional short alias env prefix, e.g. `TODOS_`. */
     aliasEnvPrefix: z.string().regex(/^[A-Z][A-Z0-9]*_$/).optional(),
-    /** Secret Manager ref for the cloud database URL. */
+    /** Legacy/private-tier secret ref. Public conformance rejects this field. */
     databaseUrlSecretRef: z
       .string()
       .regex(/^hasna\/oss\/[a-z0-9-]+\/database-url$/)
       .optional(),
     /** Local sqlite path (`~/.hasna/<name>/<name>.db`). */
-    sqlitePath: z.string().min(1).optional()
+    sqlitePath: z.string().min(1).endsWith(".db", "storage.sqlitePath must end in .db").optional(),
+    /** Live PostgreSQL proof gate. The DSN environment variable is test-only. */
+    pgTestGate: z
+      .object({
+        envVar: z.string().regex(/^[A-Z][A-Z0-9_]*_TEST_DATABASE_URL$/),
+        command: z.string().trim().min(1)
+      })
+      .strict()
+      .optional()
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.engines && new Set(value.engines).size !== value.engines.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "storage.engines must not contain duplicates",
+        path: ["engines"]
+      });
+    }
+    if (value.engines?.includes("postgres") && !value.envPrefix) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "storage.engines containing postgres requires envPrefix for the HASNA_<NAME>_DATABASE_URL contract",
+        path: ["envPrefix"]
+      });
+    }
+  });
 export type StorageContract = z.infer<typeof StorageContractSchema>;
 
 export const ServiceContractManifestSchema = z
@@ -2235,12 +2316,27 @@ export const ServiceContractManifestSchema = z
     description: z.string().min(1).optional(),
     bins: z.array(z.string().min(1)).default([]),
     storage: StorageContractSchema.optional(),
+    hosting: z.array(HostingModeSchema).min(1).default(["user-hosted"]),
     deploymentModes: z.array(DeploymentModeSchema).default(["local"]),
     serviceSurfaces: z.array(ServiceSurfaceSchema).default([]),
-    metadata: MetadataSchema.optional()
+    metadata: ServiceContractMetadataSchema.optional()
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (new Set(value.hosting).size !== value.hosting.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "hosting must not contain duplicates",
+        path: ["hosting"]
+      });
+    }
+    if (new Set(value.deploymentModes).size !== value.deploymentModes.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "deploymentModes must not contain duplicates after alias normalization",
+        path: ["deploymentModes"]
+      });
+    }
     const allowed = new Set(allowedBinsForName(value.name));
     const seenBins = new Set<string>();
     for (const [index, bin] of value.bins.entries()) {
@@ -2275,13 +2371,6 @@ export const ServiceContractManifestSchema = z
           path: ["storage", "databaseUrlSecretRef"]
         });
       }
-      if (value.storage.mode === "cloud" && !value.storage.databaseUrlSecretRef) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "cloud storage requires a databaseUrlSecretRef (PURE REMOTE: reads and writes go to cloud Postgres)",
-          path: ["storage", "databaseUrlSecretRef"]
-        });
-      }
     }
 
     if (value.class === "library") {
@@ -2300,12 +2389,21 @@ export const ServiceContractManifestSchema = z
     if (value.class === "cli-with-store") {
       if (!value.storage) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "cli-with-store repos must declare storage", path: ["storage"] });
-      } else if (value.storage.mode === "local" && !value.storage.sqlitePath) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "local cli-with-store storage requires sqlitePath (~/.hasna/<name>/<name>.db)",
-          path: ["storage", "sqlitePath"]
-        });
+      } else {
+        if (value.storage.mode === "local" && !value.storage.sqlitePath) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "local cli-with-store storage requires sqlitePath (~/.hasna/<name>/<name>.db)",
+            path: ["storage", "sqlitePath"]
+          });
+        }
+        if (value.storage.engines && (!value.storage.engines.includes("sqlite") || !value.storage.engines.includes("postgres"))) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "cli-with-store storage.engines must declare both sqlite and postgres",
+            path: ["storage", "engines"]
+          });
+        }
       }
       if (!seenBins.has(value.name)) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `cli-with-store repos must ship the "${value.name}" bin`, path: ["bins"] });
@@ -2315,6 +2413,12 @@ export const ServiceContractManifestSchema = z
     if (value.class === "service") {
       if (!value.storage) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "service repos must declare storage", path: ["storage"] });
+      } else if (value.storage.engines && (!value.storage.engines.includes("sqlite") || !value.storage.engines.includes("postgres"))) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "service storage.engines must declare both sqlite and postgres",
+          path: ["storage", "engines"]
+        });
       }
       if (!hasBin("-serve")) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `service repos must ship the "${value.name}-serve" bin`, path: ["bins"] });
@@ -2366,6 +2470,19 @@ export const ServiceContractManifestSchema = z
           });
         }
       }
+    }
+
+    const waivedKinds = value.metadata?.conformance?.waivedSurfaces ?? [];
+    const seenWaivers = new Set<ServiceSurfaceKind>();
+    for (const [index, waiver] of waivedKinds.entries()) {
+      if (seenWaivers.has(waiver.kind)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate conformance waiver for ${waiver.kind}`,
+          path: ["metadata", "conformance", "waivedSurfaces", index, "kind"]
+        });
+      }
+      seenWaivers.add(waiver.kind);
     }
   });
 export type ServiceContractManifest = z.infer<typeof ServiceContractManifestSchema>;

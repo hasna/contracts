@@ -4,7 +4,41 @@
   "name": "contracts",
   "class": "library",
   "contractVersion": "v1",
-  "kitVersion": "0.4.0",
+  "kitVersion": "0.6.0",
   "description": "Shared schemas, validators, and conformance kit for Hasna open-source agent infrastructure. Ships types and CLI checks only; no store.",
-  "bins": ["contracts", "contracts-cli"]
+  "bins": ["contracts", "contracts-cli"],
+  "hosting": ["user-hosted"],
+  "deploymentModes": ["local", "self_hosted"],
+  "serviceSurfaces": [
+    {
+      "name": "package-sdk",
+      "kind": "sdk",
+      "status": "supported",
+      "authMode": "none",
+      "deploymentModes": ["local", "self_hosted"],
+      "exportSubpath": "."
+    },
+    {
+      "name": "contract-cli",
+      "kind": "cli",
+      "status": "supported",
+      "bin": "contracts",
+      "authMode": "local-only",
+      "deploymentModes": ["local", "self_hosted"]
+    }
+  ],
+  "metadata": {
+    "conformance": {
+      "waivedSurfaces": [
+        {
+          "kind": "api",
+          "reason": "Execution-free schema library; it does not own an HTTP service boundary."
+        },
+        {
+          "kind": "mcp",
+          "reason": "Execution-free schema library; MCP execution belongs to consuming applications."
+        }
+      ]
+    }
+  }
 }

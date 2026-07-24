@@ -667,7 +667,13 @@ of magical exactly-once execution. It MUST use:
 
 ## 8. `hasna.service_contract.v2`
 
-The existing `hasna.service_contract.v1` remains valid and unchanged.
+The existing `hasna.service_contract.v1` remains readable. Its additive
+capability fields may evolve compatibly under the rules in Section 10.1; the
+four-surface, hosting, storage-engine, and canonical `self_hosted` declarations
+land in v1 because old readers can ignore them safely. The only intentional v1
+validation tightening is that an explicitly declared SQLite path must end in
+`.db`.
+
 Deployment's accepted same-origin API path is `/api/v1`; v1 currently models a
 root `/vN` base path. Supporting `/api/vN` therefore requires a deliberate v2,
 not a silent relaxation of the v1 schema.
@@ -697,7 +703,7 @@ contractVersion: v2
   modes, reconciliation, and readiness gates;
 - declare package, installed-artifact, schema-drift, parity, auth-negative,
   no-secret, and evidence-bundle smokes;
-- distinguish `local`, `self-hosted`, and `cloud` deployment modes from the
+- distinguish `local`, `self_hosted`, and `cloud` deployment modes from the
   package's `local | cloud` runtime storage vocabulary.
 
 The implementation MUST keep v1 exports and validation available. It MUST ship

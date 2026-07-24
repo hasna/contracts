@@ -21,7 +21,8 @@ Excluded packages:
 - CLI-only or library packages that explicitly declare unsupported service
   surfaces in `hasna.contract.json`.
 
-Deployment mode vocabulary is `local`, `self-hosted`, and `cloud`.
+Runtime placement vocabulary is `local`, `self_hosted`, and `cloud`.
+`self-hosted` is accepted only as a deprecated manifest-input alias.
 `remote` is a location word, not a deployment mode.
 
 ## Contract Fields
@@ -31,7 +32,7 @@ Every onboarded repo must have `hasna.contract.json` validated by
 
 - Package identity: package name, version source, repo path, and canonical app
   short name.
-- Deployment mode support: `local`, `self-hosted`, `cloud`, or explicit
+- Runtime placement support: `local`, `self_hosted`, `cloud`, or explicit
   unsupported reason per mode.
 - Published bins: primary CLI, MCP, serve, worker, runner, daemon, migrate, and
   doctor bins when supported.

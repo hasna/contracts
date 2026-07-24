@@ -27,7 +27,7 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
   $id: "https://github.com/hasna/contracts/schema/hasna.service_contract.v1.json",
   title: "Hasna Service Contract v1",
   description:
-    "Repo self-description (hasna.contract.json) for the Hasna Service Contract v1. Storage runtime enum is local|cloud ONLY per Amendment A1 (PURE REMOTE).",
+    "Repo self-description (hasna.contract.json) for the Hasna Service Contract v1. Hosting story, runtime placement, product surfaces, and storage capabilities are separate declarations.",
   type: "object",
   additionalProperties: false,
   required: ["schema", "name", "class", "contractVersion", "kitVersion"],
@@ -55,9 +55,18 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
     },
     deploymentModes: {
       type: "array",
-      items: { enum: ["local", "self-hosted", "cloud"] },
+      items: { enum: ["local", "self_hosted", "cloud", "self-hosted"] },
+      uniqueItems: true,
       description:
-        "Supported deployment modes. local = this machine, self-hosted = Hasna-owned AWS, cloud = multi-tenant SaaS for outside users."
+        "Runtime placements. Write self_hosted; self-hosted is a deprecated input alias. local = this machine, self_hosted = any operator-run server including internal dogfood, cloud = Hasna SaaS control plane."
+    },
+    hosting: {
+      type: "array",
+      items: { enum: ["user-hosted", "hasna-saas"] },
+      minItems: 1,
+      uniqueItems: true,
+      description:
+        "Customer-facing product stories. Public OSS cores include user-hosted; add hasna-saas only when a managed control plane exists."
     },
     serviceSurfaces: {
       type: "array",
@@ -67,14 +76,16 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
         required: ["name", "status", "authMode", "deploymentModes"],
         properties: {
           name: { type: "string", minLength: 1 },
+          kind: { enum: ["api", "sdk", "mcp", "cli"] },
           status: { enum: ["supported", "deferred", "unsupported"] },
           bin: { type: "string", minLength: 1 },
           mcpBin: { type: "string", minLength: 1 },
           authMode: { enum: ["none", "local-only", "api-key", "session", "service-token", "custom"] },
           deploymentModes: {
             type: "array",
-            items: { enum: ["local", "self-hosted", "cloud"] },
-            minItems: 1
+            items: { enum: ["local", "self_hosted", "cloud", "self-hosted"] },
+            minItems: 1,
+            uniqueItems: true
           },
           health: {
             type: "object",
@@ -111,6 +122,20 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
           },
           apiBasePath: { type: "string", pattern: "^/v[0-9]+$" },
           openApiPath: { type: "string", pattern: "^/[A-Za-z0-9_./:-]*$" },
+          exportSubpath: {
+            type: "string",
+            pattern: "^\\.(?:\\/[A-Za-z0-9_.-]+(?:\\/[A-Za-z0-9_.-]+)*)?$",
+            description: "SDK package export key such as . or ./sdk."
+          },
+          generatedFrom: {
+            type: "string",
+            pattern: "^/[A-Za-z0-9_./:-]*$",
+            description: "OpenAPI path used to generate the SDK."
+          },
+          clientClassName: {
+            type: "string",
+            pattern: "^[A-Za-z_$][A-Za-z0-9_$]*$"
+          },
           deferReason: { type: "string", minLength: 1 },
           readinessGates: {
             type: "array",
@@ -134,7 +159,7 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
         }
       },
       description:
-        "Declared HTTP/MCP service surfaces. Supported surfaces name lifecycle endpoints; unsafe or unfinished surfaces use deferred/unsupported with a reason."
+        "Declared API, SDK, MCP, and CLI product surfaces. Legacy entries without kind remain parseable; new manifests declare kind explicitly."
     },
     storage: {
       type: "object",
@@ -144,6 +169,13 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
         mode: {
           enum: ["local", "cloud"],
           description: "Runtime storage enum. local|cloud ONLY (Amendment A1: PURE REMOTE)."
+        },
+        engines: {
+          type: "array",
+          items: { enum: ["sqlite", "postgres"] },
+          minItems: 1,
+          uniqueItems: true,
+          description: "Supported storage engines; capability metadata independent of the active storage mode."
         },
         envPrefix: {
           type: "string",
@@ -158,16 +190,53 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
         databaseUrlSecretRef: {
           type: "string",
           pattern: "^hasna/oss/[a-z0-9-]+/database-url$",
-          description: "Secret Manager ref for the cloud database URL."
+          description: "Legacy/private-tier database secret ref. Public conformance rejects this field."
         },
         sqlitePath: {
           type: "string",
-          minLength: 1,
+          pattern: "\\.db$",
           description: "Local sqlite path (~/.hasna/<name>/<name>.db)."
+        },
+        pgTestGate: {
+          type: "object",
+          additionalProperties: false,
+          required: ["envVar", "command"],
+          properties: {
+            envVar: {
+              type: "string",
+              pattern: "^[A-Z][A-Z0-9_]*_TEST_DATABASE_URL$"
+            },
+            command: { type: "string", minLength: 1 }
+          },
+          description: "Environment-gated live PostgreSQL test command."
         }
       }
     },
-    metadata: { type: "object" }
+    metadata: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        conformance: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            waivedSurfaces: {
+              type: "array",
+              uniqueItems: true,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["kind", "reason"],
+                properties: {
+                  kind: { enum: ["api", "sdk", "mcp", "cli"] },
+                  reason: { type: "string", minLength: 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   }
 } as const;
 
@@ -210,6 +279,7 @@ export function loadServiceContractManifest(repoRoot: string): LoadServiceContra
 export interface ServiceContractSpec {
   name: string;
   env: StorageEnvKeys;
+  /** Legacy/private-tier helper; never persist this value in a public manifest. */
   databaseUrlSecretRef: string;
   sqlitePath: string;
   allowedBins: string[];

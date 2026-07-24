@@ -12,7 +12,10 @@ import {
   validateServiceContractManifest,
   loadServiceContractManifest,
   SERVICE_CONTRACT_JSON_SCHEMA,
-  ContractSchemaRegistry
+  ContractSchemaRegistry,
+  SERVICE_SURFACE_KINDS,
+  STORAGE_ENGINES,
+  HOSTING_MODES
 } from "../src";
 
 const repoRoot = join(import.meta.dir, "..");
@@ -49,6 +52,12 @@ describe("service contract helpers", () => {
   test("is registered in the schema registry", () => {
     expect(ContractSchemaRegistry[SCHEMA_IDS.serviceContract]).toBe(ServiceContractManifestSchema);
   });
+
+  test("exports the portable surface, storage capability, and hosting vocabularies", () => {
+    expect(SERVICE_SURFACE_KINDS).toEqual(["api", "sdk", "mcp", "cli"]);
+    expect(STORAGE_ENGINES).toEqual(["sqlite", "postgres"]);
+    expect(HOSTING_MODES).toEqual(["user-hosted", "hasna-saas"]);
+  });
 });
 
 describe("service contract manifest validation", () => {
@@ -67,6 +76,24 @@ describe("service contract manifest validation", () => {
     expect(validateServiceContractManifest(bad).success).toBe(false);
   });
 
+  test("normalizes legacy self-hosted placement spelling without conflating it with cloud", () => {
+    const parsed = validateServiceContractManifest({
+      ...baseCliWithStore,
+      deploymentModes: ["local", "self-hosted"]
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.deploymentModes).toEqual(["local", "self_hosted"]);
+      expect(parsed.data.deploymentModes).not.toContain("cloud");
+    }
+  });
+
+  test("defaults the public product story to user-hosted", () => {
+    const parsed = validateServiceContractManifest(baseCliWithStore);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.hosting).toEqual(["user-hosted"]);
+  });
+
   test("library must not declare storage or serve/mcp bins", () => {
     const lib = {
       schema: SCHEMA_IDS.serviceContract,
@@ -81,11 +108,25 @@ describe("service contract manifest validation", () => {
     expect(validateServiceContractManifest({ ...lib, bins: ["contracts", "contracts-serve"] }).success).toBe(false);
   });
 
-  test("cloud storage requires a database secret ref", () => {
-    const bad = { ...baseCliWithStore, storage: { mode: "cloud" } };
-    expect(validateServiceContractManifest(bad).success).toBe(false);
-    const good = { ...baseCliWithStore, storage: { mode: "cloud", databaseUrlSecretRef: "hasna/oss/todos/database-url" } };
-    expect(validateServiceContractManifest(good).success).toBe(true);
+  test("cloud storage can use the public env contract without a secret reference", () => {
+    const publicManifest = {
+      ...baseCliWithStore,
+      storage: {
+        mode: "cloud",
+        envPrefix: "HASNA_TODOS_"
+      }
+    };
+    expect(validateServiceContractManifest(publicManifest).success).toBe(true);
+
+    const privateCompatibility = {
+      ...baseCliWithStore,
+      storage: {
+        mode: "cloud",
+        envPrefix: "HASNA_TODOS_",
+        databaseUrlSecretRef: "hasna/oss/todos/database-url"
+      }
+    };
+    expect(validateServiceContractManifest(privateCompatibility).success).toBe(true);
   });
 
   test("service class requires a -serve bin and storage", () => {
@@ -122,6 +163,107 @@ describe("service contract manifest validation", () => {
     expect(validateServiceContractManifest(svc).success).toBe(true);
     expect(validateServiceContractManifest({ ...svc, bins: ["loops"] }).success).toBe(false);
     expect(validateServiceContractManifest({ ...svc, serviceSurfaces: [] }).success).toBe(false);
+  });
+
+  test("service storage capability declarations require both engines", () => {
+    const service = {
+      schema: SCHEMA_IDS.serviceContract,
+      name: "loops",
+      class: "service",
+      contractVersion: SERVICE_CONTRACT_VERSION,
+      kitVersion: "0.6.0",
+      bins: ["loops", "loops-serve"],
+      storage: {
+        mode: "local",
+        engines: ["sqlite"],
+        sqlitePath: "~/.hasna/loops/loops.db"
+      },
+      serviceSurfaces: [
+        {
+          name: "http",
+          status: "deferred",
+          authMode: "api-key",
+          deploymentModes: ["local"],
+          deferReason: "Fixture only."
+        }
+      ]
+    };
+    const parsed = validateServiceContractManifest(service);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues.some((issue) => issue.message.includes("both sqlite and postgres"))).toBe(true);
+    }
+  });
+
+  test("rejects non-database SQLite paths", () => {
+    const bad = {
+      ...baseCliWithStore,
+      storage: {
+        mode: "local",
+        sqlitePath: "~/.hasna/todos/accounts.json"
+      }
+    };
+    const parsed = validateServiceContractManifest(bad);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues.some((issue) => issue.path.join(".") === "storage.sqlitePath")).toBe(true);
+    }
+  });
+
+  test("rejects duplicate engines, hosting stories, and surface waivers", () => {
+    const duplicateEngines = {
+      ...baseCliWithStore,
+      storage: {
+        mode: "local",
+        engines: ["sqlite", "sqlite"],
+        sqlitePath: "~/.hasna/todos/todos.db"
+      }
+    };
+    expect(validateServiceContractManifest(duplicateEngines).success).toBe(false);
+    expect(validateServiceContractManifest({ ...baseCliWithStore, hosting: ["user-hosted", "user-hosted"] }).success).toBe(false);
+    expect(
+      validateServiceContractManifest({
+        ...baseCliWithStore,
+        metadata: {
+          conformance: {
+            waivedSurfaces: [
+              { kind: "api", reason: "No HTTP runtime." },
+              { kind: "api", reason: "Duplicate waiver." }
+            ]
+          }
+        }
+      }).success
+    ).toBe(false);
+  });
+
+  test("rejects malformed surface waivers", () => {
+    const bad = {
+      ...baseCliWithStore,
+      metadata: {
+        conformance: {
+          waivedSurfaces: [{ kind: "sdk", reason: "   " }]
+        }
+      }
+    };
+    expect(validateServiceContractManifest(bad).success).toBe(false);
+  });
+
+  test("preserves legacy conformance metadata while typing surface waivers", () => {
+    const legacy = {
+      ...baseCliWithStore,
+      metadata: {
+        conformance: {
+          checkCommand: "bun run check:contracts",
+          evidencePath: "artifacts/contracts.json"
+        }
+      }
+    };
+    const parsed = validateServiceContractManifest(legacy);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.metadata?.conformance?.checkCommand).toBe("bun run check:contracts");
+      expect(parsed.data.metadata?.conformance?.waivedSurfaces).toEqual([]);
+    }
   });
 
   test("service surfaces require lifecycle endpoints or explicit defer reasons", () => {
@@ -183,6 +325,18 @@ describe("service contract JSON schema and repo manifest", () => {
     if (loaded.ok) {
       expect(loaded.manifest.name).toBe("contracts");
       expect(loaded.manifest.class).toBe("library");
+    }
+  });
+
+  test("this repo dogfoods the package version and explicit surface policy", () => {
+    const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as { version: string };
+    const loaded = loadServiceContractManifest(repoRoot);
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) {
+      expect(loaded.manifest.kitVersion).toBe(pkg.version);
+      expect(loaded.manifest.hosting).toEqual(["user-hosted"]);
+      expect(loaded.manifest.serviceSurfaces.map((surface) => surface.kind)).toEqual(["sdk", "cli"]);
+      expect(loaded.manifest.metadata?.conformance?.waivedSurfaces.map((waiver) => waiver.kind)).toEqual(["api", "mcp"]);
     }
   });
 });

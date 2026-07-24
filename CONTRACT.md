@@ -24,8 +24,8 @@ Documentation and deployment guidance is organized into three tiers. These are
 | `self_hosted` | Operator runs the app against their own Postgres (and their own object store if any). Delivered via the repo's root `docker-compose.yml`. |
 | `cloud` | Hasna-operated managed offering (SaaS). |
 
-`self_hosted` at the docs tier maps to the **`cloud` runtime mode** pointed at a
-private database URL. It is not a distinct runtime.
+`self_hosted` is a distinct runtime placement. Its server process uses the
+**`cloud` storage mode** pointed at an operator-owned private database URL.
 
 ---
 
@@ -50,11 +50,12 @@ The runtime storage enum is **`local | cloud` ONLY**.
    local→cloud for comparison; **reads stay local** and the app **never reads
    from cloud** in shadow. Shadow is a migration step, not a runtime mode.
 
-The words `remote`, `hybrid`, and `self_hosted` are accepted **only as
-deprecated aliases** that normalize to `cloud`. The `hasna.contract.json`
-manifest and every wire schema reject them; only the runtime env normalizer
-(`normalizeStorageMode`, `src/mode.ts`) tolerates them and emits a deprecation
-warning.
+The words `remote`, `hybrid`, and `self_hosted` are accepted as deprecated
+**storage-mode** aliases that normalize to `cloud`. This does not erase the
+separate runtime-placement meaning of `self_hosted`: manifests write
+`deploymentModes: ["self_hosted"]` for an operator-run server. The old
+hyphenated deployment spelling `self-hosted` still parses for migration and is
+canonicalized to `self_hosted`.
 
 The reference normalizer lives in `src/mode.ts`, extracted from open-mailery's
 `normalizeMaileryMode`.
@@ -126,14 +127,23 @@ per-repo waiver recorded in `hasna.contract.json` review. `library` repos
 
 ---
 
-## 6. SQLite path and secret ref conventions
+## 6. Storage capabilities and private secret bindings
 
 - **Local SQLite path:** `~/.hasna/<name>/<name>.db`.
-- **Cloud database secret ref (Secrets Manager):** `hasna/oss/<name>/database-url`.
+- `storage.sqlitePath` **MUST** end in `.db`.
+- Store-owning OSS cores declare `storage.engines: ["sqlite", "postgres"]`.
+- A PostgreSQL capability declaration **MUST** include `storage.envPrefix`, so
+  the serve/migrate boundary can derive `HASNA_<NAME>_DATABASE_URL`.
+- `storage.pgTestGate` records the disposable live-Postgres test env var and
+  command. Conformance records the command as data and never executes it.
 
-Apps read the secret ref only through their secret store; the resolved URL is
-supplied to the app as `HASNA_<NAME>_DATABASE_URL` at runtime and is never baked
-into an image or committed.
+Public OSS manifests **MUST NOT** contain secret-reference paths, internal
+`*.hasna.xyz` hosts, cloud ARNs, or account IDs. Concrete database secret
+bindings belong in private deploy/infra configuration. The resolved URL is
+supplied to the server as `HASNA_<NAME>_DATABASE_URL` at runtime and is never
+baked into an image or committed. The legacy `databaseUrlSecretRef` field
+remains parseable for private-tier compatibility, but public conformance rejects
+it.
 
 ---
 
@@ -159,14 +169,18 @@ Ships types/validators/helpers. No store, no service.
 ### `cli-with-store`
 A CLI that owns local (and optionally cloud) data.
 - **MUST** declare `storage`.
+- **MUST** declare both `sqlite` and `postgres` in `storage.engines`.
 - If `storage.mode` is `local`, **MUST** set `storage.sqlitePath`
   (`~/.hasna/<name>/<name>.db`).
+- **MUST** declare `storage.pgTestGate`.
 - **MUST** ship the `<name>` bin.
 - SHOULD ship a `<name>-mcp` bin for agent access.
 
 ### `service`
 A long-running HTTP/MCP service.
 - **MUST** declare `storage`.
+- **MUST** declare both `sqlite` and `postgres` in `storage.engines`.
+- **MUST** declare `storage.pgTestGate`.
 - **MUST** ship a `<name>-serve` bin and expose `/health`, `/ready`, `/version`.
 - **MUST** ship a root `docker-compose.yml`.
 - SHOULD ship a `<name>-mcp` bin.
@@ -174,7 +188,8 @@ A long-running HTTP/MCP service.
 ### `saas`
 A Hasna-operated managed service.
 - **MUST** declare `storage` with `storage.mode` = `cloud`.
-- **MUST** set `storage.databaseUrlSecretRef` (`hasna/oss/<name>/database-url`).
+- **MUST** declare `storage.envPrefix`; concrete database secret bindings stay
+  in private deployment configuration, not the public manifest.
 - **MUST** ship a `<name>-serve` bin and expose `/health`, `/ready`, `/version`.
 - **MUST** ship a root `docker-compose.yml` for parity/self-host.
 
@@ -186,7 +201,9 @@ via `AppCloudManifest`; it is never a shared runtime import.
 
 ## 9. `hasna.contract.json`
 
-Each repo root carries a `hasna.contract.json`:
+Each repo root carries a `hasna.contract.json`. Product hosting, runtime
+placement, storage routing, storage capabilities, and product surfaces are
+separate axes:
 
 ```json
 {
@@ -195,20 +212,96 @@ Each repo root carries a `hasna.contract.json`:
   "name": "todos",
   "class": "cli-with-store",
   "contractVersion": "v1",
-  "kitVersion": "0.3.0",
+  "kitVersion": "0.6.0",
   "bins": ["todos", "todos-mcp", "todos-serve"],
+  "hosting": ["user-hosted", "hasna-saas"],
+  "deploymentModes": ["local", "self_hosted", "cloud"],
   "storage": {
-    "mode": "cloud",
+    "mode": "local",
+    "engines": ["sqlite", "postgres"],
     "envPrefix": "HASNA_TODOS_",
     "aliasEnvPrefix": "TODOS_",
-    "databaseUrlSecretRef": "hasna/oss/todos/database-url",
-    "sqlitePath": "~/.hasna/todos/todos.db"
-  }
+    "sqlitePath": "~/.hasna/todos/todos.db",
+    "pgTestGate": {
+      "envVar": "TODOS_TEST_DATABASE_URL",
+      "command": "bun test tests/postgres-storage.test.ts"
+    }
+  },
+  "serviceSurfaces": [
+    {
+      "name": "http-api",
+      "kind": "api",
+      "status": "supported",
+      "bin": "todos-serve",
+      "authMode": "api-key",
+      "deploymentModes": ["local", "self_hosted", "cloud"],
+      "health": { "method": "GET", "path": "/health", "public": true },
+      "readiness": { "method": "GET", "path": "/ready", "public": false },
+      "version": { "method": "GET", "path": "/version", "public": true },
+      "apiBasePath": "/v1",
+      "openApiPath": "/openapi.json"
+    },
+    {
+      "name": "typescript-sdk",
+      "kind": "sdk",
+      "status": "supported",
+      "authMode": "api-key",
+      "deploymentModes": ["local", "self_hosted", "cloud"],
+      "exportSubpath": "./sdk",
+      "generatedFrom": "/openapi.json",
+      "clientClassName": "TodosClient"
+    },
+    {
+      "name": "mcp",
+      "kind": "mcp",
+      "status": "supported",
+      "mcpBin": "todos-mcp",
+      "authMode": "api-key",
+      "deploymentModes": ["local", "self_hosted", "cloud"]
+    },
+    {
+      "name": "cli",
+      "kind": "cli",
+      "status": "supported",
+      "bin": "todos",
+      "authMode": "local-only",
+      "deploymentModes": ["local", "self_hosted"]
+    }
+  ]
 }
 ```
 
 - `contractVersion` — the Service Contract version the repo targets (`v1`).
 - `kitVersion` — the `@hasna/contracts` version the repo tracks.
+- `hosting` — product stories: `user-hosted` and, only when available,
+  `hasna-saas`.
+- `deploymentModes` — runtime placements: `local`, `self_hosted`, `cloud`.
+  The old `self-hosted` spelling parses as a deprecated alias.
+- `storage.mode` — active storage router (`local | cloud`), distinct from
+  placement.
+- `storage.engines` — supported persistence engines.
+- `serviceSurfaces` — API, SDK, MCP, and CLI declarations. A supported SDK
+  names a real package `exports` key via `exportSubpath`; generated clients
+  reference the API's `openApiPath` via `generatedFrom`.
+
+Libraries and exceptional non-Node monorepos may waive a surface explicitly:
+
+```json
+{
+  "metadata": {
+    "conformance": {
+      "waivedSurfaces": [
+        {
+          "kind": "api",
+          "reason": "Execution-free schema library; no HTTP runtime."
+        }
+      ]
+    }
+  }
+}
+```
+
+A waiver is typed, unique per surface kind, and must carry a non-empty reason.
 
 ---
 
@@ -234,9 +327,42 @@ Checks:
 1. `manifest_valid` — `hasna.contract.json` present and valid (class rules enforced).
 2. `bins_allowlisted` — declared bins are in the allowlist.
 3. `bins_match_package` — declared bins match `package.json` `bin`.
-4. `mode_enum_compliance` — any `HASNA_<NAME>_STORAGE_MODE` env normalizes to `local|cloud`.
-5. `health_shape` — when a serve bin exists, a sampled `/health` payload matches `{ status, version, mode }`.
-6. `no_cloud_guard` — no forbidden shared cloud runtime edges (reuses `scanNoCloudTarget`).
+4. `surface_matrix` — required API, SDK, MCP, and CLI kinds are declared or
+   explicitly waived.
+5. `surface_bindings` — surface bins and SDK export subpaths exist in
+   `package.json`; generated SDKs reference a declared OpenAPI path.
+6. `storage_capabilities` — store-owning cores declare SQLite + PostgreSQL and
+   a live-PG test gate.
+7. `public_manifest_safety` — public manifests contain no secret refs, internal
+   hosts, ARNs, or account IDs.
+8. `hosting_story` — public OSS cores include the user-hosted product story.
+9. `mode_enum_compliance` — any `HASNA_<NAME>_STORAGE_MODE` env normalizes to `local|cloud`.
+10. `health_shape` — when a serve bin exists, a sampled `/health` payload matches `{ status, version, mode }`.
+11. `no_cloud_guard` — no forbidden shared cloud runtime edges (reuses `scanNoCloudTarget`).
 
 The kit is dev-dependency friendly: `@hasna/contracts` can be a `devDependency`
 and the checks run under `bun test` with no runtime footprint in the app.
+
+---
+
+## 11. Migration from 0.4.x/0.5.x manifests
+
+The v1 schema additions are backward-compatible at parse time. Existing
+`deploymentModes: ["self-hosted"]` values normalize to `self_hosted`; missing
+`hosting`, `deploymentModes`, and `serviceSurfaces` still receive compatible
+defaults. The only intentional schema-level rejection is a declared
+`storage.sqlitePath` that does not end in `.db`.
+
+Conformance is stricter than schema parsing. A legacy service manifest can
+remain schema-valid while failing new checks until it:
+
+1. declares API, SDK, MCP, and CLI surfaces or scoped waivers;
+2. points SDK declarations at real package exports;
+3. declares SQLite + PostgreSQL capabilities and a `pgTestGate`;
+4. removes private infrastructure references from the public manifest; and
+5. writes canonical `self_hosted` runtime placement spelling.
+
+These additive v1 capability declarations do not consume the separately
+planned `hasna.service_contract.v2`. V2 remains reserved for breaking API-base,
+operation-registry, authorization, worker, and deployment-control-plane
+semantics.
