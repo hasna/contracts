@@ -179,12 +179,16 @@ header or `Authorization: Bearer <key>`.
 - If the per-app URL is blank or absent, a valid `HASNA_FLEET_API_DOMAIN`
   supplies the domain suffix for `https://<app>.<domain>/v1`.
 - The composed `<app>.<domain>` host must remain within DNS label and total-name
-  limits.
-- If the fleet domain is missing, blank, or malformed, resolution uses the
-  app-specific neutral, non-resolving `https://<app>.your-deployment.example/v1`
-  placeholder and marks the configuration `misconfigured`. The high-level
-  client throws before constructing an authenticated transport, so an API key
-  is never sent to the placeholder or to a parser-confused authority.
+  limits. If the fleet domain is missing, blank, malformed, or too long once the
+  app prefix is added, resolution uses the app-specific neutral, non-resolving
+  `https://<app>.your-deployment.example/v1` placeholder and marks the
+  configuration `misconfigured`. The high-level client throws before
+  constructing an authenticated transport, so an API key is never sent to the
+  placeholder or to a parser-confused authority.
+- Authenticated client requests never follow HTTP redirects. Every 3xx response,
+  including a same-origin redirect, is returned as a fail-closed
+  `HasnaHttpError`; API keys, bearer credentials, custom headers, and request
+  bodies remain confined to the explicitly validated API origin.
 
 The short aliases `<APP>_API_URL` and `<APP>_API_KEY` remain supported after the
 canonical `HASNA_` names. Client configuration uses an HTTP API URL, never a

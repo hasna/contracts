@@ -178,10 +178,79 @@ function findForbiddenInternalDomains(scanRoot: string, targets: string[]): stri
 
 interface RawTarMember {
   index: number;
+  rawPath: string;
   path: string;
+  rawLinkPath: string;
   linkPath: string;
   type: string;
   data: Uint8Array;
+}
+
+interface RawTarArchive {
+  members: RawTarMember[];
+  postEndBytes: Uint8Array;
+}
+
+interface TarFixtureEntry {
+  path: string;
+  type?: string;
+  linkPath?: string;
+  data?: Uint8Array;
+}
+
+function tarField(block: Uint8Array, offset: number, length: number, value: string): void {
+  const encoded = new TextEncoder().encode(value);
+  if (encoded.length > length) throw new Error(`Tar fixture field is too long: ${value}`);
+  block.set(encoded, offset);
+}
+
+function tarOctalField(block: Uint8Array, offset: number, length: number, value: number): void {
+  const encoded = value.toString(8).padStart(length - 1, "0");
+  tarField(block, offset, length, `${encoded}\0`);
+}
+
+function tarFixtureHeader(entry: TarFixtureEntry): Uint8Array {
+  const data = entry.data ?? new Uint8Array();
+  const header = new Uint8Array(512);
+  tarField(header, 0, 100, entry.path);
+  tarOctalField(header, 100, 8, 0o644);
+  tarOctalField(header, 108, 8, 0);
+  tarOctalField(header, 116, 8, 0);
+  tarOctalField(header, 124, 12, data.length);
+  tarOctalField(header, 136, 12, 0);
+  header.fill(0x20, 148, 156);
+  tarField(header, 156, 1, entry.type ?? "0");
+  tarField(header, 157, 100, entry.linkPath ?? "");
+  tarField(header, 257, 6, "ustar\0");
+  tarField(header, 263, 2, "00");
+  const checksum = header.reduce((sum, byte) => sum + byte, 0);
+  tarField(header, 148, 8, `${checksum.toString(8).padStart(6, "0")}\0 `);
+  return header;
+}
+
+function writeTarFixture(
+  archivePath: string,
+  entries: TarFixtureEntry[],
+  trailer: Uint8Array = new Uint8Array(),
+): void {
+  const parts: Uint8Array[] = [];
+  for (const entry of entries) {
+    const data = entry.data ?? new Uint8Array();
+    parts.push(tarFixtureHeader(entry), data);
+    const padding = (512 - (data.length % 512)) % 512;
+    if (padding > 0) parts.push(new Uint8Array(padding));
+  }
+  parts.push(new Uint8Array(1024), trailer);
+  writeFileSync(archivePath, Buffer.concat(parts.map((part) => Buffer.from(part))));
+}
+
+function paxRecord(key: string, value: string): Uint8Array {
+  const body = `${key}=${value}\n`;
+  let length = body.length + 2;
+  while (`${length} ${body}`.length !== length) {
+    length = `${length} ${body}`.length;
+  }
+  return new TextEncoder().encode(`${length} ${body}`);
 }
 
 function tarString(block: Uint8Array, offset: number, length: number): string {
@@ -230,7 +299,7 @@ function paxNames(data: Uint8Array): {
   return { path, linkPath };
 }
 
-function readRawTarMembers(archivePath: string): RawTarMember[] {
+function readRawTarArchive(archivePath: string): RawTarArchive {
   const archive = readFileSync(archivePath);
   const bytes =
     archive[0] === 0x1f && archive[1] === 0x8b
@@ -242,14 +311,13 @@ function readRawTarMembers(archivePath: string): RawTarMember[] {
   let pendingLongLinkPath: string | null = null;
   let pendingPaxPath: string | null = null;
   let pendingPaxLinkPath: string | null = null;
+  let globalPaxPath: string | null = null;
+  let globalPaxLinkPath: string | null = null;
 
   while (offset + 512 <= bytes.length) {
     const header = bytes.subarray(offset, offset + 512);
     if (header.every((byte) => byte === 0)) {
-      if (bytes.subarray(offset).some((byte) => byte !== 0)) {
-        throw new Error("Tar archive contains unchecked trailing content after its end marker.");
-      }
-      break;
+      return { members, postEndBytes: bytes.subarray(offset) };
     }
 
     const name = tarString(header, 0, 100);
@@ -263,9 +331,22 @@ function readRawTarMembers(archivePath: string): RawTarMember[] {
       throw new Error("Tar archive contains an invalid or truncated member.");
     }
     const data = bytes.subarray(dataStart, dataStart + size);
-    const path = pendingPaxPath ?? pendingLongPath ?? headerPath;
-    const linkPath = pendingPaxLinkPath ?? pendingLongLinkPath ?? headerLinkPath;
-    members.push({ index: members.length + 1, path, linkPath, type, data });
+    const isMetadataMember = type === "L" || type === "K" || type === "x" || type === "g";
+    const path = isMetadataMember
+      ? headerPath
+      : pendingPaxPath ?? pendingLongPath ?? globalPaxPath ?? headerPath;
+    const linkPath = isMetadataMember
+      ? headerLinkPath
+      : pendingPaxLinkPath ?? pendingLongLinkPath ?? globalPaxLinkPath ?? headerLinkPath;
+    members.push({
+      index: members.length + 1,
+      rawPath: headerPath,
+      path,
+      rawLinkPath: headerLinkPath,
+      linkPath,
+      type,
+      data,
+    });
 
     if (type === "L") {
       pendingLongPath = new TextDecoder().decode(data).replace(/\0.*$/, "");
@@ -275,6 +356,10 @@ function readRawTarMembers(archivePath: string): RawTarMember[] {
       const names = paxNames(data);
       pendingPaxPath = names.path;
       pendingPaxLinkPath = names.linkPath;
+    } else if (type === "g") {
+      const names = paxNames(data);
+      if (names.path !== null) globalPaxPath = names.path;
+      if (names.linkPath !== null) globalPaxLinkPath = names.linkPath;
     } else {
       pendingLongPath = null;
       pendingLongLinkPath = null;
@@ -285,21 +370,34 @@ function readRawTarMembers(archivePath: string): RawTarMember[] {
     offset = dataStart + Math.ceil(size / 512) * 512;
   }
 
-  return members;
+  return { members, postEndBytes: bytes.subarray(offset) };
+}
+
+function readRawTarMembers(archivePath: string): RawTarMember[] {
+  return readRawTarArchive(archivePath).members;
 }
 
 function findForbiddenRawTarMembers(archivePath: string): string[] {
-  return readRawTarMembers(archivePath)
+  const archive = readRawTarArchive(archivePath);
+  const findings = archive.members
     .filter((member) => {
+      const rawPathBytes = new TextEncoder().encode(member.rawPath);
       const pathBytes = new TextEncoder().encode(member.path);
+      const rawLinkPathBytes = new TextEncoder().encode(member.rawLinkPath);
       const linkPathBytes = new TextEncoder().encode(member.linkPath);
       return (
+        containsForbiddenInternalDomain(rawPathBytes) ||
         containsForbiddenInternalDomain(pathBytes) ||
+        containsForbiddenInternalDomain(rawLinkPathBytes) ||
         containsForbiddenInternalDomain(linkPathBytes) ||
         containsForbiddenInternalDomain(member.data)
       );
     })
     .map((member) => `#${member.index}:${member.path}`);
+  if (containsForbiddenInternalDomain(archive.postEndBytes)) {
+    findings.push("#trailer");
+  }
+  return findings;
 }
 
 function forbiddenEncodingFixtures(domain: string): Array<{
@@ -416,6 +514,9 @@ describe("published package hostname and provenance boundary", () => {
 
     const rawMembers = readRawTarMembers(packedArchivePath);
     expect(rawMembers.length).toBeGreaterThan(0);
+    expect(
+      rawMembers.filter((member) => member.path === "package/dist/cli/index.js").length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
   test("raw-member scan catches an encoded duplicate that extraction overwrites", () => {
@@ -460,21 +561,88 @@ describe("published package hostname and provenance boundary", () => {
     expect(findings[0]).toContain("package/service-link");
   });
 
-  test("raw-member parser rejects nonzero content after the tar end marker", () => {
+  test("raw-member scan inspects header paths hidden by PAX and GNU overrides", () => {
+    const fixtureRoot = join(temporaryRoot, "overridden-header-negative-controls");
+    mkdirSync(fixtureRoot, { recursive: true });
+    const encoded = Buffer.from(forbiddenInternalDomains[0]!).toString("base64");
+
+    const paxArchive = join(fixtureRoot, "pax.tar");
+    writeTarFixture(paxArchive, [
+      {
+        path: "PaxHeaders.0/entry",
+        type: "x",
+        data: paxRecord("path", "package/clean-pax.txt"),
+      },
+      {
+        path: `package/${encoded}`,
+        data: Buffer.from("clean member bytes"),
+      },
+    ]);
+    expect(readRawTarMembers(paxArchive)[1]?.path).toBe("package/clean-pax.txt");
+    expect(findForbiddenRawTarMembers(paxArchive)).toHaveLength(1);
+
+    const gnuArchive = join(fixtureRoot, "gnu.tar");
+    writeTarFixture(gnuArchive, [
+      {
+        path: "././@LongLink",
+        type: "L",
+        data: Buffer.from("package/clean-gnu.txt\0"),
+      },
+      {
+        path: `package/${encoded}`,
+        data: Buffer.from("clean member bytes"),
+      },
+    ]);
+    expect(readRawTarMembers(gnuArchive)[1]?.path).toBe("package/clean-gnu.txt");
+    expect(findForbiddenRawTarMembers(gnuArchive)).toHaveLength(1);
+  });
+
+  test("raw-member scan inspects header linknames hidden by PAX overrides", () => {
+    const fixtureRoot = join(temporaryRoot, "overridden-link-negative-control");
+    mkdirSync(fixtureRoot, { recursive: true });
+    const archive = join(fixtureRoot, "pax-link.tar");
+    const encoded = Buffer.from(forbiddenInternalDomains[0]!).toString("base64");
+    writeTarFixture(archive, [
+      {
+        path: "PaxHeaders.0/link",
+        type: "x",
+        data: paxRecord("linkpath", "package/clean-target"),
+      },
+      {
+        path: "package/service-link",
+        type: "2",
+        linkPath: encoded,
+      },
+    ]);
+
+    expect(readRawTarMembers(archive)[1]?.linkPath).toBe("package/clean-target");
+    expect(findForbiddenRawTarMembers(archive)).toHaveLength(1);
+  });
+
+  test("raw-member scan permits benign post-zero bytes after scanning them", () => {
     const fixtureRoot = join(temporaryRoot, "trailing-tar-negative-control");
     const firstRoot = join(fixtureRoot, "first");
-    const secondRoot = join(fixtureRoot, "second");
     const firstArchive = join(fixtureRoot, "first.tar");
-    const secondArchive = join(fixtureRoot, "second.tar");
     mkdirSync(firstRoot, { recursive: true });
-    mkdirSync(secondRoot, { recursive: true });
     writeFileSync(join(firstRoot, "first.txt"), "first");
-    writeFileSync(join(secondRoot, "second.txt"), "unchecked trailing member");
     run(["tar", "-cf", firstArchive, "-C", firstRoot, "first.txt"]);
-    run(["tar", "-cf", secondArchive, "-C", secondRoot, "second.txt"]);
-    appendFileSync(firstArchive, readFileSync(secondArchive));
+    appendFileSync(firstArchive, "benign post-zero metadata");
 
-    expect(() => readRawTarMembers(firstArchive)).toThrow(/trailing content/i);
+    expect(findForbiddenRawTarMembers(firstArchive)).toEqual([]);
+    expect(readRawTarMembers(firstArchive)).toHaveLength(1);
+  });
+
+  test("raw-member scan rejects encoded forbidden data in post-zero bytes", () => {
+    const fixtureRoot = join(temporaryRoot, "hostile-trailing-tar-negative-control");
+    const archive = join(fixtureRoot, "hostile-trailer.tar");
+    mkdirSync(fixtureRoot, { recursive: true });
+    writeTarFixture(
+      archive,
+      [{ path: "package/clean.txt", data: Buffer.from("clean") }],
+      Buffer.from(Buffer.from(forbiddenInternalDomains[0]!).toString("base64")),
+    );
+
+    expect(findForbiddenRawTarMembers(archive)).toEqual(["#trailer"]);
   });
 
   test("the packed repository manifest resolves its declared JSON Schema", () => {
