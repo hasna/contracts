@@ -354,7 +354,54 @@ and the checks run under `bun test` with no runtime footprint in the app.
 
 ---
 
-## 11. Migration from 0.4.x/0.5.x manifests
+## 11. Secure local-store lifecycle
+
+The shared secure local-store policy is `hasna.secure_local_store_policy.v1`
+(`SecureLocalStorePolicySchema`) and the helper module is
+`@hasna/contracts/secure-local-store`.
+
+This policy applies to local operator state under `.hasna` and `.codewith`.
+The default inventory is explicit by package: Codewith, Todos, Conversations,
+Mementos, Knowledge, Projects, Browser, Terminal, Logs, and Loops.
+
+Local stores **MUST** use owner-only defaults:
+
+- Store directories: `0700`.
+- Store files: `0600`.
+- SQLite main DB files, WAL sidecars, and SHM sidecars: `0600`.
+- Backup, export, report, session, snapshot, tmp, and log artifacts: `0600`
+  unless a package records a narrower non-secret exception.
+
+Lifecycle cleanup **MUST** default to dry-run. Destructive retention requires:
+
+1. Explicit apply intent.
+2. A package-owned retention adapter.
+3. Artifact allowlist matches; no broad delete outside the allowlist.
+4. Active-record exclusion proof for current tasks, sessions, messages, runs,
+   workspace rows, attachments, evidence, or other package-owned references.
+5. Redaction-before-persistence and redacted evidence from the owning package.
+
+SQLite maintenance **MUST NOT** run against active stores. WAL checkpoint,
+incremental vacuum, optimize, or vacuum operations are allowed only when the
+caller explicitly proves exclusive/offline access for that package store. The
+contracts helper plans maintenance and can apply it only when the caller opts in
+to both apply mode and SQLite maintenance.
+
+The CLI surface:
+
+```bash
+contracts secure-local-store --json
+contracts secure-local-store "$HOME" --json --plan --store todos
+contracts secure-local-store "$HOME" --json --apply --store todos
+contracts secure-local-store "$HOME" --json --plan --retention --store todos --retention-proof todos-exports-backups
+```
+
+The CLI and helper report paths, modes, counts, statuses, store ids, and adapter
+ids only. They do not read or print file contents.
+
+---
+
+## 12. Migration from 0.4.x/0.5.x manifests
 
 The v1 schema additions are backward-compatible at parse time. Existing
 `deploymentModes: ["self-hosted"]` values normalize to `self_hosted`; missing

@@ -2,7 +2,7 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
-## [0.6.0] - 2026-07-24
+## [0.7.0] - 2026-07-24
 
 ### Service contract capability extensions (additive, v1)
 

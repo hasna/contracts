@@ -1,0 +1,384 @@
+{
+  "attachmentContentReferences": [
+    {
+      "contentRef": {
+        "algorithm": "sha256",
+        "byteLength": 128,
+        "digest": "7874b0bb4fe2d62eaf90547324639fa41520f39fea2035f4508f6e6ac10bcc41",
+        "mediaType": "application/json"
+      },
+      "index": 0,
+      "owner": "tenant-a",
+      "source": {
+        "id": "task-file-1",
+        "section": "task_files"
+      }
+    }
+  ],
+  "bundleChecksum": "42c8f660effa82bd06d9017b4c519023fe0ddd62075b7aa7f7216dcfbe4802e3",
+  "bundleId": "bundle-1",
+  "contractDigest": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+  "contractVersion": "1.0.0",
+  "createdAt": "2026-07-24T00:00:00.000Z",
+  "dependencyClosure": [
+    {
+      "dependencyTaskIds": [],
+      "owner": "tenant-a",
+      "taskId": "task-1"
+    },
+    {
+      "dependencyTaskIds": [
+        "task-1"
+      ],
+      "owner": "tenant-a",
+      "taskId": "task-2"
+    }
+  ],
+  "manifestDigest": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+  "manifestVersion": "1",
+  "referenceClosure": [
+    {
+      "references": [],
+      "source": {
+        "id": "deletion-1",
+        "owner": "tenant-a",
+        "section": "deletion_records"
+      }
+    },
+    {
+      "references": [
+        {
+          "id": "project-1",
+          "owner": "tenant-a",
+          "section": "projects"
+        },
+        {
+          "id": "task-1",
+          "owner": "tenant-a",
+          "section": "tasks"
+        },
+        {
+          "id": "task-2",
+          "owner": "tenant-a",
+          "section": "tasks"
+        }
+      ],
+      "source": {
+        "id": "dependency-1",
+        "owner": "tenant-a",
+        "section": "dependencies"
+      }
+    },
+    {
+      "references": [],
+      "source": {
+        "id": "project-1",
+        "owner": "tenant-a",
+        "section": "projects"
+      }
+    },
+    {
+      "references": [
+        {
+          "id": "project-1",
+          "owner": "tenant-a",
+          "section": "projects"
+        }
+      ],
+      "source": {
+        "id": "task-1",
+        "owner": "tenant-a",
+        "section": "tasks"
+      }
+    },
+    {
+      "references": [
+        {
+          "id": "project-1",
+          "owner": "tenant-a",
+          "section": "projects"
+        }
+      ],
+      "source": {
+        "id": "task-2",
+        "owner": "tenant-a",
+        "section": "tasks"
+      }
+    },
+    {
+      "references": [
+        {
+          "id": "project-1",
+          "owner": "tenant-a",
+          "section": "projects"
+        },
+        {
+          "id": "task-1",
+          "owner": "tenant-a",
+          "section": "tasks"
+        }
+      ],
+      "source": {
+        "id": "task-file-1",
+        "owner": "tenant-a",
+        "section": "task_files"
+      }
+    }
+  ],
+  "referenceOnly": {
+    "agentIds": [],
+    "externalOwnerRefs": [
+      {
+        "digest": "1b6d6524ab97fe200c0486a1e4aec16c96fb88bb43f87e50f38544e13102be39",
+        "id": "repository-1",
+        "owner": "tenant-a"
+      }
+    ],
+    "owner": "tenant-a",
+    "ownerQualifiedRefs": []
+  },
+  "schema": "hasna.todos.transfer_bundle.v1",
+  "sections": {
+    "activities": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "approvals": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "comments": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "deletion_records": {
+      "count": 1,
+      "digest": "97abf3094617433a2ac8046735f249a5e5191d860819ef31e0dba3981ac50006",
+      "owner": "tenant-a",
+      "records": [
+        {
+          "deletedAt": "2026-07-24T00:00:00.000Z",
+          "entityIdDigest": "fde93ffb5445ce06cf1336f4f2038d727dbae37f00bd54a98cd194b73ef9f09e",
+          "entityKind": "task",
+          "id": "deletion-1",
+          "owner": "tenant-a",
+          "priorRecordDigest": "3d85fbe8bc7cebcfaee0bf087ba95a76300464300ce3f74475d6d1310859914a",
+          "reasonCode": "customer_request",
+          "redaction": "full",
+          "tombstoneVersion": 1
+        }
+      ]
+    },
+    "dependencies": {
+      "count": 1,
+      "digest": "d27e5bb7bd7b470e9c6eb2d8d42948668bc05d643793ad255786bdc8ef6916da",
+      "owner": "tenant-a",
+      "records": [
+        {
+          "createdAt": "2026-07-24T00:00:00.000Z",
+          "id": "dependency-1",
+          "kind": "requires",
+          "owner": "tenant-a",
+          "sourceTaskId": "task-2",
+          "targetTaskId": "task-1",
+          "updatedAt": "2026-07-24T00:00:00.000Z",
+          "version": 1
+        }
+      ]
+    },
+    "git_commits": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "git_refs": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "plans": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "projects": {
+      "count": 1,
+      "digest": "a6de5445e15de0aea78003a91ee9cf748bf446b4103e68806b2dd20be6cba500",
+      "owner": "tenant-a",
+      "records": [
+        {
+          "archivedAt": null,
+          "createdAt": "2026-07-24T00:00:00.000Z",
+          "description": "Small transfer fixture",
+          "id": "project-1",
+          "name": "Contract fixture",
+          "owner": "tenant-a",
+          "repositoryRef": {
+            "digest": "1b6d6524ab97fe200c0486a1e4aec16c96fb88bb43f87e50f38544e13102be39",
+            "id": "repository-1",
+            "owner": "tenant-a"
+          },
+          "slug": "contract-fixture",
+          "updatedAt": "2026-07-24T00:00:00.000Z",
+          "version": 1
+        }
+      ]
+    },
+    "run_artifacts": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "run_commands": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "run_events": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "run_files": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "runs": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "saved_views": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "task_files": {
+      "count": 1,
+      "digest": "cfb503a145567e8bd8edbca68fd8dce54ce20f1ef5d8b682f9346fcc2c5b4e43",
+      "owner": "tenant-a",
+      "records": [
+        {
+          "contentRef": {
+            "algorithm": "sha256",
+            "byteLength": 128,
+            "digest": "7874b0bb4fe2d62eaf90547324639fa41520f39fea2035f4508f6e6ac10bcc41",
+            "mediaType": "application/json"
+          },
+          "createdAt": "2026-07-24T00:00:00.000Z",
+          "id": "task-file-1",
+          "logicalName": "contract.json",
+          "owner": "tenant-a",
+          "purpose": "deliverable",
+          "taskId": "task-1",
+          "updatedAt": "2026-07-24T00:00:00.000Z",
+          "version": 1
+        }
+      ]
+    },
+    "task_lists": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "task_templates": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "task_to_pr_projections": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "tasks": {
+      "count": 2,
+      "digest": "65a93e7fbcd003a6889859a0c9626a4cf1039bfaaa3870ca7c333cf85c3b94e3",
+      "owner": "tenant-a",
+      "records": [
+        {
+          "acceptanceCriteria": [],
+          "assignedAgentId": null,
+          "completedAt": null,
+          "createdAt": "2026-07-24T00:00:00.000Z",
+          "description": null,
+          "dueAt": null,
+          "externalOwnerRefs": [],
+          "fingerprint": null,
+          "id": "task-1",
+          "owner": "tenant-a",
+          "parentTaskId": null,
+          "planId": null,
+          "priority": "medium",
+          "projectId": "project-1",
+          "shortId": null,
+          "status": "pending",
+          "tags": [],
+          "taskListId": null,
+          "title": "Prepare contract",
+          "updatedAt": "2026-07-24T00:00:00.000Z",
+          "version": 1
+        },
+        {
+          "acceptanceCriteria": [],
+          "assignedAgentId": null,
+          "completedAt": null,
+          "createdAt": "2026-07-24T00:00:00.000Z",
+          "description": null,
+          "dueAt": null,
+          "externalOwnerRefs": [],
+          "fingerprint": null,
+          "id": "task-2",
+          "owner": "tenant-a",
+          "parentTaskId": null,
+          "planId": null,
+          "priority": "medium",
+          "projectId": "project-1",
+          "shortId": null,
+          "status": "pending",
+          "tags": [],
+          "taskListId": null,
+          "title": "Verify contract",
+          "updatedAt": "2026-07-24T00:00:00.000Z",
+          "version": 1
+        }
+      ]
+    },
+    "traceability": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    },
+    "verification_evidence": {
+      "count": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "owner": "tenant-a",
+      "records": []
+    }
+  },
+  "source": {
+    "authorityId": "tenant-a",
+    "mode": "local"
+  },
+  "version": "1"
+}

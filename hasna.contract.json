@@ -4,7 +4,7 @@
   "name": "contracts",
   "class": "library",
   "contractVersion": "v1",
-  "kitVersion": "0.6.0",
+  "kitVersion": "0.7.0",
   "description": "Shared schemas, validators, and conformance kit for Hasna open-source agent infrastructure. Ships types and CLI checks only; no store.",
   "bins": ["contracts", "contracts-cli"],
   "hosting": ["user-hosted"],

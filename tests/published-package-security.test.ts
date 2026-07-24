@@ -17,7 +17,7 @@ import { gunzipSync } from "node:zlib";
 import { CONTRACTS_PACKAGE_VERSION } from "../src/schemas.js";
 
 const root = join(import.meta.dir, "..");
-const expectedUnreleasedVersion = "0.6.0";
+const expectedUnreleasedVersion = "0.7.0";
 const forbiddenInternalDomains = [["hasna", "xyz"].join(".")];
 
 function commandText(bytes: Uint8Array): string {

@@ -1,0 +1,26 @@
+{
+  "aggregateDigest": "c951ae736500757ed490737fc1ecf1e9040b56fbff9afeecb4b9e6a3e1d63e22",
+  "algorithm": "sha256",
+  "files": {
+    "capability-manifest.json": "b4f8f4114c8706ca4cdca5469d2088003b0d75ef1bede173cc46031dfc0a0810",
+    "contract.json": "2c3c4d625cbe446eaa681f978b29dab88f9ad0d09d3a9a8f654a903cef539c77",
+    "fixtures/authority.cloud.valid.json": "92ec3007bff7309fe194f0b914ce459a0393e159d8d19115cfc5dddf1847cdfc",
+    "fixtures/authority.local.valid.json": "e694d7ec741e10154a8f0df49e065d35e6209cadeea0fb52170f96c8cc072ca6",
+    "fixtures/identity.invalid.json": "9386ed0f6faa5e226b3237f291ebece78bf1f595a5f7f404c54cc5c50553579b",
+    "fixtures/identity.valid.json": "b04a7de9ed054631166d999124d8626178df8b104169ab83981c94a42ab0a5aa",
+    "fixtures/projection-transition.invalid.json": "87c25e60698668998b7c7ea12dd28394ec38db696e6a9bb1e8a477227124a074",
+    "fixtures/projection.valid.json": "eac69b7ff31f47a07c34956c8d811f09db5b27f7c37b1960ec48b62de5e9ccf6",
+    "fixtures/transfer.invalid.json": "481919b5aab4d48dca08253b328a9bcb662f8b66f5ea7bbada56efa87ea2dfd2",
+    "fixtures/transfer.valid.json": "ead38080d1e2e51fdebbd397f546693d7b123ff931ace8a05455e362233c34b0",
+    "generator-provenance.json": "37e30acc430e12dc2c365dede1312a6198b395ff157f0f8fce7d6780fb4ad693",
+    "invariant-registry.json": "276ecea7f48efb0f69efd182b97827d434dd090f9810389eb79e8d6934baddcd",
+    "local-cloud-conformance-profile.json": "e52c63d0ddc9bce22bc2f7923094fcf8f08a1ef03c94d87612825971aebc4ca5",
+    "openapi.json": "7831fa34d6035dd6e76d5748ee943c9ffd07db13240a93d7c7f927d564857b1b",
+    "operation-manifest.json": "752813782bbfa650bafcf73014c8e9d34716636bdd47165783b3897282fe634a",
+    "schema-bundle.json": "b646e067e21ea8cd67eaf11b0d0a1d33511375ca8f3d527312513cb4f36137ca",
+    "source-freeze.json": "6b6cd97937d6b04e756df4dc086128fabb8d1dd515d4a4ff88cd79dd66f487bd",
+    "surface-map.json": "23d641e57612954feec32bb7f0d70762c773993dad4b94b389778bfb6f8d2dad",
+    "transfer-classification.json": "ce41de0c594e1e569d379676fb4c5991946749a41cc85f76e4ffac57a6ca7883"
+  },
+  "schema": "hasna.todos.artifact_checksums.v1"
+}

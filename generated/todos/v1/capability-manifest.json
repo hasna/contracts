@@ -1,0 +1,706 @@
+{
+  "capabilities": [
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "core",
+      "id": "activity",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.activity.list",
+        "todos.history.list",
+        "todos.stats.get"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "core",
+      "id": "agents",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.agents.get",
+        "todos.agents.heartbeat",
+        "todos.agents.list",
+        "todos.agents.register",
+        "todos.agents.release"
+      ]
+    },
+    {
+      "audiences": [
+        "tenant_admin"
+      ],
+      "availability": "gated",
+      "id": "approvals",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.approvals.approve",
+        "todos.approvals.expire",
+        "todos.approvals.get",
+        "todos.approvals.list",
+        "todos.approvals.reject",
+        "todos.approvals.request"
+      ]
+    },
+    {
+      "audiences": [
+        "customer",
+        "tenant_admin"
+      ],
+      "availability": "core",
+      "id": "authority",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.authority.get",
+        "todos.capabilities.get",
+        "todos.capabilities.list",
+        "todos.manifest.get",
+        "todos.offline_upgrade.execute",
+        "todos.offline_upgrade.validate",
+        "todos.openapi.get",
+        "todos.server.start",
+        "todos.service.health",
+        "todos.service.ready",
+        "todos.service.version"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "core",
+      "id": "comments",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.comments.create",
+        "todos.comments.list"
+      ]
+    },
+    {
+      "audiences": [
+        "customer",
+        "tenant_admin"
+      ],
+      "availability": "core",
+      "id": "cursor-pagination",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.activity.list",
+        "todos.agents.list",
+        "todos.approvals.list",
+        "todos.capabilities.list",
+        "todos.comments.list",
+        "todos.deletion_records.list",
+        "todos.dependencies.list",
+        "todos.dependencies.list_all",
+        "todos.git_commits.list",
+        "todos.git_refs.list",
+        "todos.history.list",
+        "todos.migration_receipts.list",
+        "todos.plans.list",
+        "todos.projects.list",
+        "todos.run_artifacts.list",
+        "todos.run_commands.list",
+        "todos.run_events.list",
+        "todos.run_files.list",
+        "todos.runs.list",
+        "todos.saved_views.execute",
+        "todos.saved_views.list",
+        "todos.search.execute",
+        "todos.task_files.list",
+        "todos.task_lists.list",
+        "todos.task_templates.list",
+        "todos.task_to_pr_projection.list",
+        "todos.tasks.list",
+        "todos.tasks.list_active",
+        "todos.tasks.list_changed",
+        "todos.tasks.list_ready",
+        "todos.verification_evidence.list"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "core",
+      "id": "deletion-history",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.deletion_records.get",
+        "todos.deletion_records.list"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "core",
+      "id": "dependencies",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.dependencies.create",
+        "todos.dependencies.delete",
+        "todos.dependencies.list",
+        "todos.dependencies.list_all"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "core",
+      "id": "git-traceability",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.git_commits.find",
+        "todos.git_commits.link",
+        "todos.git_commits.list",
+        "todos.git_commits.unlink",
+        "todos.git_refs.find",
+        "todos.git_refs.link",
+        "todos.git_refs.list",
+        "todos.traceability.get"
+      ]
+    },
+    {
+      "audiences": [
+        "customer",
+        "tenant_admin"
+      ],
+      "availability": "core",
+      "id": "idempotency",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.agents.heartbeat",
+        "todos.agents.register",
+        "todos.agents.release",
+        "todos.approvals.approve",
+        "todos.approvals.expire",
+        "todos.approvals.reject",
+        "todos.approvals.request",
+        "todos.comments.create",
+        "todos.database.backup",
+        "todos.database.compact",
+        "todos.database.restore",
+        "todos.dependencies.create",
+        "todos.dependencies.delete",
+        "todos.git_commits.link",
+        "todos.git_commits.unlink",
+        "todos.git_refs.link",
+        "todos.offline_upgrade.execute",
+        "todos.plans.create",
+        "todos.plans.delete",
+        "todos.plans.update",
+        "todos.projects.create",
+        "todos.projects.delete",
+        "todos.projects.rename",
+        "todos.projects.update",
+        "todos.reports.generate",
+        "todos.run_artifacts.create",
+        "todos.run_artifacts.verify",
+        "todos.run_commands.create",
+        "todos.run_events.create",
+        "todos.run_files.create",
+        "todos.runs.finish",
+        "todos.runs.start",
+        "todos.saved_views.create",
+        "todos.saved_views.delete",
+        "todos.saved_views.update",
+        "todos.server.start",
+        "todos.task_files.record",
+        "todos.task_lists.create",
+        "todos.task_lists.delete",
+        "todos.task_lists.update",
+        "todos.task_templates.create",
+        "todos.task_templates.delete",
+        "todos.task_templates.instantiate",
+        "todos.task_templates.update",
+        "todos.task_to_pr_projection.rebuild",
+        "todos.tasks.batch",
+        "todos.tasks.claim_next",
+        "todos.tasks.complete",
+        "todos.tasks.create",
+        "todos.tasks.delete",
+        "todos.tasks.fail",
+        "todos.tasks.lock",
+        "todos.tasks.start",
+        "todos.tasks.unlock",
+        "todos.tasks.update",
+        "todos.tasks.upsert",
+        "todos.transfer.import_execute",
+        "todos.verification_evidence.create",
+        "todos.workspace.bootstrap"
+      ]
+    },
+    {
+      "audiences": [
+        "customer",
+        "tenant_admin"
+      ],
+      "availability": "core",
+      "id": "optimistic-concurrency",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.agents.heartbeat",
+        "todos.agents.release",
+        "todos.approvals.approve",
+        "todos.approvals.expire",
+        "todos.approvals.reject",
+        "todos.dependencies.delete",
+        "todos.git_commits.unlink",
+        "todos.plans.delete",
+        "todos.plans.update",
+        "todos.projects.delete",
+        "todos.projects.rename",
+        "todos.projects.update",
+        "todos.run_artifacts.verify",
+        "todos.runs.finish",
+        "todos.saved_views.delete",
+        "todos.saved_views.update",
+        "todos.task_lists.delete",
+        "todos.task_lists.update",
+        "todos.task_templates.delete",
+        "todos.task_templates.update",
+        "todos.tasks.complete",
+        "todos.tasks.delete",
+        "todos.tasks.fail",
+        "todos.tasks.start",
+        "todos.tasks.update",
+        "todos.tasks.upsert"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "core",
+      "id": "plans",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.plans.create",
+        "todos.plans.delete",
+        "todos.plans.get",
+        "todos.plans.list",
+        "todos.plans.update"
+      ]
+    },
+    {
+      "audiences": [
+        "customer",
+        "tenant_admin"
+      ],
+      "availability": "core",
+      "id": "projects",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.projects.create",
+        "todos.projects.delete",
+        "todos.projects.get",
+        "todos.projects.list",
+        "todos.projects.rename",
+        "todos.projects.update",
+        "todos.workspace.bootstrap"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "gated",
+      "id": "reports",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.reports.generate"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "core",
+      "id": "runs",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.run_artifacts.create",
+        "todos.run_artifacts.list",
+        "todos.run_artifacts.verify",
+        "todos.run_commands.create",
+        "todos.run_commands.list",
+        "todos.run_events.create",
+        "todos.run_events.list",
+        "todos.run_files.create",
+        "todos.run_files.list",
+        "todos.runs.finish",
+        "todos.runs.get",
+        "todos.runs.get_ledger",
+        "todos.runs.list",
+        "todos.runs.start"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "core",
+      "id": "saved-views",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.saved_views.create",
+        "todos.saved_views.delete",
+        "todos.saved_views.execute",
+        "todos.saved_views.get",
+        "todos.saved_views.list",
+        "todos.saved_views.update"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "core",
+      "id": "search",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.search.execute"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "core",
+      "id": "task-files",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.task_files.list",
+        "todos.task_files.record"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "core",
+      "id": "task-lists",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.task_lists.create",
+        "todos.task_lists.delete",
+        "todos.task_lists.get",
+        "todos.task_lists.list",
+        "todos.task_lists.update"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "gated",
+      "id": "task-templates",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.task_templates.create",
+        "todos.task_templates.delete",
+        "todos.task_templates.get",
+        "todos.task_templates.instantiate",
+        "todos.task_templates.list",
+        "todos.task_templates.update"
+      ]
+    },
+    {
+      "audiences": [
+        "customer",
+        "tenant_admin"
+      ],
+      "availability": "core",
+      "id": "task-to-pr-projection",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.task_to_pr_projection.get",
+        "todos.task_to_pr_projection.list",
+        "todos.task_to_pr_projection.rebuild"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "core",
+      "id": "tasks",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.tasks.batch",
+        "todos.tasks.claim_next",
+        "todos.tasks.complete",
+        "todos.tasks.count",
+        "todos.tasks.create",
+        "todos.tasks.delete",
+        "todos.tasks.exists_many",
+        "todos.tasks.fail",
+        "todos.tasks.get",
+        "todos.tasks.get_context",
+        "todos.tasks.list",
+        "todos.tasks.list_active",
+        "todos.tasks.list_changed",
+        "todos.tasks.list_ready",
+        "todos.tasks.lock",
+        "todos.tasks.next",
+        "todos.tasks.start",
+        "todos.tasks.unlock",
+        "todos.tasks.update",
+        "todos.tasks.upsert"
+      ]
+    },
+    {
+      "audiences": [
+        "customer",
+        "tenant_admin"
+      ],
+      "availability": "core",
+      "id": "transfer",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.database.backup",
+        "todos.database.check",
+        "todos.database.compact",
+        "todos.database.restore",
+        "todos.migration_receipts.get",
+        "todos.migration_receipts.list",
+        "todos.transfer.export",
+        "todos.transfer.import_execute",
+        "todos.transfer.import_preview",
+        "todos.transfer.validate"
+      ]
+    },
+    {
+      "audiences": [
+        "customer",
+        "tenant_admin"
+      ],
+      "availability": "core",
+      "id": "typed-errors",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.activity.list",
+        "todos.agents.get",
+        "todos.agents.heartbeat",
+        "todos.agents.list",
+        "todos.agents.register",
+        "todos.agents.release",
+        "todos.approvals.approve",
+        "todos.approvals.expire",
+        "todos.approvals.get",
+        "todos.approvals.list",
+        "todos.approvals.reject",
+        "todos.approvals.request",
+        "todos.authority.get",
+        "todos.capabilities.get",
+        "todos.capabilities.list",
+        "todos.comments.create",
+        "todos.comments.list",
+        "todos.database.backup",
+        "todos.database.check",
+        "todos.database.compact",
+        "todos.database.restore",
+        "todos.deletion_records.get",
+        "todos.deletion_records.list",
+        "todos.dependencies.create",
+        "todos.dependencies.delete",
+        "todos.dependencies.list",
+        "todos.dependencies.list_all",
+        "todos.git_commits.find",
+        "todos.git_commits.link",
+        "todos.git_commits.list",
+        "todos.git_commits.unlink",
+        "todos.git_refs.find",
+        "todos.git_refs.link",
+        "todos.git_refs.list",
+        "todos.history.list",
+        "todos.manifest.get",
+        "todos.migration_receipts.get",
+        "todos.migration_receipts.list",
+        "todos.offline_upgrade.execute",
+        "todos.offline_upgrade.validate",
+        "todos.openapi.get",
+        "todos.plans.create",
+        "todos.plans.delete",
+        "todos.plans.get",
+        "todos.plans.list",
+        "todos.plans.update",
+        "todos.projects.create",
+        "todos.projects.delete",
+        "todos.projects.get",
+        "todos.projects.list",
+        "todos.projects.rename",
+        "todos.projects.update",
+        "todos.reports.generate",
+        "todos.run_artifacts.create",
+        "todos.run_artifacts.list",
+        "todos.run_artifacts.verify",
+        "todos.run_commands.create",
+        "todos.run_commands.list",
+        "todos.run_events.create",
+        "todos.run_events.list",
+        "todos.run_files.create",
+        "todos.run_files.list",
+        "todos.runs.finish",
+        "todos.runs.get",
+        "todos.runs.get_ledger",
+        "todos.runs.list",
+        "todos.runs.start",
+        "todos.saved_views.create",
+        "todos.saved_views.delete",
+        "todos.saved_views.execute",
+        "todos.saved_views.get",
+        "todos.saved_views.list",
+        "todos.saved_views.update",
+        "todos.search.execute",
+        "todos.server.start",
+        "todos.service.health",
+        "todos.service.ready",
+        "todos.service.version",
+        "todos.stats.get",
+        "todos.task_files.list",
+        "todos.task_files.record",
+        "todos.task_lists.create",
+        "todos.task_lists.delete",
+        "todos.task_lists.get",
+        "todos.task_lists.list",
+        "todos.task_lists.update",
+        "todos.task_templates.create",
+        "todos.task_templates.delete",
+        "todos.task_templates.get",
+        "todos.task_templates.instantiate",
+        "todos.task_templates.list",
+        "todos.task_templates.update",
+        "todos.task_to_pr_projection.get",
+        "todos.task_to_pr_projection.list",
+        "todos.task_to_pr_projection.rebuild",
+        "todos.tasks.batch",
+        "todos.tasks.claim_next",
+        "todos.tasks.complete",
+        "todos.tasks.count",
+        "todos.tasks.create",
+        "todos.tasks.delete",
+        "todos.tasks.exists_many",
+        "todos.tasks.fail",
+        "todos.tasks.get",
+        "todos.tasks.get_context",
+        "todos.tasks.list",
+        "todos.tasks.list_active",
+        "todos.tasks.list_changed",
+        "todos.tasks.list_ready",
+        "todos.tasks.lock",
+        "todos.tasks.next",
+        "todos.tasks.start",
+        "todos.tasks.unlock",
+        "todos.tasks.update",
+        "todos.tasks.upsert",
+        "todos.traceability.get",
+        "todos.transfer.export",
+        "todos.transfer.import_execute",
+        "todos.transfer.import_preview",
+        "todos.transfer.validate",
+        "todos.verification_evidence.create",
+        "todos.verification_evidence.export",
+        "todos.verification_evidence.get",
+        "todos.verification_evidence.list",
+        "todos.workspace.bootstrap"
+      ]
+    },
+    {
+      "audiences": [
+        "customer"
+      ],
+      "availability": "core",
+      "id": "verification-evidence",
+      "modes": [
+        "local",
+        "cloud"
+      ],
+      "operationIds": [
+        "todos.verification_evidence.create",
+        "todos.verification_evidence.export",
+        "todos.verification_evidence.get",
+        "todos.verification_evidence.list"
+      ]
+    }
+  ],
+  "manifestDigest": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+  "schema": "hasna.todos.capability_manifest.v1",
+  "version": "1"
+}

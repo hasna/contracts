@@ -1,0 +1,90 @@
+{
+  "derivedAt": "2026-07-24T00:00:00.000Z",
+  "digest": "181bfeaad762fe33dbe7fa181c5217bdd9c97aadf45b6b9ba51c3a274c4802f3",
+  "head": {
+    "branchHead": {
+      "algorithm": "sha1",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "equalityProof": {
+      "head": {
+        "algorithm": "sha1",
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "kind": "head_equality",
+      "observedAt": "2026-07-24T00:00:00.000Z",
+      "ref": {
+        "digest": "dc4ce8429f5394e0b904c5fdf30cff064da0a3dd331bfc8b809cbf375e418d11",
+        "id": "proof-head-equality",
+        "kind": "proof_bundle",
+        "owner": "hasna.todos"
+      }
+    },
+    "providerObservedHead": {
+      "algorithm": "sha1",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "publishedHead": {
+      "algorithm": "sha1",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "id": "projection-1",
+  "identity": {
+    "baseHead": {
+      "algorithm": "sha1",
+      "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "branchRef": {
+      "digest": "d1f68e3a0abf965e7a2a123bbc48e243116338fff5a92c776cf18da75735b7b4",
+      "id": "branch-1",
+      "kind": "branch",
+      "owner": "hasna.todos"
+    },
+    "repositoryRef": {
+      "digest": "1d0da1b1059210dcbc453d2527148cc59f67dbf87a9a7294fa7a801c2645f57b",
+      "id": "repo-1",
+      "kind": "repository",
+      "owner": "hasna.todos"
+    },
+    "taskRef": {
+      "digest": "5a5decb10914a592b87d6a208ab01a7400ee516d80b2023b4c209c7e431708fd",
+      "id": "task-1",
+      "kind": "task",
+      "owner": "hasna.todos"
+    },
+    "worktreeRef": {
+      "digest": "e773645531839859cd9eacc3e18fde32425c37b4146d314c505f773c9dee5779",
+      "id": "worktree-1",
+      "kind": "worktree",
+      "owner": "hasna.todos"
+    }
+  },
+  "owner": "hasna.todos",
+  "predecessor": null,
+  "proofs": [
+    {
+      "head": {
+        "algorithm": "sha1",
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "kind": "ci",
+      "observedAt": "2026-07-24T00:00:00.000Z",
+      "ref": {
+        "digest": "4ac5f4c2c2962d17cac953ccdfe2874c79898af7b84c7d4d57e6b76702bf30cb",
+        "id": "proof-ci-1",
+        "kind": "proof_bundle",
+        "owner": "hasna.todos"
+      }
+    }
+  ],
+  "pullRequestRef": {
+    "digest": "9b407b47183debbf99aa21d6d87c927156b8c2bfe5160b228aa02ecd964276ba",
+    "id": "pr-1",
+    "kind": "pull_request",
+    "owner": "hasna.todos"
+  },
+  "schema": "hasna.todos.task_to_pr_projection.v1",
+  "sequence": 1,
+  "version": 1
+}

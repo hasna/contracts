@@ -11,6 +11,12 @@ import {
 import { scanNoCloudTarget } from "../no-cloud";
 import { runRepoConformance } from "../conformance";
 import { getEmbeddedSchemaId, validateContract } from "../validators";
+import {
+  applySecureLocalStorePlan,
+  planSecureLocalStoreLifecycle,
+  secureLocalStorePolicy,
+  type PlanSecureLocalStoreOptions
+} from "../secure-local-store";
 import { runVendorKit } from "./kit-runner";
 import { runIssueKey } from "./issue-key";
 
@@ -65,13 +71,13 @@ function preflightJsonUsageErrors(argv: string[]) {
     return false;
   }
 
-  if (!["schemas", "validate", "conformance", "no-cloud-scan", "repo-conformance", "vendor-kit", "issue-key"].includes(command)) {
+  if (!["schemas", "validate", "conformance", "no-cloud-scan", "repo-conformance", "vendor-kit", "issue-key", "secure-local-store"].includes(command)) {
     return reportParserJsonError("commander.unknownCommand", `unknown command '${command}'`);
   }
 
   // issue-key has rich value-taking options; let commander parse it (its
   // CommanderError is already rendered as JSON by main()).
-  if (command === "issue-key") {
+  if (command === "issue-key" || command === "secure-local-store") {
     return false;
   }
 
@@ -133,6 +139,33 @@ function preflightJsonUsageErrors(argv: string[]) {
   }
 
   return false;
+}
+
+function collectOption(value: string, previous: string[] = []): string[] {
+  return [...previous, value];
+}
+
+function parsePositiveInteger(value: string, fallback: number): number {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function printSecureLocalStoreText(payload: ReturnType<typeof secureLocalStorePolicy> | ReturnType<typeof planSecureLocalStoreLifecycle>) {
+  if ("actions" in payload) {
+    console.log(`${payload.ok ? "ok" : "blocked"} hasna.secure_local_store_policy.v1 ${payload.mode}`);
+    console.log(
+      `stores=${payload.summary.stores} scanned=${payload.summary.scannedEntries} planned=${payload.summary.planned} blocked=${payload.summary.blocked} skipped=${payload.summary.skipped} applied=${payload.summary.applied} failed=${payload.summary.failed}`
+    );
+    for (const action of payload.actions) {
+      console.log(`  ${action.status} ${action.kind} ${action.storeId} ${action.path} ${action.reason}`);
+    }
+    return;
+  }
+
+  console.log(`ok ${payload.schema} ${payload.id}`);
+  for (const store of payload.stores) {
+    console.log(`  ${store.storeId} ${store.packageName} ${store.root}/${store.relativePath}`);
+  }
 }
 
 export function createContractsProgram() {
@@ -308,6 +341,95 @@ export function createContractsProgram() {
     });
 
   program
+    .command("secure-local-store")
+    .description("Print or plan the shared .hasna/.codewith secure local-store lifecycle contract")
+    .argument("[home]", "Home directory to inspect when --plan or --apply is set. Omitted: print the default policy.")
+    .option("--plan", "Dry-run filesystem lifecycle plan for the selected stores")
+    .option("--apply", "Apply owner-only chmod repairs from the plan")
+    .option("--retention", "Include retention candidates in the dry-run plan")
+    .option("--apply-retention", "Apply allowlisted retention deletes; requires --apply")
+    .option("--sqlite-maintenance", "Include SQLite maintenance actions")
+    .option("--apply-sqlite-maintenance", "Run planned SQLite maintenance; requires --apply and --assume-exclusive-sqlite")
+    .option("--assume-exclusive-sqlite", "Assert no app process is using selected SQLite stores")
+    .option("--store <id>", "Limit to a store id; repeat for multiple stores", collectOption, [])
+    .option("--active-path <path>", "Path to exclude from retention as active; repeat for multiple paths", collectOption, [])
+    .option("--retention-proof <adapter>", "Adapter id with package-owned active-record proof; repeat for multiple adapters", collectOption, [])
+    .option("--max-entries <n>", "Maximum filesystem entries to scan per store", "25000")
+    .option("-j, --json", "Output JSON")
+    .action(async (
+      home: string | undefined,
+      options: {
+        plan?: boolean;
+        apply?: boolean;
+        retention?: boolean;
+        applyRetention?: boolean;
+        sqliteMaintenance?: boolean;
+        applySqliteMaintenance?: boolean;
+        assumeExclusiveSqlite?: boolean;
+        store?: string[];
+        activePath?: string[];
+        retentionProof?: string[];
+        maxEntries?: string;
+        json?: boolean;
+      }
+    ) => {
+      const stores = options.store && options.store.length > 0 ? options.store : undefined;
+      const shouldPlan = Boolean(options.plan || options.apply || options.retention || options.sqliteMaintenance);
+      if (!shouldPlan) {
+        let policy;
+        try {
+          policy = secureLocalStorePolicy(stores);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          reportCliError(options, `secure-local-store failed: ${message}`, { code: "secure_local_store_error" });
+          return;
+        }
+        if (options.json) {
+          console.log(JSON.stringify(policy, null, 2));
+        } else {
+          printSecureLocalStoreText(policy);
+        }
+        return;
+      }
+
+      const planOptions: PlanSecureLocalStoreOptions = {
+        apply: Boolean(options.apply),
+        includeRetention: Boolean(options.retention || options.applyRetention),
+        includeSqliteMaintenance: Boolean(options.sqliteMaintenance || options.applySqliteMaintenance),
+        assumeExclusiveSqlite: Boolean(options.assumeExclusiveSqlite),
+        maxEntries: parsePositiveInteger(options.maxEntries ?? "25000", 25_000)
+      };
+      if (home) planOptions.home = home;
+      if (stores) planOptions.stores = stores;
+      if (options.activePath && options.activePath.length > 0) planOptions.activePaths = options.activePath;
+      if (options.retentionProof && options.retentionProof.length > 0) planOptions.activeRecordProofs = options.retentionProof;
+
+      let plan;
+      try {
+        plan = planSecureLocalStoreLifecycle(planOptions);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        reportCliError(options, `secure-local-store failed: ${message}`, { code: "secure_local_store_error" });
+        return;
+      }
+      const result = options.apply
+        ? await applySecureLocalStorePlan(plan, {
+            applyRetention: Boolean(options.applyRetention),
+            applySqliteMaintenance: Boolean(options.applySqliteMaintenance)
+          })
+        : plan;
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        printSecureLocalStoreText(result);
+      }
+      if (!result.ok) {
+        process.exitCode = 1;
+      }
+    });
+
+  program
     .command("repo-conformance")
     .description("Check a repo against the Hasna Service Contract v1 using its hasna.contract.json")
     .argument("[path]", "Repo root path", ".")
@@ -373,7 +495,7 @@ export function createContractsProgram() {
   return program;
 }
 
-export function main(argv = process.argv) {
+export async function main(argv = process.argv) {
   if (preflightJsonUsageErrors(argv)) {
     return;
   }
@@ -386,7 +508,7 @@ export function main(argv = process.argv) {
   }
   program.exitOverride();
   try {
-    program.parse(argv);
+    await program.parseAsync(argv);
   } catch (error) {
     const commanderError = error as Partial<CommanderError> & { message?: string };
     if (error instanceof CommanderError || typeof commanderError.code === "string" || typeof commanderError.exitCode === "number") {
@@ -410,5 +532,5 @@ export function main(argv = process.argv) {
 }
 
 if (import.meta.main) {
-  main();
+  await main();
 }
