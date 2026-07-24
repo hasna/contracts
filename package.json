@@ -69,6 +69,11 @@
       "types": "./dist/client/storage.d.ts",
       "import": "./dist/client/storage.js"
     },
+    "./todos": {
+      "types": "./dist/todos/index.d.ts",
+      "import": "./dist/todos/index.js"
+    },
+    "./todos/artifacts/*": "./generated/todos/v1/*",
     "./hasna.contract.schema.json": "./dist/hasna.contract.schema.json"
   },
   "files": [
@@ -76,6 +81,7 @@
     "src/kit",
     "docs",
     "examples",
+    "generated/todos/v1",
     "CONTRACT.md",
     "docker-compose.yml",
     "hasna.contract.json",
@@ -83,14 +89,18 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "rm -rf dist && bun build src/index.ts src/schemas.ts src/validators.ts src/no-cloud.ts src/mode.ts src/service-contract.ts src/conformance.ts src/kit/generate.ts src/auth/index.ts src/sdk/generate.ts src/client/transport.ts src/client/storage.ts --root src --outdir dist --target bun && bun build src/cli/index.ts --outdir dist/cli --target bun && cp src/hasna.contract.schema.json dist/hasna.contract.schema.json && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
+    "build": "bun run todos:check && rm -rf dist && bun build src/index.ts src/schemas.ts src/validators.ts src/no-cloud.ts src/mode.ts src/service-contract.ts src/conformance.ts src/kit/generate.ts src/auth/index.ts src/sdk/generate.ts src/client/transport.ts src/client/storage.ts --root src --outdir dist --target bun && bun build src/todos/index.ts --root src --outdir dist --target bun --packages external && bun build src/cli/index.ts --outdir dist/cli --target bun && cp src/hasna.contract.schema.json dist/hasna.contract.schema.json && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "lint": "tsc --noEmit",
     "conformance": "bun run src/cli/index.ts conformance examples",
-    "verify:release": "rm -rf dist && bun run typecheck && bun test && bun run conformance && bun run build && bun run smoke:dist && bun run pack:check",
+    "verify:release": "rm -rf dist && bun run todos:hygiene && bun run typecheck && bun test && bun run conformance && bun run build && bun run smoke:dist && bun run smoke:todos-pack && bun run pack:check",
     "smoke:dist": "bun scripts/smoke-dist.ts",
+    "smoke:todos-pack": "bun scripts/smoke-todos-pack.ts",
     "pack:check": "bun pm pack --dry-run --ignore-scripts",
+    "todos:generate": "bun scripts/generate-todos-contract.ts",
+    "todos:check": "bun scripts/generate-todos-contract.ts --check",
+    "todos:hygiene": "bun scripts/check-todos-text-hygiene.ts",
     "dev:cli": "bun run src/cli/index.ts",
     "prepack": "bun run verify:release",
     "prepublishOnly": "bun run verify:release"

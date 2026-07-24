@@ -6,6 +6,7 @@ const root = join(import.meta.dir, "..");
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { version: string };
 const { CONTRACTS_PACKAGE_VERSION } = await import("../dist/schemas.js");
 const { scanNoCloudTarget } = await import("../dist/no-cloud.js");
+const todos = await import("../dist/todos/index.js");
 
 if (typeof scanNoCloudTarget !== "function") {
   throw new Error("dist/no-cloud.js did not export scanNoCloudTarget");
@@ -41,6 +42,16 @@ function parseJson(result: CommandResult, label: string) {
 
 if (CONTRACTS_PACKAGE_VERSION !== packageJson.version) {
   throw new Error(`Version mismatch: package.json=${packageJson.version} dist=${CONTRACTS_PACKAGE_VERSION}`);
+}
+
+if (todos.TodosModeSchema.parse("local") !== "local" || todos.TodosModeSchema.parse("cloud") !== "cloud") {
+  throw new Error("dist/todos did not expose the strict Todos mode schema");
+}
+if (todos.TODOS_OPERATION_MANIFEST.operations.length !== 125) {
+  throw new Error("dist/todos operation manifest is incomplete");
+}
+if (todos.TODOS_CONTRACT_DESCRIPTOR.rootExported !== false) {
+  throw new Error("dist/todos contract root-export invariant changed");
 }
 
 const version = run(["--version"]);

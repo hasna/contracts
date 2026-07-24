@@ -29,6 +29,129 @@ The goal is to make integration work deterministic:
 bun add @hasna/contracts
 ```
 
+## Todos contract
+
+`@hasna/contracts/todos` is the pure customer contract for Todos. Import it
+from the subpath; it is intentionally not exported from the package root.
+
+```ts
+import {
+  TodosModeSchema,
+  TodosTaskSchema,
+  TODOS_OPERATION_MANIFEST,
+} from "@hasna/contracts/todos";
+
+const mode = TodosModeSchema.parse("local"); // "local" | "cloud"
+```
+
+Mode and authority selection are explicit data. The contract accepts exactly
+`local` or `cloud`, binds one authority, and exposes the same shared customer
+operation manifest across both modes. Local topology operations have no HTTP
+mapping. Checked-in artifacts are available under
+`@hasna/contracts/todos/artifacts/*`.
+
+Authority discovery is fail-closed. Consumers must validate the authority
+handshake with `TodosCanonicalAuthorityHandshakeSchema` or
+`validateCanonicalTodosAuthorityHandshake`; a structurally valid handshake is
+not canonical unless its contract digest, operation-manifest digest, and sorted
+capability inventory exactly match this package.
+
+The manifest is a required target contract, not an assertion about either
+producer implementation. Every CLI, MCP, SDK, and shared HTTP mapping is marked
+`required_target` with producer implementation status `not_attested`. The
+manifest includes only customer and tenant-admin audiences. Shared HTTP
+operations live under `/v1`; local topology operations intentionally have no
+HTTP surface.
+
+The v1 source boundary is frozen to:
+
+- contracts base `0c8c5b4205ceaf16b1cee26c30199249055c934e`
+- open Todos evidence `a18a8b797eb1b05e92964dbf8b036dde972c2314`
+- platform Todos evidence `3d0bb21d586eed553e9010fc1187b19415958394`
+- selective projection evidence `142e650c7f13d05ac145bd37e986e68909d571d2`
+
+The operation manifest mechanically binds mutability, idempotency,
+concurrency/precondition fields, task-transition targets, request schemas,
+response schemas, and surface paths. The local `server.start` operation, for
+example, requires the explicit `expectedState: "stopped"` precondition and
+returns typed started-state data. Generated OpenAPI represents every GET
+request field as an actual path or query parameter with schema-derived
+requiredness; non-GET requests use typed JSON bodies.
+
+Transfer bundles carry deterministic section counts and digests, a bundle
+checksum, complete transitive foreign-key closure, dependency closure,
+content-addressed attachments, reference-only identity inventories, and
+fully-redacted deletion history. Every section, record, nested reference,
+projection, closure entry, attachment, and inventory entry binds one source
+authority. Portable command, evidence, run, and file records carry only
+content-addressed or redacted metadata; raw command text, arguments, and
+filesystem locations are rejected. Import plans, checkpoints, migration
+receipts, and replay decisions bind the source and target authorities, current
+contract and manifest digests, bundle id and digest, deterministic import-plan
+id and content digest, and idempotency key. Within a receipt chain, one
+idempotency key can commit exactly one canonical import tuple and terminal
+result; an exact receipt replay is reported without appending another receipt,
+while key reuse or a second commit is rejected. The package's public
+checkpoint, transition, receipt, execution-context, and chain validators reject
+otherwise well-formed historical digests; version-neutral structural schemas
+remain internal to artifact generation. Use
+`validateTodosTransferBundle`,
+`validateTodosTransferCheckpointTransition`,
+`validateTodosMigrationReceiptChain`, and `evaluateTodosImportExecution` at the
+corresponding runtime boundaries.
+
+Task-to-PR projections are append-only digest-linked records. A transferred
+projection successor requires its exact predecessor record in the same
+projection section, matched by owner, kind, projection id, immediately prior
+version, and digest; missing-first, missing-middle, and substituted predecessor
+histories are rejected. Validate both individual transitions and the complete
+history:
+
+```ts
+import {
+  validateTaskToPrProjectionHistory,
+  validateTaskToPrProjectionTransition,
+} from "@hasna/contracts/todos";
+```
+
+The generated JSON Schemas describe transport shape, but some canonical rules
+cannot be expressed by JSON Schema alone. `invariant-registry.json`,
+`schema-bundle.json`, and each affected schema's `x-hasna-invariants` extension
+name the required runtime validator. Consumers must run those validators; they
+must not treat JSON-Schema acceptance as proof of canonical authority,
+invocation, transfer, replay, or projection-history integrity.
+
+`contract.json` closes over the operation manifest, capability manifest, schema
+bundle, invariant registry, source provenance, and generator identity digests.
+`generator-provenance.json` records the exact frozen sources and semantic input
+digests. `checksums.json` then closes over every generated file. This split
+keeps schema hashing version-neutral and avoids a circular contract-digest
+dependency while still making artifact tampering detectable.
+The version-neutral schema foundation and runtime schema registry are internal
+artifact-generation modules: `@hasna/contracts/todos` does not export their
+registries, lookup or parser helpers, schema-bundle builder, or structural
+digest constants, and no package subpath exposes those modules. Public
+consumers can read generated JSON through
+`@hasna/contracts/todos/artifacts/*`, but checkpoint and migration-receipt
+runtime input must go through the canonical public schemas and helpers. The
+public `TODOS_REQUEST_SCHEMAS` transfer-import execution entry and both
+`TODOS_RESPONSE_SCHEMAS` migration-receipt entries apply those same current
+contract and operation-manifest digest checks; the internal structural maps
+remain available only to artifact generation and internal operation plumbing.
+
+Regenerate and verify the deterministic artifacts with:
+
+```bash
+bun run todos:generate
+bun run todos:check
+bun run smoke:todos-pack
+```
+
+The packed-subpath smoke installs the produced `.tgz` into a separate consumer
+with its own Zod dependency and imports
+`@hasna/contracts/todos` plus JSON artifacts through package exports. It does
+not reuse or symlink this repository's `node_modules`.
+
 ## CLI
 
 The CLI is Bun-based. Use the package `bin` entries (`contracts` or
