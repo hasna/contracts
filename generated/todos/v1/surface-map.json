@@ -1,0 +1,2995 @@
+{
+  "operations": [
+    {
+      "cli": {
+        "command": "todos service health",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/service/health",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.service.health",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_service_health"
+      },
+      "sdk": {
+        "method": "service.health",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos service ready",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/service/ready",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.service.ready",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_service_ready"
+      },
+      "sdk": {
+        "method": "service.ready",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos service version",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/service/version",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.service.version",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_service_version"
+      },
+      "sdk": {
+        "method": "service.version",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos authority get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/authority",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.authority.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_authority_get"
+      },
+      "sdk": {
+        "method": "authority.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos manifest get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/manifest",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.manifest.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_manifest_get"
+      },
+      "sdk": {
+        "method": "manifest.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos openapi get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/openapi",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.openapi.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_openapi_get"
+      },
+      "sdk": {
+        "method": "openapi.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos capabilities list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/capabilities",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.capabilities.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_capabilities_list"
+      },
+      "sdk": {
+        "method": "capabilities.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos capabilities get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/capabilities/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.capabilities.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_capabilities_get"
+      },
+      "sdk": {
+        "method": "capabilities.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/tasks",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_list"
+      },
+      "sdk": {
+        "method": "tasks.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks count",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/tasks/count",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.count",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_count"
+      },
+      "sdk": {
+        "method": "tasks.count",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks exists-many",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/tasks/exists-many",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.exists_many",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_exists_many"
+      },
+      "sdk": {
+        "method": "tasks.existsMany",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/tasks",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.create",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_create"
+      },
+      "sdk": {
+        "method": "tasks.create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks upsert",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "PUT",
+        "path": "/v1/tasks/upsert",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.upsert",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_upsert"
+      },
+      "sdk": {
+        "method": "tasks.upsert",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/tasks/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_get"
+      },
+      "sdk": {
+        "method": "tasks.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks update",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "PATCH",
+        "path": "/v1/tasks/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.update",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_update"
+      },
+      "sdk": {
+        "method": "tasks.update",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks delete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "DELETE",
+        "path": "/v1/tasks/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.delete",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_delete"
+      },
+      "sdk": {
+        "method": "tasks.delete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks batch",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/tasks/batch",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.batch",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_batch"
+      },
+      "sdk": {
+        "method": "tasks.batch",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks start",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/tasks/{ref}/start",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.start",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_start"
+      },
+      "sdk": {
+        "method": "tasks.start",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks complete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/tasks/{ref}/complete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.complete",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_complete"
+      },
+      "sdk": {
+        "method": "tasks.complete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks fail",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/tasks/{ref}/fail",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.fail",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_fail"
+      },
+      "sdk": {
+        "method": "tasks.fail",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks claim-next",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/tasks/claim-next",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.claim_next",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_claim_next"
+      },
+      "sdk": {
+        "method": "tasks.claimNext",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks next",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/tasks/next",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.next",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_next"
+      },
+      "sdk": {
+        "method": "tasks.next",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks list-ready",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/tasks/ready",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.list_ready",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_list_ready"
+      },
+      "sdk": {
+        "method": "tasks.listReady",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks list-active",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/tasks/active",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.list_active",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_list_active"
+      },
+      "sdk": {
+        "method": "tasks.listActive",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks list-changed",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/tasks/changed",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.list_changed",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_list_changed"
+      },
+      "sdk": {
+        "method": "tasks.listChanged",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks lock",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/tasks/{ref}/lock",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.lock",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_lock"
+      },
+      "sdk": {
+        "method": "tasks.lock",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks unlock",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "DELETE",
+        "path": "/v1/tasks/{ref}/lock",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.unlock",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_unlock"
+      },
+      "sdk": {
+        "method": "tasks.unlock",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos tasks get-context",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/tasks/{ref}/context",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.tasks.get_context",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_tasks_get_context"
+      },
+      "sdk": {
+        "method": "tasks.getContext",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos history list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/tasks/{ref}/history",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.history.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_history_list"
+      },
+      "sdk": {
+        "method": "history.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos comments list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/tasks/{ref}/comments",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.comments.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_comments_list"
+      },
+      "sdk": {
+        "method": "comments.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos comments create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/tasks/{taskRef}/comments",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.comments.create",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_comments_create"
+      },
+      "sdk": {
+        "method": "comments.create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos dependencies list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/tasks/{ref}/dependencies",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.dependencies.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_dependencies_list"
+      },
+      "sdk": {
+        "method": "dependencies.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos dependencies list-all",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/dependencies",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.dependencies.list_all",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_dependencies_list_all"
+      },
+      "sdk": {
+        "method": "dependencies.listAll",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos dependencies create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/dependencies",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.dependencies.create",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_dependencies_create"
+      },
+      "sdk": {
+        "method": "dependencies.create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos dependencies delete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "DELETE",
+        "path": "/v1/dependencies/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.dependencies.delete",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_dependencies_delete"
+      },
+      "sdk": {
+        "method": "dependencies.delete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos projects list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/projects",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.projects.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_projects_list"
+      },
+      "sdk": {
+        "method": "projects.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos projects create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/projects",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.projects.create",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_projects_create"
+      },
+      "sdk": {
+        "method": "projects.create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos projects get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/projects/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.projects.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_projects_get"
+      },
+      "sdk": {
+        "method": "projects.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos projects update",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "PATCH",
+        "path": "/v1/projects/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.projects.update",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_projects_update"
+      },
+      "sdk": {
+        "method": "projects.update",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos projects rename",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/projects/{ref}/rename",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.projects.rename",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_projects_rename"
+      },
+      "sdk": {
+        "method": "projects.rename",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos projects delete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "DELETE",
+        "path": "/v1/projects/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.projects.delete",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_projects_delete"
+      },
+      "sdk": {
+        "method": "projects.delete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-lists list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/task-lists",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_lists.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_lists_list"
+      },
+      "sdk": {
+        "method": "taskLists.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-lists create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/task-lists",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_lists.create",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_lists_create"
+      },
+      "sdk": {
+        "method": "taskLists.create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-lists get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/task-lists/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_lists.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_lists_get"
+      },
+      "sdk": {
+        "method": "taskLists.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-lists update",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "PATCH",
+        "path": "/v1/task-lists/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_lists.update",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_lists_update"
+      },
+      "sdk": {
+        "method": "taskLists.update",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-lists delete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "DELETE",
+        "path": "/v1/task-lists/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_lists.delete",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_lists_delete"
+      },
+      "sdk": {
+        "method": "taskLists.delete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos plans list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/plans",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.plans.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_plans_list"
+      },
+      "sdk": {
+        "method": "plans.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos plans create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/plans",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.plans.create",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_plans_create"
+      },
+      "sdk": {
+        "method": "plans.create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos plans get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/plans/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.plans.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_plans_get"
+      },
+      "sdk": {
+        "method": "plans.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos plans update",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "PATCH",
+        "path": "/v1/plans/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.plans.update",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_plans_update"
+      },
+      "sdk": {
+        "method": "plans.update",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos plans delete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "DELETE",
+        "path": "/v1/plans/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.plans.delete",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_plans_delete"
+      },
+      "sdk": {
+        "method": "plans.delete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos agents list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/agents",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.agents.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_agents_list"
+      },
+      "sdk": {
+        "method": "agents.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos agents register",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/agents",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.agents.register",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_agents_register"
+      },
+      "sdk": {
+        "method": "agents.register",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos agents get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/agents/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.agents.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_agents_get"
+      },
+      "sdk": {
+        "method": "agents.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos agents heartbeat",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/agents/{ref}/heartbeat",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.agents.heartbeat",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_agents_heartbeat"
+      },
+      "sdk": {
+        "method": "agents.heartbeat",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos agents release",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/agents/{ref}/release",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.agents.release",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_agents_release"
+      },
+      "sdk": {
+        "method": "agents.release",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos activity list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/activity",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.activity.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_activity_list"
+      },
+      "sdk": {
+        "method": "activity.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos stats get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/stats",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.stats.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_stats_get"
+      },
+      "sdk": {
+        "method": "stats.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos search execute",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/search",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.search.execute",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_search_execute"
+      },
+      "sdk": {
+        "method": "search.execute",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos saved-views list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/saved-views",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.saved_views.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_saved_views_list"
+      },
+      "sdk": {
+        "method": "savedViews.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos saved-views create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/saved-views",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.saved_views.create",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_saved_views_create"
+      },
+      "sdk": {
+        "method": "savedViews.create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos saved-views get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/saved-views/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.saved_views.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_saved_views_get"
+      },
+      "sdk": {
+        "method": "savedViews.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos saved-views update",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "PATCH",
+        "path": "/v1/saved-views/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.saved_views.update",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_saved_views_update"
+      },
+      "sdk": {
+        "method": "savedViews.update",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos saved-views delete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "DELETE",
+        "path": "/v1/saved-views/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.saved_views.delete",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_saved_views_delete"
+      },
+      "sdk": {
+        "method": "savedViews.delete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos saved-views execute",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/saved-views/{ref}/execute",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.saved_views.execute",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_saved_views_execute"
+      },
+      "sdk": {
+        "method": "savedViews.execute",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos verification-evidence list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/verification-evidence",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.verification_evidence.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_verification_evidence_list"
+      },
+      "sdk": {
+        "method": "verificationEvidence.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos verification-evidence create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/verification-evidence",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.verification_evidence.create",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_verification_evidence_create"
+      },
+      "sdk": {
+        "method": "verificationEvidence.create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos verification-evidence get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/verification-evidence/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.verification_evidence.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_verification_evidence_get"
+      },
+      "sdk": {
+        "method": "verificationEvidence.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos verification-evidence export",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/verification-evidence/export",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.verification_evidence.export",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_verification_evidence_export"
+      },
+      "sdk": {
+        "method": "verificationEvidence.export",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-files list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/task-files",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_files.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_files_list"
+      },
+      "sdk": {
+        "method": "taskFiles.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-files record",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/task-files",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_files.record",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_files_record"
+      },
+      "sdk": {
+        "method": "taskFiles.record",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos runs list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/runs",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.runs.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_runs_list"
+      },
+      "sdk": {
+        "method": "runs.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos runs start",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/runs",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.runs.start",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_runs_start"
+      },
+      "sdk": {
+        "method": "runs.start",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos runs get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/runs/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.runs.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_runs_get"
+      },
+      "sdk": {
+        "method": "runs.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos runs finish",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/runs/{ref}/finish",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.runs.finish",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_runs_finish"
+      },
+      "sdk": {
+        "method": "runs.finish",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos runs get-ledger",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/runs/{ref}/ledger",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.runs.get_ledger",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_runs_get_ledger"
+      },
+      "sdk": {
+        "method": "runs.getLedger",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos run-events list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/runs/{ref}/events",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.run_events.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_run_events_list"
+      },
+      "sdk": {
+        "method": "runEvents.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos run-events create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/runs/{runId}/events",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.run_events.create",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_run_events_create"
+      },
+      "sdk": {
+        "method": "runEvents.create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos run-commands list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/runs/{ref}/commands",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.run_commands.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_run_commands_list"
+      },
+      "sdk": {
+        "method": "runCommands.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos run-commands create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/runs/{runId}/commands",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.run_commands.create",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_run_commands_create"
+      },
+      "sdk": {
+        "method": "runCommands.create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos run-files list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/runs/{ref}/files",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.run_files.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_run_files_list"
+      },
+      "sdk": {
+        "method": "runFiles.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos run-files create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/runs/{runId}/files",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.run_files.create",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_run_files_create"
+      },
+      "sdk": {
+        "method": "runFiles.create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos run-artifacts list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/runs/{ref}/artifacts",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.run_artifacts.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_run_artifacts_list"
+      },
+      "sdk": {
+        "method": "runArtifacts.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos run-artifacts create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/runs/{runId}/artifacts",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.run_artifacts.create",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_run_artifacts_create"
+      },
+      "sdk": {
+        "method": "runArtifacts.create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos run-artifacts verify",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/runs/{runId}/artifacts/{ref}/verify",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.run_artifacts.verify",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_run_artifacts_verify"
+      },
+      "sdk": {
+        "method": "runArtifacts.verify",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos git-commits list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/git/commits",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.git_commits.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_git_commits_list"
+      },
+      "sdk": {
+        "method": "gitCommits.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos git-commits link",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/git/commits",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.git_commits.link",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_git_commits_link"
+      },
+      "sdk": {
+        "method": "gitCommits.link",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos git-commits unlink",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "DELETE",
+        "path": "/v1/git/commits/{commitRef}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.git_commits.unlink",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_git_commits_unlink"
+      },
+      "sdk": {
+        "method": "gitCommits.unlink",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos git-commits find",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/git/commits/find",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.git_commits.find",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_git_commits_find"
+      },
+      "sdk": {
+        "method": "gitCommits.find",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos git-refs list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/git/refs",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.git_refs.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_git_refs_list"
+      },
+      "sdk": {
+        "method": "gitRefs.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos git-refs link",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/git/refs",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.git_refs.link",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_git_refs_link"
+      },
+      "sdk": {
+        "method": "gitRefs.link",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos git-refs find",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/git/refs/find",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.git_refs.find",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_git_refs_find"
+      },
+      "sdk": {
+        "method": "gitRefs.find",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos traceability get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/traceability/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.traceability.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_traceability_get"
+      },
+      "sdk": {
+        "method": "traceability.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-to-pr-projection list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/task-to-pr-projections",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_to_pr_projection.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_to_pr_projection_list"
+      },
+      "sdk": {
+        "method": "taskToPrProjection.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-to-pr-projection get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/task-to-pr-projections/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_to_pr_projection.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_to_pr_projection_get"
+      },
+      "sdk": {
+        "method": "taskToPrProjection.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos transfer export",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/transfer/export",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.transfer.export",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_transfer_export"
+      },
+      "sdk": {
+        "method": "transfer.export",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos transfer validate",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/transfer/validate",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.transfer.validate",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_transfer_validate"
+      },
+      "sdk": {
+        "method": "transfer.validate",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos transfer import-preview",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/transfer/import/preview",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.transfer.import_preview",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_transfer_import_preview"
+      },
+      "sdk": {
+        "method": "transfer.importPreview",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos transfer import-execute",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/transfer/import/execute",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.transfer.import_execute",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_transfer_import_execute"
+      },
+      "sdk": {
+        "method": "transfer.importExecute",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos migration-receipts list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/migration-receipts",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.migration_receipts.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_migration_receipts_list"
+      },
+      "sdk": {
+        "method": "migrationReceipts.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos migration-receipts get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/migration-receipts/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.migration_receipts.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_migration_receipts_get"
+      },
+      "sdk": {
+        "method": "migrationReceipts.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos deletion-records list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/deletion-records",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.deletion_records.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_deletion_records_list"
+      },
+      "sdk": {
+        "method": "deletionRecords.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos deletion-records get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/deletion-records/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.deletion_records.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_deletion_records_get"
+      },
+      "sdk": {
+        "method": "deletionRecords.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos approvals list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/approvals",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.approvals.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_approvals_list"
+      },
+      "sdk": {
+        "method": "approvals.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos approvals get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/approvals/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.approvals.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_approvals_get"
+      },
+      "sdk": {
+        "method": "approvals.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos approvals request",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/approvals",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.approvals.request",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_approvals_request"
+      },
+      "sdk": {
+        "method": "approvals.request",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos approvals approve",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/approvals/{ref}/approve",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.approvals.approve",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_approvals_approve"
+      },
+      "sdk": {
+        "method": "approvals.approve",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos approvals reject",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/approvals/{ref}/reject",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.approvals.reject",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_approvals_reject"
+      },
+      "sdk": {
+        "method": "approvals.reject",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos approvals expire",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/approvals/{ref}/expire",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.approvals.expire",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_approvals_expire"
+      },
+      "sdk": {
+        "method": "approvals.expire",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-templates list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/task-templates",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_templates.list",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_templates_list"
+      },
+      "sdk": {
+        "method": "taskTemplates.list",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-templates create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/task-templates",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_templates.create",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_templates_create"
+      },
+      "sdk": {
+        "method": "taskTemplates.create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-templates get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "GET",
+        "path": "/v1/task-templates/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_templates.get",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_templates_get"
+      },
+      "sdk": {
+        "method": "taskTemplates.get",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-templates update",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "PATCH",
+        "path": "/v1/task-templates/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_templates.update",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_templates_update"
+      },
+      "sdk": {
+        "method": "taskTemplates.update",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-templates delete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "DELETE",
+        "path": "/v1/task-templates/{ref}",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_templates.delete",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_templates_delete"
+      },
+      "sdk": {
+        "method": "taskTemplates.delete",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-templates instantiate",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/task-templates/{ref}/instantiate",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.task_templates.instantiate",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_templates_instantiate"
+      },
+      "sdk": {
+        "method": "taskTemplates.instantiate",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos reports generate",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/reports/generate",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.reports.generate",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_reports_generate"
+      },
+      "sdk": {
+        "method": "reports.generate",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos workspace bootstrap",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": null,
+      "id": "todos.workspace.bootstrap",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_workspace_bootstrap"
+      },
+      "sdk": {
+        "method": "workspace.bootstrap",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos server start",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": null,
+      "id": "todos.server.start",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_server_start"
+      },
+      "sdk": {
+        "method": "server.start",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos database backup",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": null,
+      "id": "todos.database.backup",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_database_backup"
+      },
+      "sdk": {
+        "method": "database.backup",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos database restore",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": null,
+      "id": "todos.database.restore",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_database_restore"
+      },
+      "sdk": {
+        "method": "database.restore",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos database check",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": null,
+      "id": "todos.database.check",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_database_check"
+      },
+      "sdk": {
+        "method": "database.check",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos database compact",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": null,
+      "id": "todos.database.compact",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_database_compact"
+      },
+      "sdk": {
+        "method": "database.compact",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos offline-upgrade validate",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": null,
+      "id": "todos.offline_upgrade.validate",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_offline_upgrade_validate"
+      },
+      "sdk": {
+        "method": "offlineUpgrade.validate",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos offline-upgrade execute",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": null,
+      "id": "todos.offline_upgrade.execute",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_offline_upgrade_execute"
+      },
+      "sdk": {
+        "method": "offlineUpgrade.execute",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
+        "command": "todos task-to-pr-projection rebuild",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": null,
+      "id": "todos.task_to_pr_projection.rebuild",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_task_to_pr_projection_rebuild"
+      },
+      "sdk": {
+        "method": "taskToPrProjection.rebuild",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    }
+  ],
+  "provenance": {
+    "schema": "hasna.todos.contract_provenance.v1",
+    "sourceFreeze": {
+      "contracts": {
+        "commitSha": "0c8c5b4205ceaf16b1cee26c30199249055c934e",
+        "repository": "hasna/contracts",
+        "role": "contract_base"
+      },
+      "e00115": {
+        "commitSha": "142e650c7f13d05ac145bd37e986e68909d571d2",
+        "repository": "hasna/contracts",
+        "role": "e_00115_projection_evidence"
+      },
+      "openTodos": {
+        "commitSha": "a18a8b797eb1b05e92964dbf8b036dde972c2314",
+        "repository": "hasna/todos",
+        "role": "open_todos_evidence"
+      },
+      "platformTodos": {
+        "commitSha": "3d0bb21d586eed553e9010fc1187b19415958394",
+        "repository": "hasna/platform-todos",
+        "role": "platform_todos_evidence"
+      }
+    },
+    "surfaceMappings": {
+      "evidenceUse": "design_input_only",
+      "localTopologyHttpSurface": null,
+      "operatorAudienceIncluded": false,
+      "producerImplementationStatus": "not_attested",
+      "sharedHttpPrefix": "/v1",
+      "status": "required_target"
+    }
+  },
+  "provenanceDigest": "2e75eb8006d785e7c11c358425c3ea928cf4cbb9e2d66fa7a4f72664b1f97eaf",
+  "schema": "hasna.todos.surface_map.v1",
+  "version": "1"
+}

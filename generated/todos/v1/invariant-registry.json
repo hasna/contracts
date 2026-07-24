@@ -1,0 +1,585 @@
+{
+  "invariants": [
+    {
+      "category": "common",
+      "description": "Non-portable domain paths are relative, traversal-free, and never absolute.",
+      "id": "todos.common.relative_path",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "common.relative_path_semantics"
+      ],
+      "schemaIds": [
+        "hasna.todos.task_file.v1",
+        "hasna.todos.run_file.v1",
+        "hasna.todos.git_commit.v1",
+        "hasna.todos.request.task_file_record.v1",
+        "hasna.todos.request.run_file_create.v1",
+        "hasna.todos.request.git_commit_link.v1"
+      ]
+    },
+    {
+      "category": "identity",
+      "description": "Identity roles and scopes are unique and administrative audiences carry the administrative role.",
+      "id": "todos.identity.context_semantics",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "identity.context_semantics"
+      ],
+      "schemaIds": [
+        "hasna.todos.identity_context.v1"
+      ]
+    },
+    {
+      "category": "identity",
+      "description": "Identity tenant, audience, scopes, and idempotency satisfy the requested operation.",
+      "id": "todos.identity.authorization_binding",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "identity.authorization_binding"
+      ],
+      "schemaIds": [
+        "hasna.todos.identity_context.v1"
+      ]
+    },
+    {
+      "category": "authority",
+      "description": "Local authorities have no endpoint and cloud authorities require one HTTPS endpoint.",
+      "id": "todos.authority.mode_binding",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "authority.config_semantics",
+        "authority.handshake_semantics"
+      ],
+      "schemaIds": [
+        "hasna.todos.authority_config.v1",
+        "hasna.todos.authority_handshake.v1"
+      ]
+    },
+    {
+      "category": "authority",
+      "description": "Authority capability identifiers are unique.",
+      "id": "todos.authority.capability_uniqueness",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "authority.config_semantics",
+        "authority.handshake_semantics"
+      ],
+      "schemaIds": [
+        "hasna.todos.authority_config.v1",
+        "hasna.todos.authority_handshake.v1"
+      ]
+    },
+    {
+      "category": "authority",
+      "description": "Authority handshakes bind exact current digests and the sorted capability inventory.",
+      "id": "todos.authority.canonical_binding",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "authority.canonical_binding",
+        "authority.validate_canonical_handshake"
+      ],
+      "schemaIds": [
+        "hasna.todos.authority_handshake.v1"
+      ]
+    },
+    {
+      "category": "domain",
+      "description": "Task tags are unique and completed tasks carry a completion timestamp.",
+      "id": "todos.domain.task_record",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "domain.task_record_semantics"
+      ],
+      "schemaIds": [
+        "hasna.todos.task.v1"
+      ]
+    },
+    {
+      "category": "domain",
+      "description": "Task status transitions follow the closed lifecycle and terminal states do not reopen.",
+      "id": "todos.domain.task_status_transition",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "domain.task_status_transition"
+      ],
+      "schemaIds": [
+        "hasna.todos.task.v1"
+      ]
+    },
+    {
+      "category": "domain",
+      "description": "Agent role identifiers are unique.",
+      "id": "todos.domain.agent_role_uniqueness",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "domain.agent_role_uniqueness"
+      ],
+      "schemaIds": [
+        "hasna.todos.agent.v1"
+      ]
+    },
+    {
+      "category": "domain",
+      "description": "A dependency cannot point a task at itself.",
+      "id": "todos.domain.dependency_self_reference",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "domain.dependency_self_reference"
+      ],
+      "schemaIds": [
+        "hasna.todos.dependency.v1"
+      ]
+    },
+    {
+      "category": "domain",
+      "description": "Git object identifiers have the exact hexadecimal length required by their algorithm.",
+      "id": "todos.domain.git_object_id",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "domain.git_object_id"
+      ],
+      "schemaIds": [
+        "hasna.todos.git_object_id.v1"
+      ]
+    },
+    {
+      "category": "response",
+      "description": "Every page count equals the exact number of returned items.",
+      "id": "todos.response.page_count",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "response.page_count"
+      ],
+      "schemaIds": [
+        "hasna.todos.response.capability_page.v1",
+        "hasna.todos.response.task_page.v1",
+        "hasna.todos.response.activity_page.v1",
+        "hasna.todos.response.comment_page.v1",
+        "hasna.todos.response.dependency_page.v1",
+        "hasna.todos.response.project_page.v1",
+        "hasna.todos.response.task_list_page.v1",
+        "hasna.todos.response.plan_page.v1",
+        "hasna.todos.response.agent_page.v1",
+        "hasna.todos.response.saved_view_page.v1",
+        "hasna.todos.response.verification_page.v1",
+        "hasna.todos.response.task_file_page.v1",
+        "hasna.todos.response.run_page.v1",
+        "hasna.todos.response.run_event_page.v1",
+        "hasna.todos.response.run_command_page.v1",
+        "hasna.todos.response.run_file_page.v1",
+        "hasna.todos.response.run_artifact_page.v1",
+        "hasna.todos.response.git_commit_page.v1",
+        "hasna.todos.response.git_ref_page.v1",
+        "hasna.todos.response.projection_page.v1",
+        "hasna.todos.response.migration_receipt_page.v1",
+        "hasna.todos.response.deletion_record_page.v1",
+        "hasna.todos.response.approval_page.v1",
+        "hasna.todos.response.task_template_page.v1"
+      ]
+    },
+    {
+      "category": "operation",
+      "description": "Operation identifiers and surfaces are unique, derived, mode-correct, and semantically complete.",
+      "id": "todos.operation.manifest_semantics",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "operation.manifest_semantics"
+      ],
+      "schemaIds": [
+        "hasna.todos.operation_manifest.v1"
+      ]
+    },
+    {
+      "category": "operation",
+      "description": "Task update requests contain at least one changed field.",
+      "id": "todos.operation.task_update_nonempty",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "operation.task_update_nonempty"
+      ],
+      "schemaIds": [
+        "hasna.todos.request.task_update.v1"
+      ]
+    },
+    {
+      "category": "operation",
+      "description": "Transfer execution checkpoints bind the source, target, bundle, plan, and canonical digests.",
+      "id": "todos.operation.transfer_checkpoint_binding",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "operation.transfer_checkpoint_binding"
+      ],
+      "schemaIds": [
+        "hasna.todos.request.transfer_import_execute.v1"
+      ]
+    },
+    {
+      "category": "invocation",
+      "description": "Operation invocations bind exact current contract and manifest digests.",
+      "id": "todos.invocation.canonical_digests",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "invocation.operation_binding",
+        "invocation.validate_operation"
+      ],
+      "schemaIds": [
+        "hasna.todos.operation_invocation.v1"
+      ]
+    },
+    {
+      "category": "invocation",
+      "description": "Invocation authority equals the validated organization and tenant identity.",
+      "id": "todos.invocation.authority_identity_binding",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "invocation.operation_binding",
+        "invocation.validate_operation"
+      ],
+      "schemaIds": [
+        "hasna.todos.operation_invocation.v1"
+      ]
+    },
+    {
+      "category": "invocation",
+      "description": "The operation, mode, scopes, idempotency, and typed request all match the manifest.",
+      "id": "todos.invocation.operation_mode_scope_request",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "invocation.operation_binding",
+        "invocation.validate_operation"
+      ],
+      "schemaIds": [
+        "hasna.todos.operation_invocation.v1"
+      ]
+    },
+    {
+      "category": "contract",
+      "description": "The descriptor closes over current manifest, capability, schema, invariant, provenance, and generator digests.",
+      "id": "todos.contract.digest_closure",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "contract.digest_closure",
+        "contract.verify_digest_closure"
+      ],
+      "schemaIds": [
+        "hasna.todos.contract.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Every section, record, nested reference, projection, closure, attachment, and inventory entry has one source authority.",
+      "id": "todos.transfer.source_authority",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.bundle_owner_binding"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_bundle.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Public transfer validation binds exact current contract and manifest digests.",
+      "id": "todos.transfer.canonical_digests",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.canonical_digests"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_bundle.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Public import execution binds exact current contract and manifest digests.",
+      "id": "todos.transfer.execution_canonical_digests",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.canonical_execution"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_import_execution.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Every section count and digest and the bundle checksum match canonical content.",
+      "id": "todos.transfer.section_integrity",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.integrity"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_bundle.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Portable records exclude raw commands, arguments, paths, credentials, and execution internals.",
+      "id": "todos.transfer.classification",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.integrity"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_bundle.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Every portable record participates in a complete transitive reference closure; projection predecessors resolve by exact owner, kind, id, version, and digest.",
+      "id": "todos.transfer.reference_closure",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.integrity"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_bundle.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Task dependency closure is complete, deterministic, and acyclic.",
+      "id": "todos.transfer.dependency_closure",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.integrity"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_bundle.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Evidence, command output, file, and artifact payloads are represented only by SHA-256 content references.",
+      "id": "todos.transfer.attachment_content_addressing",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.integrity"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_bundle.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Deletion history contains digest-only full-redaction tombstones and no raw payload.",
+      "id": "todos.transfer.deletion_redaction",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.integrity"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_bundle.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Import plans carry a deterministic id plus a content digest binding source and target authorities, canonical digests, bundle content, conflicts, and counts.",
+      "id": "todos.transfer.import_plan",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.import_plan_digest"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_import_preview.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Checkpoints bind source, target, bundle id and digest, import-plan id and digest, contract and manifest digests, and idempotency.",
+      "id": "todos.transfer.checkpoint_binding",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.checkpoint_record"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_checkpoint.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Checkpoint progress advances one canonical section at a time to one terminal state.",
+      "id": "todos.transfer.checkpoint_monotonicity",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.checkpoint_transition"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_checkpoint.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Execution requests and optional checkpoints bind every source, target, digest, plan, bundle, and idempotency field.",
+      "id": "todos.transfer.execution_request_binding",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.execution_request"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_import_execution.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Execution context is exactly uncommitted or committed with one valid receipt; all unknown states fail closed.",
+      "id": "todos.transfer.execution_context_closed",
+      "jsonSchemaExpressible": true,
+      "runtimeValidatorIds": [
+        "transfer.execution_context"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_execution_context.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Receipts bind source, target, bundle id and digest, import-plan id and digest, contract and manifest digests, counts, and one terminal checkpoint.",
+      "id": "todos.transfer.receipt_binding",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.receipt_record"
+      ],
+      "schemaIds": [
+        "hasna.todos.migration_receipt.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Migration receipts form one strict digest-linked chain where each idempotency key has one canonical import tuple and terminal result; exact receipt replay never appends.",
+      "id": "todos.transfer.receipt_chain",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.receipt_chain",
+        "transfer.public_receipt_chain"
+      ],
+      "schemaIds": [
+        "hasna.todos.migration_receipt.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Every public checkpoint, execution, receipt, transition, receipt-chain, and operation-map boundary rejects historical contract or manifest digests; version-neutral foundation, registry, and generated schemas remain internal structural inputs.",
+      "id": "todos.transfer.public_canonical_boundaries",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "operation.public_transfer_import_execute_canonical",
+        "transfer.public_checkpoint_canonical",
+        "transfer.public_receipt_canonical",
+        "transfer.public_execution_request_canonical",
+        "transfer.public_checkpoint_transition",
+        "transfer.public_receipt_chain"
+      ],
+      "schemaIds": [
+        "hasna.todos.request.transfer_import_execute.v1",
+        "hasna.todos.response.migration_receipt.v1",
+        "hasna.todos.response.migration_receipt_page.v1",
+        "hasna.todos.transfer_checkpoint.v1",
+        "hasna.todos.transfer_import_execution.v1",
+        "hasna.todos.migration_receipt.v1"
+      ]
+    },
+    {
+      "category": "transfer",
+      "description": "Only an identical committed import replays; conflicts and unknown context reject.",
+      "id": "todos.transfer.replay_binding",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "transfer.execution_replay"
+      ],
+      "schemaIds": [
+        "hasna.todos.transfer_import_execution.v1",
+        "hasna.todos.transfer_execution_context.v1"
+      ]
+    },
+    {
+      "category": "projection",
+      "description": "Projection references are opaque identifiers, never paths or URLs.",
+      "id": "todos.projection.opaque_refs",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "projection.record_binding"
+      ],
+      "schemaIds": [
+        "hasna.todos.task_to_pr_projection.v1"
+      ]
+    },
+    {
+      "category": "projection",
+      "description": "All identity, pull-request, proof, and predecessor refs match the projection owner and required kind.",
+      "id": "todos.projection.owner_kind_binding",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "projection.record_binding"
+      ],
+      "schemaIds": [
+        "hasna.todos.task_to_pr_projection.v1"
+      ]
+    },
+    {
+      "category": "projection",
+      "description": "Published, provider-observed, and equality-proof heads are complete and equal to the branch head.",
+      "id": "todos.projection.exact_head",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "projection.head_binding"
+      ],
+      "schemaIds": [
+        "hasna.todos.task_to_pr_projection.v1"
+      ]
+    },
+    {
+      "category": "projection",
+      "description": "Proof references and digests are unique, owner-bound, kind-bound, and tied to the current head.",
+      "id": "todos.projection.proof_identity",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "projection.record_binding"
+      ],
+      "schemaIds": [
+        "hasna.todos.task_to_pr_projection.v1"
+      ]
+    },
+    {
+      "category": "projection",
+      "description": "Projection digests cover canonical content and successors bind exact immediate predecessors.",
+      "id": "todos.projection.digest_predecessor",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "projection.record_binding",
+        "projection.transition"
+      ],
+      "schemaIds": [
+        "hasna.todos.task_to_pr_projection.v1"
+      ]
+    },
+    {
+      "category": "projection",
+      "description": "Full histories reject missing links, ABA heads, repeats, substitutions, owner or kind drift, and stale heads.",
+      "id": "todos.projection.full_history",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "projection.history"
+      ],
+      "schemaIds": [
+        "hasna.todos.task_to_pr_projection.v1"
+      ]
+    },
+    {
+      "category": "artifacts",
+      "description": "Checked-in artifacts match canonical regenerated bytes even when checksums are internally recomputed.",
+      "id": "todos.artifacts.canonical_bytes",
+      "jsonSchemaExpressible": false,
+      "runtimeValidatorIds": [
+        "artifacts.canonical_bytes"
+      ],
+      "schemaIds": [
+        "hasna.todos.contract.v1"
+      ]
+    }
+  ],
+  "runtimeValidationRequired": true,
+  "schema": "hasna.todos.invariant_registry.v1",
+  "version": "1"
+}

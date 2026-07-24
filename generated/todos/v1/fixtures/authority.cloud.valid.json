@@ -1,0 +1,40 @@
+{
+  "authority": {
+    "endpoint": "https://todos.example.invalid/v1",
+    "id": "tenant-a-cloud",
+    "kind": "cloud_tenant"
+  },
+  "capabilityIds": [
+    "activity",
+    "agents",
+    "approvals",
+    "authority",
+    "comments",
+    "cursor-pagination",
+    "deletion-history",
+    "dependencies",
+    "git-traceability",
+    "idempotency",
+    "optimistic-concurrency",
+    "plans",
+    "projects",
+    "reports",
+    "runs",
+    "saved-views",
+    "search",
+    "task-files",
+    "task-lists",
+    "task-templates",
+    "task-to-pr-projection",
+    "tasks",
+    "transfer",
+    "typed-errors",
+    "verification-evidence"
+  ],
+  "contractDigest": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+  "contractVersion": "1.0.0",
+  "issuedAt": "2026-07-24T00:00:00.000Z",
+  "manifestDigest": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+  "manifestVersion": "1",
+  "mode": "cloud"
+}

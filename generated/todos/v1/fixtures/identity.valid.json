@@ -1,0 +1,21 @@
+{
+  "agentId": null,
+  "audience": "customer",
+  "idempotencyKey": "request-key-1",
+  "issuer": "https://identity.example.invalid",
+  "keyId": "key-1",
+  "organizationId": "tenant-a",
+  "projectId": "project-1",
+  "requestId": "request-1",
+  "roles": [
+    "customer_member"
+  ],
+  "scopes": [
+    "todos:*"
+  ],
+  "sessionId": null,
+  "subject": "user-1",
+  "taskListId": null,
+  "tenantId": "tenant-a",
+  "tokenId": "token-1"
+}
