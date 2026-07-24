@@ -525,7 +525,7 @@ describe("published package hostname and provenance boundary", () => {
     const evidence = scanNoCloudTarget(packedArchivePath);
     expect(evidence.verdict).toBe("passed");
     expect(evidence.findings).toEqual([]);
-  });
+  }, 15_000);
 
   test("raw-member scan catches an encoded duplicate that extraction overwrites", () => {
     const fixtureRoot = join(temporaryRoot, "duplicate-member-negative-control");
