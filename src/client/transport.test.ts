@@ -7,6 +7,7 @@ import {
   createClientTransport,
   createHasnaHttpTransport,
   defaultCloudBaseUrl,
+  fleetApiDomain,
   resolveClientTransport,
   toV1BaseUrl,
 } from "./transport.js";
@@ -71,6 +72,67 @@ describe("resolveClientTransport — the client-flip contract", () => {
     expect(r.deprecatedAlias).toBe("self_hosted");
     expect(r.baseUrl).toBe("https://knowledge.your-deployment.example/v1");
     expect(r.apiUrlSource).toBe("default");
+  });
+
+  test("explicit per-app API URL wins over a malformed fleet domain", () => {
+    const r = resolveClientTransport("todos", {
+      HASNA_TODOS_STORAGE_MODE: "cloud",
+      HASNA_TODOS_API_URL: "  https://api.customer.example/contracts/  ",
+      HASNA_TODOS_API_KEY: "hasna_todos_custom",
+      HASNA_FLEET_API_DOMAIN: "https://malformed.example/path",
+    });
+    expect(r.transport).toBe("cloud-http");
+    expect(r.baseUrl).toBe("https://api.customer.example/contracts/v1");
+    expect(r.apiUrlSource).toBe("HASNA_TODOS_API_URL");
+    expect(r.misconfigured).toBe(false);
+  });
+
+  test("valid fleet domain is trimmed, normalized, and used only as fallback", () => {
+    const r = resolveClientTransport("todos", {
+      HASNA_TODOS_STORAGE_MODE: "cloud",
+      HASNA_TODOS_API_KEY: "hasna_todos_fleet",
+      HASNA_FLEET_API_DOMAIN: "  Fleet.Customer.Example  ",
+    });
+    expect(r.transport).toBe("cloud-http");
+    expect(r.baseUrl).toBe("https://todos.fleet.customer.example/v1");
+    expect(r.apiUrlSource).toBe("HASNA_FLEET_API_DOMAIN");
+    expect(fleetApiDomain({ HASNA_FLEET_API_DOMAIN: "  Fleet.Customer.Example  " })).toBe(
+      "fleet.customer.example",
+    );
+  });
+
+  test("whitespace-only fleet domain uses the neutral non-resolving placeholder", () => {
+    const env = { HASNA_FLEET_API_DOMAIN: " \t\n " };
+    expect(fleetApiDomain(env)).toBe("your-deployment.example");
+    expect(defaultCloudBaseUrl("todos", env)).toBe("https://todos.your-deployment.example");
+
+    const r = resolveClientTransport("todos", {
+      ...env,
+      HASNA_TODOS_STORAGE_MODE: "cloud",
+      HASNA_TODOS_API_KEY: "hasna_todos_placeholder",
+    });
+    expect(r.transport).toBe("cloud-http");
+    expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
+    expect(r.apiUrlSource).toBe("default");
+  });
+
+  test("malformed fleet domains fail closed instead of becoming request URLs", () => {
+    for (const malformedDomain of [
+      "https://fleet.customer.example/path",
+      "fleet.customer.example/path",
+      "fleet..customer.example",
+      "-fleet.customer.example",
+    ]) {
+      const r = resolveClientTransport("todos", {
+        HASNA_TODOS_STORAGE_MODE: "cloud",
+        HASNA_TODOS_API_KEY: "hasna_todos_invalid_domain",
+        HASNA_FLEET_API_DOMAIN: malformedDomain,
+      });
+      expect(r.transport).toBe("local");
+      expect(r.baseUrl).toBeNull();
+      expect(r.misconfigured).toBe(true);
+      expect(r.warning).toContain("HASNA_FLEET_API_DOMAIN");
+    }
   });
 
   test("STORAGE_MODE=cloud (bare alias) is honored", () => {

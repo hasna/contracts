@@ -18,12 +18,12 @@ import { createHasnaHttpTransport, defaultCloudBaseUrl, toV1BaseUrl } from "./tr
 
 const APP = "knowledge";
 const RESOURCE = "notes";
-// Real live runs (with AWS creds present) must set HASNA_FLEET_API_DOMAIN to the
-// operator's real deployment domain; absent that, this falls back to the same
+// Real live runs (with AWS creds present) should set the explicit per-app URL or
+// a valid fleet domain. The explicit URL wins. Absent both, this uses the same
 // neutral, non-resolving placeholder as the rest of the package, so a live run
-// without the env var configured fails fast rather than silently targeting a
+// without deployment configuration fails fast rather than silently targeting a
 // guessed real hostname.
-const HOST = defaultCloudBaseUrl(APP);
+const HOST = process.env.HASNA_KNOWLEDGE_API_URL?.trim() || defaultCloudBaseUrl(APP);
 
 function fetchApiKey(app: string): string | null {
   if (process.env.HASNA_CONTRACTS_LIVE_CONFORMANCE === "0") return null;

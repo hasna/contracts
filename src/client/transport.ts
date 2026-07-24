@@ -42,15 +42,38 @@
 import { normalizeStorageMode, envToken, type Env } from "../mode.js";
 import type { StorageMode } from "../schemas.js";
 
+const FLEET_API_DOMAIN_ENV_KEY = "HASNA_FLEET_API_DOMAIN";
+const NEUTRAL_FLEET_API_DOMAIN = "your-deployment.example";
+
 /**
  * Fleet API domain suffix. This published package never ships a real internal
  * hostname: override with `HASNA_FLEET_API_DOMAIN` (REQUIRED in a real
  * deployment) or set an explicit `HASNA_<NAME>_API_URL` per app. Absent both,
  * this falls back to a neutral placeholder that intentionally does not
- * resolve to any service.
+ * resolve to any service. Non-blank malformed values throw so callers can fail
+ * closed instead of constructing a request URL from invalid input.
  */
 export function fleetApiDomain(env: Env = process.env as Env): string {
-  return env["HASNA_FLEET_API_DOMAIN"]?.trim() || "your-deployment.example";
+  const configured = env[FLEET_API_DOMAIN_ENV_KEY]?.trim();
+  if (!configured) return NEUTRAL_FLEET_API_DOMAIN;
+
+  const normalized = configured.toLowerCase();
+  if (normalized.length > 253) {
+    throw new Error(`${FLEET_API_DOMAIN_ENV_KEY} must be a valid DNS domain.`);
+  }
+
+  const labels = normalized.split(".");
+  const valid = labels.every(
+    (label) =>
+      label.length > 0 &&
+      label.length <= 63 &&
+      /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label),
+  );
+  if (!valid) {
+    throw new Error(`${FLEET_API_DOMAIN_ENV_KEY} must be a valid DNS domain.`);
+  }
+
+  return normalized;
 }
 
 /** Default cloud host template. `<app>` is the app slug. */
@@ -117,7 +140,7 @@ export interface ClientTransportResolution {
   modeSource: string;
   /** `<origin>/v1` base for the cloud API when transport is cloud-http, else null. */
   baseUrl: string | null;
-  /** Env key the API URL came from, `"default"` (host template), or null. */
+  /** Env key the API URL/domain came from, `"default"` (neutral placeholder), or null. */
   apiUrlSource: string | null;
   /** Whether an API key is present (value never exposed). */
   apiKeyPresent: boolean;
@@ -205,10 +228,15 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     };
   }
 
-  const rawUrl = urlHit?.value ?? defaultCloudBaseUrl(name, env);
-  const apiUrlSource = urlHit ? urlHit.key : "default";
+  const configuredFleetDomain = env[FLEET_API_DOMAIN_ENV_KEY]?.trim();
+  const apiUrlSource = urlHit
+    ? urlHit.key
+    : configuredFleetDomain
+      ? FLEET_API_DOMAIN_ENV_KEY
+      : "default";
   let baseUrl: string;
   try {
+    const rawUrl = urlHit?.value ?? defaultCloudBaseUrl(name, env);
     baseUrl = toV1BaseUrl(rawUrl);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
