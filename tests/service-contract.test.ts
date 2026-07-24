@@ -248,6 +248,30 @@ describe("service contract manifest validation", () => {
     expect(validateServiceContractManifest(bad).success).toBe(false);
   });
 
+  test("types the exceptional non-Node surface waiver profile", () => {
+    const eligible = {
+      ...baseCliWithStore,
+      metadata: {
+        conformance: {
+          waiverProfile: "non-node-monorepo",
+          waivedSurfaces: [{ kind: "sdk", reason: "SDK is provided by the non-Node toolchain." }]
+        }
+      }
+    };
+    expect(validateServiceContractManifest(eligible).success).toBe(true);
+
+    const invalid = {
+      ...eligible,
+      metadata: {
+        conformance: {
+          waiverProfile: "arbitrary-exception",
+          waivedSurfaces: [{ kind: "sdk", reason: "Invalid profile." }]
+        }
+      }
+    };
+    expect(validateServiceContractManifest(invalid).success).toBe(false);
+  });
+
   test("preserves legacy conformance metadata while typing surface waivers", () => {
     const legacy = {
       ...baseCliWithStore,

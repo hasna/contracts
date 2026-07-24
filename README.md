@@ -168,7 +168,21 @@ header or `Authorization: Bearer <key>`.
 | `HASNA_<APP>_API_SIGNING_KEY`  | HMAC signing secret (falls back to `HASNA_API_SIGNING_KEY`) |
 | `HASNA_<APP>_DATABASE_URL`     | RDS URL for the `api_keys` store (revocation lookups)      |
 
-**Client env vars (self_hosted mode):** `<APP>_API_URL` + `<APP>_API_KEY` — never a DSN.
+**Client env vars (self_hosted mode):**
+
+- `HASNA_<APP>_API_URL` + `HASNA_<APP>_API_KEY` — the explicit per-app URL
+  always wins and is normalized to `/v1`.
+- If the per-app URL is blank or absent, a valid `HASNA_FLEET_API_DOMAIN`
+  supplies the domain suffix for `https://<app>.<domain>/v1`.
+- If both URL settings are blank or absent, the client uses the neutral,
+  non-resolving `your-deployment.example` placeholder. A non-blank malformed
+  fleet domain fails closed instead of producing a request URL.
+
+The short aliases `<APP>_API_URL` and `<APP>_API_KEY` remain supported after the
+canonical `HASNA_` names. Client configuration uses an HTTP API URL, never a
+database DSN. When relying on the fleet-domain or placeholder fallback, set
+`HASNA_<APP>_STORAGE_MODE=cloud`; only an explicit URL + API-key pair infers
+cloud mode when the mode variable is absent.
 
 Scope grammar is `<app>:<action>` with wildcards (`*`, `<app>:*`, `*:<action>`).
 
@@ -201,7 +215,7 @@ negative-test matrix.
 `generateSdkFromOpenApi(spec)` turns an `<app>-serve` OpenAPI 3 document into a
 typed, dependency-free `fetch` client plus interfaces from `components.schemas`.
 The generated client sends the API key as `x-api-key`, so a self_hosted consumer
-only needs `<APP>_API_URL` + `<APP>_API_KEY`.
+only needs `HASNA_<APP>_API_URL` + `HASNA_<APP>_API_KEY`.
 
 ```ts
 import { generateSdkFromOpenApi } from "@hasna/contracts/sdk";

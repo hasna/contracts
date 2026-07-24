@@ -220,6 +220,11 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
           type: "object",
           additionalProperties: true,
           properties: {
+            waiverProfile: {
+              const: "non-node-monorepo",
+              description:
+                "Explicit surface-waiver eligibility for exceptional non-Node monorepos. Libraries are eligible for API/MCP waivers without this profile."
+            },
             waivedSurfaces: {
               type: "array",
               uniqueItems: true,

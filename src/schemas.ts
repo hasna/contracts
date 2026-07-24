@@ -2199,7 +2199,9 @@ export const ServiceContractMetadataSchema = z
   .object({
     conformance: z
       .object({
-        waivedSurfaces: z.array(SurfaceConformanceWaiverSchema).default([])
+        waivedSurfaces: z.array(SurfaceConformanceWaiverSchema).default([]),
+        /** Explicit exception profile for non-Node monorepos. Libraries are eligible without a profile. */
+        waiverProfile: z.literal("non-node-monorepo").optional()
       })
       .catchall(z.unknown())
       .optional()

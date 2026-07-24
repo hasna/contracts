@@ -12,8 +12,8 @@
 //      { status, version, mode } shape.
 //   8. No forbidden shared cloud runtimes (reuses the no-cloud guard).
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import {
   HealthResponseSchema,
   SERVICE_SURFACE_KINDS,
@@ -56,11 +56,67 @@ interface PackageJsonInfo {
   present: boolean;
   bins: string[];
   exportSubpaths: string[];
+  exportTargets: Record<string, string[]>;
+}
+
+function collectExportTargets(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(collectExportTargets);
+  if (!value || typeof value !== "object") return [];
+  return Object.values(value as Record<string, unknown>).flatMap(collectExportTargets);
+}
+
+function packageExportTargets(value: unknown): Record<string, string[]> {
+  if (typeof value === "string" || Array.isArray(value)) {
+    return { ".": collectExportTargets(value) };
+  }
+  if (!value || typeof value !== "object") return {};
+
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.some(([key]) => key.startsWith("."))) {
+    return Object.fromEntries(
+      entries
+        .filter(([key]) => key.startsWith("."))
+        .map(([key, target]) => [key, collectExportTargets(target)])
+    );
+  }
+  return { ".": collectExportTargets(value) };
+}
+
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function sourceCandidatesForExportTarget(target: string): string[] {
+  if (!target.startsWith("./dist/")) return [];
+  const relativeTarget = target.slice("./dist/".length);
+  const sourceStem = relativeTarget
+    .replace(/\.d\.(?:ts|mts|cts)$/i, "")
+    .replace(/\.(?:js|mjs|cjs|json)$/i, "");
+  return [
+    `./src/${sourceStem}.ts`,
+    `./src/${sourceStem}.tsx`,
+    `./src/${sourceStem}.mts`,
+    `./src/${sourceStem}.cts`,
+    `./src/${sourceStem}.json`
+  ];
+}
+
+function exportTargetExists(repoRoot: string, target: string): boolean {
+  if (!target.startsWith("./")) return false;
+  const resolved = join(repoRoot, target);
+  if (relative(repoRoot, resolved).startsWith("..")) return false;
+  if (isFile(resolved)) return true;
+  return sourceCandidatesForExportTarget(target).some((candidate) => isFile(join(repoRoot, candidate)));
 }
 
 function packageJsonInfo(repoRoot: string): PackageJsonInfo {
   const path = join(repoRoot, "package.json");
-  if (!existsSync(path)) return { present: false, bins: [], exportSubpaths: [] };
+  if (!existsSync(path)) return { present: false, bins: [], exportSubpaths: [], exportTargets: {} };
   try {
     const pkg = JSON.parse(readFileSync(path, "utf8")) as { name?: unknown; bin?: unknown; exports?: unknown };
     const defaultBinName =
@@ -71,16 +127,10 @@ function packageJsonInfo(repoRoot: string): PackageJsonInfo {
         : pkg.bin && typeof pkg.bin === "object"
           ? Object.keys(pkg.bin as Record<string, unknown>)
           : [];
-    let exportSubpaths: string[] = [];
-    if (typeof pkg.exports === "string" || Array.isArray(pkg.exports)) {
-      exportSubpaths = ["."];
-    } else if (pkg.exports && typeof pkg.exports === "object") {
-      const keys = Object.keys(pkg.exports as Record<string, unknown>);
-      exportSubpaths = keys.some((key) => key.startsWith(".")) ? keys.filter((key) => key.startsWith(".")) : ["."];
-    }
-    return { present: true, bins, exportSubpaths };
+    const exportTargets = packageExportTargets(pkg.exports);
+    return { present: true, bins, exportSubpaths: Object.keys(exportTargets), exportTargets };
   } catch {
-    return { present: true, bins: [], exportSubpaths: [] };
+    return { present: true, bins: [], exportSubpaths: [], exportTargets: {} };
   }
 }
 
@@ -104,7 +154,48 @@ function representedSurfaceKinds(manifest: ServiceContractManifest): Set<Service
 
 interface PublicManifestFinding {
   path: string;
-  category: "secret-ref" | "internal-host" | "arn" | "account-id";
+  category: "secret-ref" | "credential-ref" | "credential-value" | "internal-host" | "arn" | "account-id";
+}
+
+function credentialKeyFinding(key: string): PublicManifestFinding["category"] | null {
+  const normalized = key.replace(/[-_]/g, "");
+  if (/secretref$/i.test(normalized) || normalized === "databasedsnbindings") {
+    return "secret-ref";
+  }
+  if (
+    /(?:secret|secrets|credential|credentials|password|passphrase|privatekey|apikey|accesskey|token)(?:ref|reference|id|path|arn)?$/i.test(
+      normalized
+    ) ||
+    /(?:databaseurl|dsn|connectionstring)$/i.test(normalized)
+  ) {
+    return /(?:ref|reference|id|path|arn)$/i.test(normalized) ? "credential-ref" : "credential-value";
+  }
+  return null;
+}
+
+function credentialValueFinding(value: string): PublicManifestFinding["category"] | null {
+  const trimmed = value.trim();
+  if (
+    /^(?:vault|secret|credential|keychain|secretsmanager|aws-secretsmanager|ssm):(?:\/\/|[a-z0-9])/i.test(trimmed) ||
+    /(?:^|\/)(?:secrets?|credentials?)(?:\/|:)[a-z0-9._-]+/i.test(trimmed)
+  ) {
+    return "credential-ref";
+  }
+  if (
+    /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i.test(trimmed) ||
+    /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/.test(trimmed) ||
+    /\bgh[pousr]_[A-Za-z0-9]{20,}\b/.test(trimmed) ||
+    /\bgithub_pat_[A-Za-z0-9_]{20,}\b/.test(trimmed) ||
+    /\bsk-[A-Za-z0-9_-]{16,}\b/.test(trimmed) ||
+    /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/.test(trimmed) ||
+    /\bBearer\s+[A-Za-z0-9._~+/-]{8,}\b/i.test(trimmed) ||
+    /^[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^@\s]+@/i.test(trimmed) ||
+    /\bhasna_[a-z0-9_]+_[A-Za-z0-9._-]{12,}\b/i.test(trimmed) ||
+    /\b(?:password|passphrase|api[_-]?key|access[_-]?key|token|secret)\s*[:=]\s*\S{8,}/i.test(trimmed)
+  ) {
+    return "credential-value";
+  }
+  return null;
 }
 
 function publicManifestFindings(value: unknown, path = "<root>"): PublicManifestFinding[] {
@@ -118,9 +209,8 @@ function publicManifestFindings(value: unknown, path = "<root>"): PublicManifest
   if (value && typeof value === "object") {
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
       const childPath = path === "<root>" ? key : `${path}.${key}`;
-      if (/secretRef$/i.test(key) || key === "databaseDsnBindings") {
-        findings.push({ path: childPath, category: "secret-ref" });
-      }
+      const keyFinding = credentialKeyFinding(key);
+      if (keyFinding) findings.push({ path: childPath, category: keyFinding });
       findings.push(...publicManifestFindings(child, childPath));
     }
     return findings;
@@ -138,6 +228,10 @@ function publicManifestFindings(value: unknown, path = "<root>"): PublicManifest
   }
   if (/\b\d{12}\b/.test(value)) {
     findings.push({ path, category: "account-id" });
+  }
+  const credentialFinding = credentialValueFinding(value);
+  if (credentialFinding) {
+    findings.push({ path, category: credentialFinding });
   }
   return findings;
 }
@@ -190,13 +284,35 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
     manifest.class === "saas" ||
     (manifest.class === "cli-with-store" && manifest.bins.includes(`${manifest.name}-serve`));
   const representedKinds = representedSurfaceKinds(manifest);
-  const waivedKinds = new Set(manifest.metadata?.conformance?.waivedSurfaces?.map((waiver) => waiver.kind) ?? []);
+  const waivers = manifest.metadata?.conformance?.waivedSurfaces ?? [];
+  const waiverProfile = manifest.metadata?.conformance?.waiverProfile;
+  const eligibleWaiverKinds =
+    waiverProfile === "non-node-monorepo"
+      ? new Set<ServiceSurfaceKind>(SERVICE_SURFACE_KINDS)
+      : manifest.class === "library"
+        ? new Set<ServiceSurfaceKind>(["api", "mcp"])
+        : new Set<ServiceSurfaceKind>();
+  const ineligibleWaivers = waivers.filter((waiver) => !eligibleWaiverKinds.has(waiver.kind));
+  const waivedKinds = new Set(
+    waivers.filter((waiver) => eligibleWaiverKinds.has(waiver.kind)).map((waiver) => waiver.kind)
+  );
   const missingKinds = SERVICE_SURFACE_KINDS.filter((kind) => !representedKinds.has(kind) && !waivedKinds.has(kind));
-  if (missingKinds.length > 0) {
+  if (missingKinds.length > 0 || ineligibleWaivers.length > 0) {
+    const failures: string[] = [];
+    if (missingKinds.length > 0) {
+      failures.push(`missing supported surface declarations or eligible waivers: ${missingKinds.join(", ")}`);
+    }
+    if (ineligibleWaivers.length > 0) {
+      failures.push(
+        `waivers not permitted for class ${manifest.class}${waiverProfile ? ` with profile ${waiverProfile}` : ""}: ${ineligibleWaivers
+          .map((waiver) => waiver.kind)
+          .join(", ")}`
+      );
+    }
     checks.push({
       id: "surface_matrix",
       status: "fail",
-      detail: `missing supported surface declarations or explicit waivers: ${missingKinds.join(", ")}`
+      detail: failures.join("; ")
     });
   } else {
     checks.push({
@@ -223,6 +339,16 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
     if (surface.kind === "sdk" && surface.status === "supported") {
       if (!surface.exportSubpath || !pkg.exportSubpaths.includes(surface.exportSubpath)) {
         surfaceBindingFailures.push(`serviceSurfaces[${index}].exportSubpath is not in package.json exports`);
+      } else {
+        const targets = pkg.exportTargets[surface.exportSubpath] ?? [];
+        const missingTargets = targets.filter((target) => !exportTargetExists(repoRoot, target));
+        if (targets.length === 0) {
+          surfaceBindingFailures.push(`serviceSurfaces[${index}].exportSubpath has no package export file target`);
+        } else if (missingTargets.length > 0) {
+          surfaceBindingFailures.push(
+            `serviceSurfaces[${index}].exportSubpath targets missing files: ${missingTargets.join(", ")}`
+          );
+        }
       }
       if (requiresGeneratedServiceSdk && !surface.generatedFrom) {
         surfaceBindingFailures.push(`serviceSurfaces[${index}].generatedFrom is required for a supported service SDK`);
@@ -265,18 +391,21 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
       status: unique.length === 0 ? "pass" : "fail",
       detail:
         unique.length === 0
-          ? "no private secret references, internal hosts, ARNs, or account IDs"
+          ? "no private secret or credential references, credential values, internal hosts, ARNs, or account IDs"
           : `private infrastructure references at ${unique.map((finding) => `${finding.path} (${finding.category})`).join(", ")}`
     });
   }
 
+  const requiredHosting = manifest.class === "saas" ? "hasna-saas" : "user-hosted";
   checks.push({
     id: "hosting_story",
-    status: manifest.hosting.includes("user-hosted") || manifest.class === "saas" ? "pass" : "fail",
-    detail: manifest.hosting.includes("user-hosted")
-      ? `user-hosted product story declared${manifest.hosting.includes("hasna-saas") ? " with optional Hasna SaaS" : ""}`
+    status: manifest.hosting.includes(requiredHosting) ? "pass" : "fail",
+    detail: manifest.hosting.includes(requiredHosting)
+      ? manifest.class === "saas"
+        ? `Hasna SaaS control-plane story declared${manifest.hosting.includes("user-hosted") ? " with user-hosted parity" : ""}`
+        : `user-hosted product story declared${manifest.hosting.includes("hasna-saas") ? " with optional Hasna SaaS" : ""}`
       : manifest.class === "saas"
-        ? "Hasna SaaS control-plane story declared"
+        ? "saas repos must declare the hasna-saas product story"
         : "public OSS cores must declare the user-hosted product story"
   });
 

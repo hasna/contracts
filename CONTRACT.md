@@ -138,7 +138,7 @@ per-repo waiver recorded in `hasna.contract.json` review. `library` repos
   command. Conformance records the command as data and never executes it.
 
 Public OSS manifests **MUST NOT** contain secret-reference paths, internal
-`*.hasna.xyz` hosts, cloud ARNs, or account IDs. Concrete database secret
+company hostnames, cloud ARNs, or account IDs. Concrete database secret
 bindings belong in private deploy/infra configuration. The resolved URL is
 supplied to the server as `HASNA_<NAME>_DATABASE_URL` at runtime and is never
 baked into an image or committed. The legacy `databaseUrlSecretRef` field
@@ -187,6 +187,7 @@ A long-running HTTP/MCP service.
 
 ### `saas`
 A Hasna-operated managed service.
+- **MUST** declare the `hasna-saas` hosting story.
 - **MUST** declare `storage` with `storage.mode` = `cloud`.
 - **MUST** declare `storage.envPrefix`; concrete database secret bindings stay
   in private deployment configuration, not the public manifest.
@@ -281,15 +282,20 @@ separate axes:
   placement.
 - `storage.engines` — supported persistence engines.
 - `serviceSurfaces` — API, SDK, MCP, and CLI declarations. A supported SDK
-  names a real package `exports` key via `exportSubpath`; generated clients
-  reference the API's `openApiPath` via `generatedFrom`.
+  names a real package `exports` key via `exportSubpath`, and the export target
+  must exist in the built package or have a corresponding source entry before
+  build. Generated clients reference the API's `openApiPath` via
+  `generatedFrom`.
 
-Libraries and exceptional non-Node monorepos may waive a surface explicitly:
+Libraries may waive only API and MCP because they remain responsible for their
+SDK and CLI surfaces. Exceptional non-Node monorepos may waive any inapplicable
+surface only when they declare the explicit `non-node-monorepo` waiver profile:
 
 ```json
 {
   "metadata": {
     "conformance": {
+      "waiverProfile": "non-node-monorepo",
       "waivedSurfaces": [
         {
           "kind": "api",
@@ -302,6 +308,8 @@ Libraries and exceptional non-Node monorepos may waive a surface explicitly:
 ```
 
 A waiver is typed, unique per surface kind, and must carry a non-empty reason.
+`service`, `saas`, and `cli-with-store` repos without the non-Node profile
+cannot use waivers to bypass required supported surfaces.
 
 ---
 
@@ -333,9 +341,10 @@ Checks:
    `package.json`; generated SDKs reference a declared OpenAPI path.
 6. `storage_capabilities` — store-owning cores declare SQLite + PostgreSQL and
    a live-PG test gate.
-7. `public_manifest_safety` — public manifests contain no secret refs, internal
-   hosts, ARNs, or account IDs.
-8. `hosting_story` — public OSS cores include the user-hosted product story.
+7. `public_manifest_safety` — public manifests contain no secret or credential
+   refs, credential-shaped values, internal hosts, ARNs, or account IDs.
+8. `hosting_story` — public OSS cores include the user-hosted product story;
+   `saas` repos include the `hasna-saas` story.
 9. `mode_enum_compliance` — any `HASNA_<NAME>_STORAGE_MODE` env normalizes to `local|cloud`.
 10. `health_shape` — when a serve bin exists, a sampled `/health` payload matches `{ status, version, mode }`.
 11. `no_cloud_guard` — no forbidden shared cloud runtime edges (reuses `scanNoCloudTarget`).

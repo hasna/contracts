@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -99,6 +99,11 @@ function withRepoFixture(
   try {
     writeFileSync(join(root, "hasna.contract.json"), `${JSON.stringify(manifest, null, 2)}\n`);
     writeFileSync(join(root, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
+    const dist = join(root, "dist");
+    mkdirSync(dist);
+    for (const file of ["index.js", "index.d.ts", "sdk.js", "sdk.d.ts"]) {
+      writeFileSync(join(dist, file), file.endsWith(".d.ts") ? "export {};\n" : "export {};\n");
+    }
     run(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -218,6 +223,67 @@ describe("repo conformance kit", () => {
     });
   });
 
+  test("fails conformance when the declared SDK export target does not exist", () => {
+    const pkg = {
+      ...completePackage,
+      exports: {
+        ".": "./dist/index.js",
+        "./sdk": "./dist/missing-sdk.js"
+      }
+    };
+    withRepoFixture(completeServiceManifest(), pkg, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      const binding = report.checks.find((check) => check.id === "surface_bindings");
+      expect(binding?.status).toBe("fail");
+      expect(binding?.detail).toContain("./dist/missing-sdk.js");
+      expect(report.ok).toBe(false);
+    });
+  });
+
+  test("rejects service surface waivers without library or non-Node eligibility", () => {
+    const manifest = completeServiceManifest();
+    manifest.serviceSurfaces = (manifest.serviceSurfaces ?? []).filter((surface) => surface.kind === "api");
+    manifest.metadata = {
+      conformance: {
+        waivedSurfaces: [
+          { kind: "sdk", reason: "Fixture tries to bypass the SDK requirement." },
+          { kind: "mcp", reason: "Fixture tries to bypass the MCP requirement." },
+          { kind: "cli", reason: "Fixture tries to bypass the CLI requirement." }
+        ]
+      }
+    };
+    withRepoFixture(manifest, completePackage, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      const surface = report.checks.find((check) => check.id === "surface_matrix");
+      expect(surface?.status).toBe("fail");
+      expect(surface?.detail).toContain("waivers not permitted for class service");
+      expect(surface?.detail).toContain("sdk");
+      expect(surface?.detail).toContain("mcp");
+      expect(surface?.detail).toContain("cli");
+      expect(report.ok).toBe(false);
+    });
+  });
+
+  test("accepts explicit surface waivers for an exceptional non-Node monorepo", () => {
+    const manifest = completeServiceManifest();
+    manifest.serviceSurfaces = (manifest.serviceSurfaces ?? []).filter((surface) => surface.kind === "api");
+    manifest.metadata = {
+      conformance: {
+        waiverProfile: "non-node-monorepo",
+        waivedSurfaces: [
+          { kind: "sdk", reason: "SDK is generated in the non-Node workspace." },
+          { kind: "mcp", reason: "MCP is hosted by the non-Node workspace." },
+          { kind: "cli", reason: "CLI is distributed by the non-Node toolchain." }
+        ]
+      }
+    };
+    withRepoFixture(manifest, completePackage, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      expect(report.checks.find((check) => check.id === "surface_matrix")?.status).toBe("pass");
+      expect(report.ok).toBe(true);
+    });
+  });
+
   test("resolves a string bin and conditional root export from package.json", () => {
     const manifest = {
       schema: SCHEMA_IDS.serviceContract,
@@ -287,6 +353,9 @@ describe("repo conformance kit", () => {
   });
 
   test("redacts public-manifest safety findings and supports explicit private-tier inspection", () => {
+    const internalDomain = ["hasna", "xyz"].join(".");
+    const credentialReference = ["vault", "//team/demo/provider"].join(":");
+    const credentialValue = ["hasna", "demo", "placeholdercredentialvalue"].join("_");
     const manifest = {
       ...completeServiceManifest(),
       storage: {
@@ -294,9 +363,13 @@ describe("repo conformance kit", () => {
         databaseUrlSecretRef: "hasna/oss/demo/database-url"
       },
       metadata: {
-        endpoint: "https://internal.hasna.xyz",
+        endpoint: `https://internal.${internalDomain}`,
         account: "123456789012",
-        role: "arn:aws:iam::123456789012:role/example"
+        role: "arn:aws:iam::123456789012:role/example",
+        credentialReference: "provider-entry",
+        apiKey: "redacted",
+        opaqueLocation: credentialReference,
+        exampleValue: credentialValue
       }
     };
     withRepoFixture(manifest, completePackage, (root) => {
@@ -307,9 +380,15 @@ describe("repo conformance kit", () => {
       expect(safety?.detail).toContain("metadata.account (account-id)");
       expect(safety?.detail).toContain("metadata.role (arn)");
       expect(safety?.detail).toContain("storage.databaseUrlSecretRef (secret-ref)");
-      expect(safety?.detail).not.toContain("internal.hasna.xyz");
+      expect(safety?.detail).toContain("metadata.credentialReference (credential-ref)");
+      expect(safety?.detail).toContain("metadata.apiKey (credential-value)");
+      expect(safety?.detail).toContain("metadata.opaqueLocation (credential-ref)");
+      expect(safety?.detail).toContain("metadata.exampleValue (credential-value)");
+      expect(safety?.detail).not.toContain(`internal.${internalDomain}`);
       expect(safety?.detail).not.toContain("123456789012");
       expect(safety?.detail).not.toContain("hasna/oss/demo/database-url");
+      expect(safety?.detail).not.toContain(credentialReference);
+      expect(safety?.detail).not.toContain(credentialValue);
 
       const privateReport = runRepoConformance(root, {
         env: {},
@@ -317,6 +396,20 @@ describe("repo conformance kit", () => {
         manifestTier: "private"
       });
       expect(privateReport.checks.find((check) => check.id === "public_manifest_safety")?.status).toBe("skip");
+    });
+  });
+
+  test("requires a saas manifest to declare the hasna-saas hosting story", () => {
+    const { hosting: _hosting, ...manifest } = completeServiceManifest();
+    manifest.class = "saas";
+    if (!manifest.storage) throw new Error("complete service fixture is missing storage");
+    manifest.storage.mode = "cloud";
+    withRepoFixture(manifest, completePackage, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      const hosting = report.checks.find((check) => check.id === "hosting_story");
+      expect(hosting?.status).toBe("fail");
+      expect(hosting?.detail).toContain("hasna-saas");
+      expect(report.ok).toBe(false);
     });
   });
 });

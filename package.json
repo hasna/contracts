@@ -74,6 +74,7 @@
   "files": [
     "dist",
     "src/kit",
+    "src/hasna.contract.schema.json",
     "docs",
     "examples",
     "CONTRACT.md",
