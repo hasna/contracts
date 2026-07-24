@@ -399,6 +399,64 @@ describe("repo conformance kit", () => {
     });
   });
 
+  test("rejects segmented credential keys and token-shaped values without echoing values", () => {
+    const jwtFixture = [
+      "eyJmaXh0dXJlIjoidGVzdCJ9",
+      "eyJzdWIiOiJwbGFjZWhvbGRlciJ9",
+      "c2FmZS1maXh0dXJlLXNpZ25hdHVyZQ"
+    ].join(".");
+    const cases: Array<{
+      metadata: Record<string, unknown>;
+      expectedFinding: string;
+      redactedValue: string;
+    }> = [
+      {
+        metadata: { "auth.credential.value": jwtFixture },
+        expectedFinding: "metadata.auth.credential.value (credential-value)",
+        redactedValue: jwtFixture
+      },
+      {
+        metadata: { "auth/token/reference": "provider-entry" },
+        expectedFinding: "metadata.auth/token/reference (credential-ref)",
+        redactedValue: "provider-entry"
+      },
+      {
+        metadata: { auth: { credential: { value: jwtFixture } } },
+        expectedFinding: "metadata.auth.credential.value (credential-value)",
+        redactedValue: jwtFixture
+      }
+    ];
+
+    for (const fixture of cases) {
+      withRepoFixture(
+        { ...completeServiceManifest(), metadata: fixture.metadata },
+        completePackage,
+        (root) => {
+          const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+          const safety = report.checks.find((check) => check.id === "public_manifest_safety");
+          expect(safety?.status).toBe("fail");
+          expect(safety?.detail).toContain(fixture.expectedFinding);
+          expect(safety?.detail).not.toContain(fixture.redactedValue);
+        }
+      );
+    }
+
+    withRepoFixture(
+      {
+        ...completeServiceManifest(),
+        metadata: {
+          "documentation.tokenization.value": "public-example",
+          exampleSegments: "eyJzaG9ydCJ9.not-a-token"
+        }
+      },
+      completePackage,
+      (root) => {
+        const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+        expect(report.checks.find((check) => check.id === "public_manifest_safety")?.status).toBe("pass");
+      }
+    );
+  });
+
   test("requires a saas manifest to declare the hasna-saas hosting story", () => {
     const { hosting: _hosting, ...manifest } = completeServiceManifest();
     manifest.class = "saas";

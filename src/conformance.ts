@@ -158,12 +158,16 @@ interface PublicManifestFinding {
 }
 
 function credentialKeyFinding(key: string): PublicManifestFinding["category"] | null {
-  const normalized = key.replace(/[-_]/g, "");
+  // Manifest metadata is open-ended, and producers use both nested objects and
+  // flattened paths (`auth.credential.value`, `auth/token/reference`). Treat
+  // every non-alphanumeric separator as a path boundary before matching so a
+  // dotted key cannot bypass the same policy as its nested representation.
+  const normalized = key.replace(/[^a-z0-9]/gi, "");
   if (/secretref$/i.test(normalized) || normalized === "databasedsnbindings") {
     return "secret-ref";
   }
   if (
-    /(?:secret|secrets|credential|credentials|password|passphrase|privatekey|apikey|accesskey|token)(?:ref|reference|id|path|arn)?$/i.test(
+    /(?:secret|secrets|credential|credentials|password|passphrase|privatekey|apikey|accesskey|token)(?:value|ref|reference|id|path|arn)?$/i.test(
       normalized
     ) ||
     /(?:databaseurl|dsn|connectionstring)$/i.test(normalized)
@@ -191,7 +195,10 @@ function credentialValueFinding(value: string): PublicManifestFinding["category"
     /\bBearer\s+[A-Za-z0-9._~+/-]{8,}\b/i.test(trimmed) ||
     /^[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^@\s]+@/i.test(trimmed) ||
     /\bhasna_[a-z0-9_]+_[A-Za-z0-9._-]{12,}\b/i.test(trimmed) ||
-    /\b(?:password|passphrase|api[_-]?key|access[_-]?key|token|secret)\s*[:=]\s*\S{8,}/i.test(trimmed)
+    /\b(?:password|passphrase|api[_-]?key|access[_-]?key|token|secret)\s*[:=]\s*\S{8,}/i.test(trimmed) ||
+    /(?:^|[^A-Za-z0-9_-])[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?:$|[^A-Za-z0-9_-])/.test(
+      trimmed
+    )
   ) {
     return "credential-value";
   }
