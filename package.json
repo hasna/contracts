@@ -1,6 +1,6 @@
 {
   "name": "@hasna/contracts",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Shared schemas and validators for Hasna open-source agent infrastructure contracts.",
   "type": "module",
   "license": "Apache-2.0",
@@ -83,6 +83,7 @@
   "files": [
     "dist",
     "src/kit",
+    "src/hasna.contract.schema.json",
     "docs",
     "examples",
     "generated/todos/v1",

@@ -7,7 +7,8 @@
 //
 // This module makes the client actually talk to the cloud. Given an app name and
 // the environment it decides whether reads AND writes should be routed to the
-// app's cloud HTTP API (`<API_URL>/v1`, default `https://<app>.<HASNA_FLEET_API_DOMAIN>/v1`)
+// app's cloud HTTP API (`<API_URL>/v1`, default
+// `https://<app>.<HASNA_FLEET_API_DOMAIN>/v1`)
 // with the API key, or fall through to the local store.
 //
 // THE CLIENT-FLIP CONTRACT (env vars). For app `<NAME>` = envToken(name):
@@ -222,6 +223,16 @@ function rawAuthority(value: string): string {
   return authority;
 }
 
+function assertCanonicalPort(port: string): void {
+  if (!/^[0-9]+$/.test(port) || (port.length > 1 && port.startsWith("0"))) {
+    throw new Error("API URL authority must contain a canonical port between 1 and 65535.");
+  }
+  const numericPort = Number(port);
+  if (!Number.isSafeInteger(numericPort) || numericPort < 1 || numericPort > 65_535) {
+    throw new Error("API URL authority must contain a canonical port between 1 and 65535.");
+  }
+}
+
 function canonicalAuthorityHostname(authority: string): string {
   let rawHostname: string;
   if (authority.startsWith("[")) {
@@ -231,8 +242,11 @@ function canonicalAuthorityHostname(authority: string): string {
     }
     rawHostname = authority.slice(0, closingBracket + 1);
     const portSuffix = authority.slice(closingBracket + 1);
-    if (portSuffix && !/^:[0-9]+$/.test(portSuffix)) {
-      throw new Error("API URL authority must contain a canonical hostname and port.");
+    if (portSuffix) {
+      if (!portSuffix.startsWith(":")) {
+        throw new Error("API URL authority must contain a canonical hostname and port.");
+      }
+      assertCanonicalPort(portSuffix.slice(1));
     }
     if (isIP(rawHostname.slice(1, -1)) !== 6) {
       throw new Error("API URL authority must contain a canonical IPv6 literal.");
@@ -245,9 +259,7 @@ function canonicalAuthorityHostname(authority: string): string {
     }
     if (lastColon !== -1) {
       const port = authority.slice(lastColon + 1);
-      if (!/^[0-9]+$/.test(port)) {
-        throw new Error("API URL authority must contain a canonical hostname and port.");
-      }
+      assertCanonicalPort(port);
       rawHostname = authority.slice(0, lastColon);
     } else {
       rawHostname = authority;

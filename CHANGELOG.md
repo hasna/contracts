@@ -2,6 +2,41 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.7.0] - 2026-07-24
+
+### Service contract capability extensions (additive, v1)
+
+- Add typed `serviceSurfaces` for API, SDK, MCP, and CLI, with class- and
+  profile-scoped waivers plus package export/bin conformance
+  (`surface_matrix`, `surface_bindings`).
+- Add SQLite/PostgreSQL storage-engine capability metadata, `.db` path
+  validation, and live-Postgres test-gate metadata recorded (never executed)
+  by conformance (`storage_capabilities`).
+- Add product `hosting` stories (`user-hosted` / `hasna-saas`) and canonical
+  `self_hosted` runtime placement; the legacy `self-hosted` spelling parses as
+  a deprecated alias.
+- `public_manifest_safety` conformance rejects secret/credential references,
+  credential-shaped values, internal hosts, ARNs, and account IDs from public
+  manifests, reporting only structural path + category (no value echo).
+
+### Client transport hardening
+
+- Reject leading-zero, zero, and out-of-range explicit ports before WHATWG URL
+  normalization, preserving canonical DNS, IPv4, bracketed IPv6, loopback,
+  default, and boundary ports.
+- Fail closed on authenticated redirects: every 3xx is surfaced as a terminal
+  `HasnaHttpError` so API keys, bearer credentials, headers, and bodies stay on
+  the validated origin.
+- Compose the cloud host from `HASNA_FLEET_API_DOMAIN` with a neutral,
+  non-resolving placeholder fallback that marks the config `misconfigured`.
+
+### Compatibility
+
+- Existing v1 manifests remain schema-readable; the only intentional tightening
+  is rejecting a declared non-`.db` SQLite path. Conformance is intentionally
+  stricter than schema parsing and reports migration gaps without executing
+  manifest commands.
+
 ## [0.6.1] - 2026-07-24
 
 ### Security — remove internal infra hostnames from the published package

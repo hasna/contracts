@@ -100,7 +100,7 @@ describe("resolveClientTransport — the client-flip contract", () => {
     expect(r.baseUrl).toBe("https://todos.fleet.customer.example/v1");
     expect(r.apiUrlSource).toBe("HASNA_FLEET_API_DOMAIN");
     expect(fleetApiDomain({ HASNA_FLEET_API_DOMAIN: "  Fleet.Customer.Example  " })).toBe(
-      "fleet.customer.example",
+      "fleet.customer.example"
     );
   });
 
@@ -269,6 +269,47 @@ describe("resolveClientTransport — the client-flip contract", () => {
     }
   });
 
+  test("explicit API URLs reject noncanonical and out-of-range ports while preserving canonical bounds", () => {
+    for (const apiUrl of [
+      "https://api.customer.example:0443",
+      "https://203.0.113.10:000443",
+      "https://[2001:db8::1]:08443",
+      "http://localhost:08080",
+      "http://127.0.0.1:00080",
+      "http://[::1]:00080",
+      "https://api.customer.example:0",
+      "https://api.customer.example:65536",
+    ]) {
+      expect(() => toV1BaseUrl(apiUrl)).toThrow(/canonical.*port/i);
+      expect(() =>
+        createHasnaHttpTransport({
+          name: "todos",
+          baseUrl: apiUrl,
+          apiKey: "x",
+        }),
+      ).toThrow(/canonical.*port/i);
+    }
+
+    expect(toV1BaseUrl("https://api.customer.example:1/contracts")).toBe(
+      "https://api.customer.example:1/contracts/v1",
+    );
+    expect(toV1BaseUrl("https://203.0.113.10:65535/contracts")).toBe(
+      "https://203.0.113.10:65535/contracts/v1",
+    );
+    expect(toV1BaseUrl("https://[2001:db8::1]:443/contracts")).toBe(
+      "https://[2001:db8::1]/contracts/v1",
+    );
+    expect(toV1BaseUrl("http://localhost:80/contracts")).toBe(
+      "http://localhost/contracts/v1",
+    );
+    expect(toV1BaseUrl("http://127.0.0.1:65535/contracts")).toBe(
+      "http://127.0.0.1:65535/contracts/v1",
+    );
+    expect(toV1BaseUrl("http://[::1]:1/contracts")).toBe(
+      "http://[::1]:1/contracts/v1",
+    );
+  });
+
   test("invalid raw authorities are rejected before WHATWG URL construction", () => {
     const OriginalURL = globalThis.URL;
     let constructorCalled = false;
@@ -286,6 +327,8 @@ describe("resolveClientTransport — the client-flip contract", () => {
     });
     try {
       expect(() => toV1BaseUrl("https://2130706433")).toThrow();
+      expect(constructorCalled).toBe(false);
+      expect(() => toV1BaseUrl("https://api.customer.example:0443")).toThrow();
       expect(constructorCalled).toBe(false);
     } finally {
       Object.defineProperty(globalThis, "URL", {

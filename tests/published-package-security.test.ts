@@ -17,7 +17,7 @@ import { gunzipSync } from "node:zlib";
 import { CONTRACTS_PACKAGE_VERSION } from "../src/schemas.js";
 
 const root = join(import.meta.dir, "..");
-const expectedUnreleasedVersion = "0.6.1";
+const expectedUnreleasedVersion = "0.7.0";
 const forbiddenInternalDomains = [["hasna", "xyz"].join(".")];
 
 function commandText(bytes: Uint8Array): string {
@@ -501,8 +501,7 @@ describe("published package hostname and provenance boundary", () => {
   });
 
   test("all tracked source, docs, tests, and examples contain no forbidden internal domains", () => {
-    const findings = findForbiddenInternalDomains(root, trackedFiles());
-    expect(findings).toEqual([]);
+    expect(findForbiddenInternalDomains(root, trackedFiles())).toEqual([]);
   });
 
   test("generated build output contains no forbidden internal domains", () => {
@@ -646,7 +645,15 @@ describe("published package hostname and provenance boundary", () => {
     expect(findForbiddenRawTarMembers(archive)).toEqual(["#trailer"]);
   });
 
-  test("source, generated output, and packed package use the fresh unreleased version", async () => {
+  test("the packed repository manifest resolves its declared JSON Schema", () => {
+    const manifest = JSON.parse(
+      readFileSync(join(extractedPackageRoot, "hasna.contract.json"), "utf8"),
+    ) as { $schema?: string };
+    expect(manifest.$schema).toBe("./src/hasna.contract.schema.json");
+    expect(lstatSync(join(extractedPackageRoot, manifest.$schema!)).isFile()).toBe(true);
+  });
+
+  test("source, generated output, and packed package use the unreleased version", async () => {
     const sourcePackage = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
       version: string;
     };

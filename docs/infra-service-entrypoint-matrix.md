@@ -20,7 +20,7 @@ bin.
 | --- | --- | --- | --- | --- |
 | `open-backup` | `@hasna/backup@0.1.2` | `backup`, `backup-mcp` | `deferred` | Define hosted state owner, backup target credential refs, `/health`, `/ready`, redacted inventory output, and restore-smoke evidence before `backup-serve`. |
 | `open-bridge` | `@hasna/bridge@0.2.1` | `bridge`, `bridge-mcp` | `deferred` | Define bridge auth scopes, connector secret refs, event replay boundaries, and no-secret output gates before `bridge-serve`. |
-| `open-domains` | `@hasna/domains@0.0.27` | `domains`, `domains-mcp`, `domains-serve` | `supported` | Add/refresh `hasna.contract.json` service surface with `local` and `self-hosted` support, `/health`, `/ready`, `/version`, `/v1`, Route53/Cloudflare secret refs, dry-run DNS mutation gates, and redaction tests. |
+| `open-domains` | `@hasna/domains@0.0.27` | `domains`, `domains-mcp`, `domains-serve` | `supported` | Add/refresh `hasna.contract.json` service surface with `local` and `self_hosted` support, `/health`, `/ready`, `/version`, `/v1`, provider-credential readiness gates, dry-run DNS mutation gates, and redaction tests. Keep concrete secret refs in private deployment config. |
 | `open-hooks` | `@hasna/hooks@0.2.20` | `hooks` | `deferred` | Decide whether hooks is CLI-only, MCP-capable, or service-capable; service mode needs webhook signature/replay gates and operator-visible DLQ before `hooks-serve`. |
 | `open-machines` | `@hasna/machines@0.0.63` | `machines`, `machines-mcp`, `machines-agent`, `machines-serve` | `supported` | Add/refresh service surface with lease/claim auth scopes, private metadata redaction, `/v1` ownership boundaries, and fleet dry-run fixture gates. |
 | `open-releases` | `@hasna/releases@0.1.0` | `releases`, `releases-mcp` | `deferred` | Promote release evidence schema and append-only ledger first; then add `releases-serve` with package/version/gate/evidence APIs and unauthorized mutation denial. |
@@ -34,11 +34,19 @@ bin.
 
 Use `hasna.service_contract.v1` with:
 
-- `deploymentModes`: one or more of `local`, `self-hosted`, `cloud`. Do not use
-  `remote` as a deployment mode.
-- `serviceSurfaces[]`: one record per HTTP/MCP service boundary.
+- `hosting`: `user-hosted` and, only when a managed control plane exists,
+  `hasna-saas`.
+- `deploymentModes`: one or more of `local`, `self_hosted`, `cloud`. The old
+  `self-hosted` spelling is parse-only migration input. Do not use `remote` as a
+  deployment mode.
+- `serviceSurfaces[]`: typed API, SDK, MCP, and CLI records.
+- `serviceSurfaces[].kind`: `api`, `sdk`, `mcp`, or `cli`.
 - `serviceSurfaces[].status`: `supported`, `deferred`, or `unsupported`.
 - `serviceSurfaces[].deferReason`: required for `deferred` and `unsupported`.
+- `serviceSurfaces[kind=sdk].exportSubpath`: a real `package.json` export key.
+- `storage.engines`: both `sqlite` and `postgres` for store-owning OSS cores.
+- `storage.pgTestGate`: the disposable live-Postgres test env var and command;
+  conformance records this command but never executes it.
 - `serviceSurfaces[].readinessGates[]`: auth, storage, secret-ref, migration,
   health, readiness, redaction, smoke, and operator gates with command/evidence
   status when available.

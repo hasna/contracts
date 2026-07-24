@@ -3,22 +3,24 @@
   "name": "todos",
   "class": "cli-with-store",
   "contractVersion": "v1",
-  "kitVersion": "0.3.0",
+  "kitVersion": "0.6.0",
   "description": "Universal task management for AI coding agents.",
   "bins": ["todos", "todos-mcp", "todos-serve"],
-  "deploymentModes": ["local", "self-hosted"],
+  "hosting": ["user-hosted", "hasna-saas"],
+  "deploymentModes": ["local", "self_hosted", "cloud"],
   "serviceSurfaces": [
     {
-      "name": "http",
+      "name": "http-api",
+      "kind": "api",
       "status": "supported",
       "bin": "todos-serve",
-      "mcpBin": "todos-mcp",
       "authMode": "api-key",
-      "deploymentModes": ["local", "self-hosted"],
+      "deploymentModes": ["local", "self_hosted", "cloud"],
       "health": { "method": "GET", "path": "/health", "public": true },
       "readiness": { "method": "GET", "path": "/ready", "public": false },
       "version": { "method": "GET", "path": "/version", "public": true },
       "apiBasePath": "/v1",
+      "openApiPath": "/openapi.json",
       "readinessGates": [
         {
           "id": "auth-negative-smoke",
@@ -36,13 +38,43 @@
           "summary": "Health, readiness, logs, and CLI JSON must not expose credential values."
         }
       ]
+    },
+    {
+      "name": "typescript-sdk",
+      "kind": "sdk",
+      "status": "supported",
+      "authMode": "api-key",
+      "deploymentModes": ["local", "self_hosted", "cloud"],
+      "exportSubpath": "./sdk",
+      "generatedFrom": "/openapi.json",
+      "clientClassName": "TodosClient"
+    },
+    {
+      "name": "mcp",
+      "kind": "mcp",
+      "status": "supported",
+      "mcpBin": "todos-mcp",
+      "authMode": "api-key",
+      "deploymentModes": ["local", "self_hosted", "cloud"]
+    },
+    {
+      "name": "cli",
+      "kind": "cli",
+      "status": "supported",
+      "bin": "todos",
+      "authMode": "local-only",
+      "deploymentModes": ["local", "self_hosted"]
     }
   ],
   "storage": {
-    "mode": "cloud",
+    "mode": "local",
+    "engines": ["sqlite", "postgres"],
     "envPrefix": "HASNA_TODOS_",
     "aliasEnvPrefix": "TODOS_",
-    "databaseUrlSecretRef": "hasna/oss/todos/database-url",
-    "sqlitePath": "~/.hasna/todos/todos.db"
+    "sqlitePath": "~/.hasna/todos/todos.db",
+    "pgTestGate": {
+      "envVar": "TODOS_TEST_DATABASE_URL",
+      "command": "bun test tests/postgres-storage.test.ts"
+    }
   }
 }

@@ -1,5 +1,6 @@
 // LIVE conformance: drive the HTTP storage client against a REAL Hasna cloud app
-// (`knowledge.your-deployment.example/v1`) end to end — create, get, list, update, delete —
+// (`knowledge.your-deployment.example/v1`) end to end — create, get, list,
+// update, delete —
 // proving the client satisfies the app storage interface over the wire with a
 // real API key.
 //
@@ -18,11 +19,9 @@ import { createHasnaHttpTransport, defaultCloudBaseUrl, toV1BaseUrl } from "./tr
 
 const APP = "knowledge";
 const RESOURCE = "notes";
-// Real live runs (with AWS creds present) should set the explicit per-app URL or
-// a valid fleet domain. The explicit URL wins. Absent both, this uses the same
-// neutral, non-resolving placeholder as the rest of the package, so a live run
-// without deployment configuration fails fast rather than silently targeting a
-// guessed real hostname.
+// Real live runs should set the explicit per-app URL or a valid fleet domain.
+// Absent both, this uses the same neutral, non-resolving placeholder as the
+// package and fails fast instead of targeting a guessed real hostname.
 const HOST = process.env.HASNA_KNOWLEDGE_API_URL?.trim() || defaultCloudBaseUrl(APP);
 
 function fetchApiKey(app: string): string | null {
