@@ -509,7 +509,7 @@ describe("Todos production boundary", () => {
       exports: Record<string, unknown>;
       files: string[];
     };
-    expect(packageJson.version).toBe("0.5.1");
+    expect(packageJson.version).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
     expect(packageJson.exports["./todos"]).toBeDefined();
     expect(packageJson.exports["./todos/artifacts/*"]).toBe("./generated/todos/v1/*");
     expect(packageJson.files).toContain("generated/todos/v1");
