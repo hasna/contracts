@@ -198,6 +198,8 @@ describe("resolveClientTransport — the client-flip contract", () => {
       "https://api.customer.example@evil.example",
       "https://evil.example@api.customer.example",
       "https://user:password@api.customer.example",
+      "https://api.customer.example\\@evil.example",
+      "https:\\\\evil.example\\contracts",
     ];
 
     for (const apiUrl of unsafe) {
@@ -248,7 +250,12 @@ describe("resolveClientTransport — the client-flip contract", () => {
       "https://api_customer.example",
       "https://-bad.example",
       "https://foo..bar",
+      "https://api.customer.example.",
       "https://2130706433",
+      "https://127.1",
+      "https://0x7f000001",
+      "https://0177.0.0.1",
+      "https://1.2.3.4.5",
     ]) {
       expect(() => toV1BaseUrl(apiUrl)).toThrow();
       expect(() =>
@@ -261,9 +268,42 @@ describe("resolveClientTransport — the client-flip contract", () => {
     }
   });
 
+  test("invalid raw authorities are rejected before WHATWG URL construction", () => {
+    const OriginalURL = globalThis.URL;
+    let constructorCalled = false;
+    class TrackingURL extends OriginalURL {
+      constructor(url: string | URL, base?: string | URL) {
+        constructorCalled = true;
+        super(url, base);
+      }
+    }
+
+    Object.defineProperty(globalThis, "URL", {
+      configurable: true,
+      value: TrackingURL,
+      writable: true,
+    });
+    try {
+      expect(() => toV1BaseUrl("https://2130706433")).toThrow();
+      expect(constructorCalled).toBe(false);
+    } finally {
+      Object.defineProperty(globalThis, "URL", {
+        configurable: true,
+        value: OriginalURL,
+        writable: true,
+      });
+    }
+  });
+
   test("explicit API URL policy preserves HTTPS paths and ports plus deliberate loopback HTTP", () => {
     expect(toV1BaseUrl("  https://x.test:8443/contracts/  ")).toBe(
       "https://x.test:8443/contracts/v1",
+    );
+    expect(toV1BaseUrl("https://203.0.113.10:8443/contracts/")).toBe(
+      "https://203.0.113.10:8443/contracts/v1",
+    );
+    expect(toV1BaseUrl("https://[2001:db8::1]:8443/contracts/")).toBe(
+      "https://[2001:db8::1]:8443/contracts/v1",
     );
     expect(toV1BaseUrl("http://127.0.0.1:43123")).toBe("http://127.0.0.1:43123/v1");
     expect(toV1BaseUrl("http://localhost:43123/contracts")).toBe(
@@ -318,17 +358,35 @@ describe("resolveClientTransport — the client-flip contract", () => {
     const env = { HASNA_FLEET_API_DOMAIN: maximumStandaloneDomain };
     expect(maximumStandaloneDomain).toHaveLength(253);
     expect(fleetApiDomain(env)).toBe(maximumStandaloneDomain);
-    expect(() => defaultCloudBaseUrl("todos", env)).toThrow(/composed cloud hostname/i);
+    expect(defaultCloudBaseUrl("todos", env)).toBe(
+      "https://todos.your-deployment.example",
+    );
 
     const r = resolveClientTransport("todos", {
       ...env,
       HASNA_TODOS_STORAGE_MODE: "cloud",
       HASNA_TODOS_API_KEY: "x",
     });
-    expect(r.transport).toBe("local");
-    expect(r.baseUrl).toBeNull();
+    expect(r.transport).toBe("cloud-http");
+    expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
+    expect(r.apiUrlSource).toBe("HASNA_FLEET_API_DOMAIN");
     expect(r.misconfigured).toBe(true);
     expect(r.warning).toMatch(/composed cloud hostname/i);
+
+    let fetched = false;
+    expect(() =>
+      createClientTransport("todos", {
+        ...env,
+        HASNA_TODOS_STORAGE_MODE: "cloud",
+        HASNA_TODOS_API_KEY: "x",
+      }, {
+        fetchImpl: async () => {
+          fetched = true;
+          return Response.json({ ok: true });
+        },
+      }),
+    ).toThrow(/composed cloud hostname/i);
+    expect(fetched).toBe(false);
   });
 
   test("STORAGE_MODE=cloud (bare alias) is honored", () => {

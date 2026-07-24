@@ -32,12 +32,12 @@
 // URL is set, the base URL falls back to `https://<app>.<domain>` where `<domain>`
 // comes from `HASNA_FLEET_API_DOMAIN` (REQUIRED for a real deployment) or else a
 // neutral, non-resolving placeholder — this published package never bakes in a real
-// internal hostname. Missing or malformed fleet-domain configuration resolves to
-// that app-specific placeholder with `misconfigured: true`; callers fail before
-// constructing an authenticated client. If mode is `cloud` but the API key is
-// MISSING, we do NOT silently serve wrong local data — we return `local` with a
-// loud warning and `misconfigured: true` so the caller can hard-fail instead of
-// drifting.
+// internal hostname. Missing, malformed, or app-prefix-incompatible fleet-domain
+// configuration resolves to that app-specific placeholder with
+// `misconfigured: true`; callers fail before constructing an authenticated
+// client. If mode is `cloud` but the API key is MISSING, we do NOT silently serve
+// wrong local data — we return `local` with a loud warning and `misconfigured:
+// true` so the caller can hard-fail instead of drifting.
 //
 // SAFETY: this module never returns, logs, or embeds the API key value. Callers
 // receive only presence flags and env-key names.
@@ -54,6 +54,13 @@ const DNS_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 interface FleetApiDomainResolution {
   domain: string;
   source: typeof FLEET_API_DOMAIN_ENV_KEY | "default";
+  misconfigured: boolean;
+  warning: string | null;
+}
+
+interface DefaultCloudBaseUrlResolution {
+  baseUrl: string;
+  source: FleetApiDomainResolution["source"];
   misconfigured: boolean;
   warning: string | null;
 }
@@ -121,12 +128,41 @@ function composeCloudHostname(name: string, domain: string): string {
   return hostname;
 }
 
+function resolveDefaultCloudBaseUrl(
+  name: string,
+  env: Env,
+): DefaultCloudBaseUrlResolution {
+  const appSlug = validateAppSlug(name);
+  const fleetDomain = resolveFleetApiDomain(env);
+  const configuredHostname = `${appSlug}.${fleetDomain.domain}`;
+  if (isValidDnsDomain(configuredHostname)) {
+    return {
+      baseUrl: `https://${configuredHostname}`,
+      source: fleetDomain.source,
+      misconfigured: fleetDomain.misconfigured,
+      warning: fleetDomain.warning,
+    };
+  }
+
+  const fallbackHostname = composeCloudHostname(
+    appSlug,
+    NEUTRAL_FLEET_API_DOMAIN,
+  );
+  return {
+    baseUrl: `https://${fallbackHostname}`,
+    source: fleetDomain.source,
+    misconfigured: true,
+    warning: `${FLEET_API_DOMAIN_ENV_KEY} cannot form a valid composed cloud hostname for app '${appSlug}'; using the non-resolving ${NEUTRAL_FLEET_API_DOMAIN} fallback.`,
+  };
+}
+
 /**
  * Fleet API domain suffix. This published package never ships a real internal
  * hostname: override with `HASNA_FLEET_API_DOMAIN` (REQUIRED in a real
  * deployment) or set an explicit `HASNA_<NAME>_API_URL` per app. Absent both,
  * this falls back to a neutral placeholder that intentionally does not
- * resolve to any service. Blank and malformed values use the same deterministic
+ * resolve to any service. Blank, malformed, and suffixes that cannot form a
+ * valid total hostname with the app prefix use the same deterministic
  * placeholder; `resolveClientTransport()` marks that fallback misconfigured so
  * authenticated clients fail before making a request.
  */
@@ -136,7 +172,7 @@ export function fleetApiDomain(env: Env = process.env as Env): string {
 
 /** Default cloud host template. `<app>` is the app slug. */
 export function defaultCloudBaseUrl(name: string, env: Env = process.env as Env): string {
-  return `https://${composeCloudHostname(name, fleetApiDomain(env))}`;
+  return resolveDefaultCloudBaseUrl(name, env).baseUrl;
 }
 
 export interface ClientTransportEnvKeys {
@@ -216,7 +252,16 @@ function canonicalAuthorityHostname(authority: string): string {
     } else {
       rawHostname = authority;
     }
-    if (!isValidDnsDomain(rawHostname.toLowerCase())) {
+    const ipVersion = isIP(rawHostname);
+    const numericAddressParts = rawHostname.split(".");
+    const looksLikeNonCanonicalIpv4 =
+      numericAddressParts.every((part) =>
+        /^(?:0x[0-9a-f]+|[0-9]+)$/i.test(part)
+      );
+    if (
+      (ipVersion !== 4 && looksLikeNonCanonicalIpv4) ||
+      (ipVersion !== 4 && !isValidDnsDomain(rawHostname.toLowerCase()))
+    ) {
       throw new Error("API URL authority must contain a canonical ASCII hostname.");
     }
   }
@@ -250,8 +295,8 @@ export function toV1BaseUrl(apiUrl: string): string {
     throw new Error("API URL authority must be canonical ASCII without credentials.");
   }
 
-  const url = new URL(input);
   const canonicalHostname = canonicalAuthorityHostname(authority);
+  const url = new URL(input);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("API URL must use http or https.");
   }
@@ -380,13 +425,19 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     };
   }
 
-  const fleetDomain = urlHit ? null : resolveFleetApiDomain(env);
-  const apiUrlSource = urlHit ? urlHit.key : fleetDomain!.source;
+  let defaultBaseUrl: DefaultCloudBaseUrlResolution | null = null;
+  let apiUrlSource: string =
+    urlHit?.key ??
+    (env[FLEET_API_DOMAIN_ENV_KEY] === undefined
+      ? "default"
+      : FLEET_API_DOMAIN_ENV_KEY);
   let baseUrl: string;
   try {
-    const rawUrl =
-      urlHit?.value ??
-      `https://${composeCloudHostname(name, fleetDomain!.domain)}`;
+    if (!urlHit) {
+      defaultBaseUrl = resolveDefaultCloudBaseUrl(name, env);
+      apiUrlSource = defaultBaseUrl.source;
+    }
+    const rawUrl = urlHit?.value ?? defaultBaseUrl!.baseUrl;
     baseUrl = toV1BaseUrl(rawUrl);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -405,7 +456,7 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     };
   }
 
-  if (fleetDomain?.warning) warnings.push(fleetDomain.warning);
+  if (defaultBaseUrl?.warning) warnings.push(defaultBaseUrl.warning);
 
   return {
     transport: "cloud-http",
@@ -416,7 +467,7 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     apiUrlSource,
     apiKeyPresent: true,
     apiKeySource: keyHit.key,
-    misconfigured: fleetDomain?.misconfigured ?? false,
+    misconfigured: defaultBaseUrl?.misconfigured ?? false,
     warning: warnings.length > 0 ? warnings.join(" ") : null,
   };
 }
