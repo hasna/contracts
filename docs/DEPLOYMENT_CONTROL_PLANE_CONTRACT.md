@@ -55,7 +55,7 @@ Build authority ────────> BuildArtifact + ArtifactAttestation
 EnvironmentBinding + ProviderCapabilityCard + observed state
                                       │
                                       ▼
-DeploymentRequest → DeploymentPlan → DeploymentApprovalDecision
+DeploymentRequest → DeploymentPlan → bounded approval-decision set
                                       │
                                       ▼
                               DeploymentAttempt
@@ -95,9 +95,13 @@ executor, auditor, and administrator actors. A deployment profile MAY allow one
 actor to hold multiple roles in local development, but it MUST NOT erase the
 roles from the records.
 
-One approval authorizes one bounded plan digest, one target environment, and
-one attempt scope. An unchanged retry covered by that decision MUST NOT create
-a duplicate approval prompt in CLI, MCP, API, GitHub, or Terraform.
+Each approval decision authorizes one bounded subject: either the immutable
+parent plan or one explicit action or phase plus its exact runtime
+execution-material digest, target environment, and attempt scope. A gated
+attempt MAY require an ordered set of decisions. An unchanged retry covered by
+the applicable decision MUST NOT create a duplicate approval prompt in CLI,
+MCP, API, GitHub, or Terraform, but any changed bound input requires a new
+decision.
 
 ## 3. Common contract rules
 
@@ -142,9 +146,11 @@ The following are immutable snapshots once accepted:
 A correction creates a new record that links to the superseded record. It does
 not overwrite evidence that was used by an earlier plan.
 
-`EnvironmentBinding`, provider connections, and a current attempt header may
-advance by compare-and-swap. Their immutable history and step ledgers remain
-append-only.
+`EnvironmentBinding`, provider connections, a
+`DeploymentPlanLifecycleProjection`, and a current attempt header may advance
+by compare-and-swap. Their immutable history and step ledgers remain
+append-only. The lifecycle projection is a rebuildable read model, not part of
+the immutable plan or its canonical digest.
 
 ### 3.3 Canonical serialization and digests
 
@@ -199,6 +205,7 @@ the package's schema registry, exports, JSON Schemas, fixtures, and tests.
 | `CommercialBindingRef` | `hasna.commercial_binding_ref.v1` | Billing or Economy projection publisher |
 | `DeploymentRequest` | `hasna.deployment_request.v1` | Deployment request boundary |
 | `DeploymentPlan` | `hasna.deployment_plan.v1` | Deployment plan compiler |
+| `DeploymentPlanLifecycleProjection` | `hasna.deployment_plan_lifecycle_projection.v1` | Deployment event projector |
 | `DeploymentApprovalDecision` | `hasna.deployment_approval_decision.v1` | Deployment authorization boundary |
 | `DeploymentAttempt` | `hasna.deployment_attempt.v1` | Deployment worker and reconciler |
 | `ProviderReceipt` | `hasna.provider_receipt.v1` | Provider adapter |
@@ -362,12 +369,32 @@ validated request and pinned inputs. It MUST include:
 - expected state and verification criteria;
 - rollback target and rollback-plan inputs;
 - plan digest;
-- issuance timestamp and optional expiry;
-- status: `draft`, `checked`, `approval_required`, `approved`,
-  `rejected`, `expired`, or `superseded`.
+- issuance timestamp and optional expiry.
 
 Changing any input, action, dependency, policy, artifact, binding revision, or
 verification criterion creates a new plan and digest.
+
+Compiler workflow states such as `draft`, `checked`, and `approval_required`
+MUST NOT be serialized into an issued plan. An issued plan MAY define an
+ordered `generate execution material → decide phase → apply exact material`
+action sequence. Runtime material that does not exist at issuance, such as a
+saved Terraform plan, is not and cannot be pre-digested by the parent plan.
+Instead, the parent plan binds the generation inputs and requires a later
+phase-scoped decision over the generated material before its apply action.
+
+#### 4.9.1 `DeploymentPlanLifecycleProjection`
+
+`DeploymentPlanLifecycleProjection` is a derived, rebuildable read model keyed
+by the immutable plan ID and digest. It exposes lifecycle state as `issued`,
+`approved`, `rejected`, `expired`, or `superseded`, together with the effective
+decision references, latest attempt references and states, projection revision,
+and observation timestamp.
+
+The projection MUST be driven by the immutable plan and append-only approval,
+attempt, expiry, and supersession events. It MUST NOT be embedded in the
+`DeploymentPlan`, included in canonical plan serialization, or used as the
+authorization artifact for execution. Rebuilding or advancing the projection
+does not change the plan digest.
 
 ### 4.10 `DeploymentApprovalDecision`
 
@@ -376,6 +403,14 @@ verification criterion creates a new plan and digest.
 bind:
 
 - the exact plan ID and digest;
+- decision scope: the parent plan or one explicit action or phase;
+- the action and phase identifiers when phase-scoped;
+- the exact runtime execution-material kind and digest when the action consumes
+  material generated after plan issuance;
+- the current backend, workspace, state lineage, and pre-action state serial
+  when infrastructure state is in scope;
+- the exact artifact, variable-set, provider-lock, policy, and other input
+  digests required by the scoped action;
 - target environment ID and revision;
 - decision actor and actor role;
 - decision status;
@@ -385,16 +420,23 @@ bind:
 - authorization-policy revision;
 - obligations and evidence references.
 
-An approval for one digest MUST NOT authorize another digest. Expired, revoked,
-superseded, or rejected decisions fail closed.
+The decision is an immutable authorization record independent of the immutable
+plan. A parent-plan decision does not pre-authorize an unknown future runtime
+execution-material digest and does not replace a required phase-scoped
+decision. A phase-scoped decision MUST be issued only after its runtime
+material exists. An approval for one digest, state lineage or serial, artifact,
+or input set MUST NOT authorize another; any changed bound input requires a new
+decision. Expired, revoked, superseded, or rejected decisions fail closed.
 
 ### 4.11 `DeploymentAttempt`
 
-`DeploymentAttempt` is the durable execution aggregate for one approved plan.
-It MUST include:
+`DeploymentAttempt` is the durable execution aggregate for one immutable parent
+plan and its required decision set. It MUST include:
 
-- plan and approval IDs and digests;
-- requester, approver, and executor actors;
+- the parent plan ID and digest;
+- the ordered set of required approval-decision IDs and digests, including
+  their bound action or phase and runtime execution-material digests;
+- requester, decision actors, and executor actors;
 - environment lock ID and monotonic fencing token;
 - attempt number and unchanged-retry lineage;
 - state and revision;
@@ -434,7 +476,7 @@ deployment. Later observation and verification remain distinct.
 `DeploymentReceipt` is the immutable control-plane result for a completed or
 terminal attempt. It MUST include:
 
-- request, plan, decision, and attempt references;
+- request, parent-plan, ordered decision-set, and attempt references;
 - product, intent, artifact, attestation, and environment revisions;
 - provider receipt references;
 - final desired and observed state digests;
@@ -485,7 +527,7 @@ Each operation entry MUST declare:
 | Resource boundary | Product, environment, plan, attempt, provider connection, or evidence scope. |
 | Permission and actor constraints | Required Access permission, allowed actor kinds, and separation-of-duties rules. |
 | Risk and side-effect class | Must align with the provider operation card where a provider is used. |
-| Approval rule | Whether approval is required and which digest or revision it binds. |
+| Approval rule | Whether approval is required and which parent plan, action or phase, runtime execution-material digest, state input, or revision it binds. |
 | Idempotency policy | Required, optional, or not applicable; fingerprint and replay behavior. |
 | Concurrency policy | ETag, compare-and-swap, lock, or immutable. |
 | Execution mode | Synchronous read, asynchronous command, or transactional enqueue. |
@@ -520,6 +562,8 @@ Every node MUST contain:
 - precondition and postcondition identifiers;
 - resource-lock and fencing requirements;
 - side-effect and risk classes;
+- decision scope and runtime execution-material binding requirements when an
+  action consumes material generated after plan issuance;
 - provider capability operation and snapshot digest when applicable;
 - retry class and bounded retry policy;
 - timeout class, not an arbitrary command timeout script;
@@ -540,7 +584,10 @@ The complete contract-set validator MUST reject a plan unless:
 - all input records exist and match the pinned schema, revision, and digest;
 - every operation exists at the pinned registry version;
 - provider actions are allowed by the pinned capability card and mode;
-- every side effect is covered by policy and, where required, approval;
+- every side effect is covered by policy and the applicable ordered approval
+  decisions;
+- runtime execution material generated after plan issuance is bound by a fresh
+  scoped decision before any consuming side effect;
 - every live mutation has idempotency, rollback or revocation, and
   reconciliation behavior;
 - every required output is consumed or declared terminal;
@@ -670,7 +717,8 @@ is not a substitute for a durable deployment-domain event.
 
 - event ID and namespaced type such as
   `deployment.plan.issued`, `deployment.decision.approved`,
-  `deployment.attempt.started`, or `deployment.receipt.issued`;
+  `deployment.plan.superseded`, `deployment.attempt.started`, or
+  `deployment.receipt.issued`;
 - event schema version;
 - occurred-at timestamp;
 - producer `ActorRef` or actor pointer;
@@ -863,15 +911,28 @@ Session ID:
 Raw session:
 `/home/hasna/.codewith/sessions/2026/07/23/rollout-2026-07-23T17-52-47-019f8f76-fb12-7330-a863-1a51f6967d6d.jsonl`
 
+This absolute JSONL path is a current-machine locator only, not a portable
+durable identifier. Before using it, validate the top-level `session_meta`
+fields: `id` is `019f8f76-fb12-7330-a863-1a51f6967d6d`, `cwd` is
+`/home/hasna/workspace/hasnaxyz/internalapp/iapp-deployment`, `source` is
+`cli`, and `thread_source` is `user`.
+
+The JSONL is append-only and may grow. Provenance MUST never be anchored to a
+whole-file hash. The stable evidence is each bounded `response_item` JSONL
+line, role, phase, exact opening, and message-scoped digest below.
+
 | JSONL line | Role | Phase | Opening | Pre-citation SHA-256 |
 | --- | --- | --- | --- | --- |
 | 1766 | `assistant` | `final_answer` | “The right end state is a private, self-hosted deployment control plane for every Hasna app.” | `ecdaccd46404a0cc92a8a03571e2925ceab361c8cc15088a3946692148f84b01` |
+| 1774 | `user` | `not present` | “ok now what is the next step for this say we want to implement this plan, where do we write it down, what should be the procedure for this” | `7fe072332ab54a0fb03161b76b0f393b1e1ac59bd224fff953f4fbcd9a9dd904` |
 | 1844 | `assistant` | `final_answer` | “The next step is not code yet. It is to bootstrap a new implementation program from the completed blueprint.” | `a089fcc9b0ae2853ddb3007176f995bb09c167252d79858e07da6b0749991f16` |
 
-Each digest is SHA-256 over the parsed `output_text` before the first
+Each assistant digest is SHA-256 over the parsed `output_text` before the first
 `<oai-mem-citation>` marker, including the newline immediately before that
-marker. No whole-file hash is used because the session file is append-only and
-may grow while the cited records remain unchanged.
+marker. The user digest is SHA-256 over that response item's parsed
+`input_text`; it has no citation marker. No whole-file hash is used because the
+session file is append-only and may grow while the cited records remain
+unchanged.
 
 The compacted summary was used only to locate the raw records. It is not a
 normative source for this contract.
