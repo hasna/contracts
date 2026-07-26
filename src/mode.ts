@@ -15,6 +15,7 @@
 // is just `cloud` pointed at a private database URL).
 
 import { DEPRECATED_STORAGE_MODE_ALIASES, type StorageMode } from "./schemas";
+import { envToken } from "./env-token";
 
 // `STORAGE_MODES` and the `StorageMode` type are the canonical exports from
 // `./schemas` (re-exported from the package root). Import them from there.
@@ -42,10 +43,9 @@ export function normalizeStorageMode(value: string): StorageModeNormalization {
   throw new Error(`Unknown storage mode: ${value}. Use local or cloud.`);
 }
 
-/** Upper-snake env token for an app name, e.g. `todos` -> `TODOS`. */
-export function envToken(name: string): string {
-  return name.toUpperCase().replace(/-/g, "_");
-}
+// The derivation itself lives in a leaf module so `src/auth/*` can share it
+// without importing this one (and, through it, the Zod schema bundle).
+export { envToken };
 
 export interface StorageEnvKeys {
   /** `HASNA_<NAME>_STORAGE_MODE` then the optional `<NAME>_STORAGE_MODE` alias. */

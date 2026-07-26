@@ -175,6 +175,122 @@ invalidates the signature. It is not a header and MUST NOT be read from one.
 parses, verifies, and authenticates unchanged, and minting without a tenant
 produces a byte-identical claim body — so stored `tokenHash` values still match.
 
+## Identity Seam (offline EdDSA fleet tokens)
+
+Every server-bearing repo MUST keep a **complete in-repo API-key default** — the
+HMAC path above — and MAY additionally expose an **identity option**: verify
+EdDSA tokens minted by a configured issuer against a configured JWKS, and map
+the token's `tid` onto one of the server's own organizations.
+
+`open-tenants` is the **reference issuer behind this seam, never a dependency**.
+Nothing in `@hasna/contracts` imports it, and a repo that never configures the
+identity option is fully runnable on its own — which is what R2 and R3 require.
+
+### Offline verification is structural, not a promise
+
+Downstream services MUST NOT call back to the IdP on the request path.
+`verifyFleetToken` therefore takes a **key set value**, never a URI, and
+`@hasna/contracts/auth`'s identity module contains no network primitive at all
+(asserted by `tests/auth-identity.test.ts`). `HASNA_<NAME>_IDENTITY_JWKS_URI` is
+**recorded configuration only** — refreshing the key set is the operator's job,
+out of band. `HASNA_<NAME>_IDENTITY_JWKS` (inline JWKS JSON) needs no refresher
+at all.
+
+### Wire shape
+
+This is the shape `open-tenants` already mints — standardized here, not invented.
+
+Header: `{ "alg": "EdDSA", "kid": "<key id>", "typ": "at+jwt" }`
+
+| Claim | Required | Meaning |
+| --- | --- | --- |
+| `iss` | yes | Issuer. An opaque wire-contract string, **not necessarily a URL**. |
+| `aud` | yes | The app slug the token is for. A JWT array form is accepted. |
+| `sub` | yes | Principal id in the issuer's namespace. |
+| `tid` | yes | Tenant — see **Tenant Identifier**. Same grammar as the API-key claim. |
+| `pt` | yes | `user` or `service`. |
+| `scope` | yes | Array, in the same `<app>:<action>` grammar as API-key scopes. |
+| `iat` | yes | Issued-at, epoch seconds. |
+| `exp` | yes | Expiry, epoch seconds. |
+| `nbf` | no | Not-before, epoch seconds. |
+| `jti` | yes | Token id — the only handle a revocation list can key on. |
+
+Unlike the API-key claim, **`tid` is REQUIRED here**. The API-key claim is
+optional because it had to be added additively to a live token format; the
+identity seam is new and is tenant-native from its first token.
+
+### Mandatory checks
+
+A conforming verifier MUST reject a token when any of these fails. Each exists
+because its absence is a known, exploitable weakness:
+
+- `alg` is not exactly `EdDSA`, checked **before any key is selected** — this is
+  what defeats `alg: "none"` and every algorithm-confusion variant.
+- `typ`, when present, is not `at+jwt`.
+- the header carries no `kid`, or no configured key matches it.
+- **the configured key set is empty or has no usable Ed25519 key.** An empty key
+  set MUST fail. A verifier that passes when it has nothing to check protects
+  nothing.
+- the JWKS carries private material (a `d` component). That is an incident, not
+  a usable key.
+- the signature does not verify.
+- `iss` is not the configured issuer.
+- **`aud` is not the configured audience.** The audience check is never
+  optional: an optional audience check means a token minted for one app is
+  accepted by every other app.
+- **`exp` is missing or non-numeric.** A missing `exp` MUST be a rejection,
+  never a skipped check — skipping it turns an absent claim into an immortal
+  token.
+- `exp - iat` exceeds **24h**. Offline verification cannot see a revocation, so
+  the TTL *is* the revocation window.
+- `exp`/`nbf`/`iat` fail against the clock, within the configured leeway.
+- `tid`, `pt`, `scope`, `sub`, or `jti` are missing or malformed.
+
+Tenant is checked **before** scopes, so a wrong-organization token is never
+reported as merely under-scoped.
+
+### Revocation — a known gap, stated rather than hidden
+
+Offline verification cannot observe a revocation, and the reference issuer has
+no fleet-wide revocation today: a revoked token stays acceptable for the
+remainder of its (≤24h) life. The contract therefore **requires `jti`**, so
+revocation is at least possible, and `createIdentityVerifier` accepts the same
+optional `isRevoked` hook shape as the API-key middleware — keyed by `jti`
+instead of `kid`. A service needing prompt revocation supplies it.
+
+### `tid` -> org
+
+The token names a tenant in the **issuer's** namespace; the service resolves it
+to one of its **own** organization rows (`resolveTenantOrg`). A resolver
+returning `null` MUST deny. A service that invents an organization on an unknown
+`tid` has no isolation boundary at all.
+
+### Configuration
+
+| Env key | Meaning |
+| --- | --- |
+| `HASNA_<NAME>_IDENTITY_ISSUER` | Expected `iss`. **No default.** |
+| `HASNA_<NAME>_IDENTITY_AUDIENCE` | Expected `aud`. Defaults to the app name. |
+| `HASNA_<NAME>_IDENTITY_JWKS_URI` | Where the operator's own refresher fetches keys. Recorded only. |
+| `HASNA_<NAME>_IDENTITY_JWKS` | Inline JWKS JSON — the fully-offline option. |
+| `HASNA_<NAME>_IDENTITY_LEEWAY_SECONDS` | Clock-skew leeway. Default 0. |
+
+Each key also has the `<NAME>_*` alias form, matching `storageEnvKeys`.
+
+Three outcomes, and the middle one is the point:
+
+- **nothing set** -> the option is disabled and the server runs on its in-repo
+  API-key default. There is deliberately **no default issuer and no default JWKS
+  URI** (R1).
+- **partially set** -> an **error naming the missing variable**. A
+  half-configured identity option MUST NOT silently degrade to "API keys only":
+  an operator who set an issuer believes tokens are being checked.
+- **fully set** -> enabled.
+
+A configured `HASNA_<NAME>_IDENTITY_JWKS_URI` must be `https`, or `http` on an
+exact loopback host, with no embedded credentials, whitespace, or control
+characters.
+
 ## Role Model
 
 Apps may add domain roles, but the shared minimum role set is:

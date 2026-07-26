@@ -343,6 +343,54 @@ await verifier.authenticate(req.headers, { expectedTid: req.params.tid });
 Normative definition: [`docs/AUTH_RBAC_VERIFIER_CONTRACT.md` → Tenant
 Identifier](docs/AUTH_RBAC_VERIFIER_CONTRACT.md#tenant-identifier).
 
+### The identity seam (offline EdDSA fleet tokens)
+
+A server keeps the API-key path above as its **complete in-repo default**, and
+may *additionally* accept EdDSA tokens from a configured issuer. `open-tenants`
+is the reference issuer **behind the seam, never a dependency** — nothing here
+imports it, and a repo that never configures the option is fully runnable alone.
+
+**Offline is structural, not a promise.** `verifyFleetToken` takes a key set
+**value**, never a URI, and the module contains no network primitive — a test
+asserts that. `HASNA_<APP>_IDENTITY_JWKS_URI` is recorded configuration; the
+operator refreshes keys out of band. `HASNA_<APP>_IDENTITY_JWKS` (inline JWKS
+JSON) needs no refresher at all.
+
+```ts
+import { resolveIdentityConfig, createIdentityVerifier, resolveTenantOrg } from "@hasna/contracts/auth";
+
+const identity = resolveIdentityConfig(APP);            // no env set => disabled
+if (identity.enabled) {
+  const verifier = createIdentityVerifier(
+    identity.config,
+    () => keyCache.current(),                           // YOUR cache; the kit never fetches
+    { isRevoked: (jti) => denyList.has(jti) },           // optional; closes the offline gap
+  );
+  const result = await verifier.verify(token, { requiredScopes: ["todos:read"] });
+  if (result.ok) {
+    const org = await resolveTenantOrg(result.principal, (tid) => orgs.findByTenant(tid));
+    // org.ok === false => unknown tenant => DENY. Never invent an org.
+  }
+}
+```
+
+Wire shape is `open-tenants`' existing one, standardized rather than invented:
+header `{alg:"EdDSA", kid, typ:"at+jwt"}` over `{iss, aud, sub, tid, pt, scope,
+iat, exp, jti}`. `tid` is **required** here (the API-key claim is optional only
+because it had to be added to a live format).
+
+Rejections that are easy to get wrong and are therefore mandatory: `alg` pinned
+**before** key selection (kills `alg:"none"`), audience always checked, a
+missing `exp` is a **rejection not a skipped check**, an **empty key set fails**,
+a JWKS carrying private material (`d`) is refused, and a lifetime over 24h is
+refused because offline verification cannot see a revocation.
+
+Partial configuration is an **error naming the missing variable** — never a
+silent fall back to "API keys only".
+
+Normative definition: [`docs/AUTH_RBAC_VERIFIER_CONTRACT.md` → Identity
+Seam](docs/AUTH_RBAC_VERIFIER_CONTRACT.md#identity-seam-offline-eddsa-fleet-tokens).
+
 **Serve env vars:**
 
 | Env var                        | Purpose                                                    |
