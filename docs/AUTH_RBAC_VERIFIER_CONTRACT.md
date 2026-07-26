@@ -226,7 +226,12 @@ because its absence is a known, exploitable weakness:
 
 - `alg` is not exactly `EdDSA`, checked **before any key is selected** — this is
   what defeats `alg: "none"` and every algorithm-confusion variant.
-- `typ`, when present, is not `at+jwt`.
+- `typ`, when present, is not `at+jwt`. A header that OMITS `typ` still
+  verifies — the reference issuer always stamps it, and rejecting its absence
+  would break any other conforming issuer.
+- the header carries `crit` or `b64` (RFC 7515 s4.1.11 / RFC 7797): this
+  verifier implements no extensions, so a header the issuer marked
+  must-understand is a rejection, never something to ignore.
 - the header carries no `kid`, or no configured key matches it.
 - **the configured key set is empty or has no usable Ed25519 key.** An empty key
   set MUST fail. A verifier that passes when it has nothing to check protects
@@ -243,11 +248,29 @@ because its absence is a known, exploitable weakness:
   token.
 - `exp - iat` exceeds **24h**. Offline verification cannot see a revocation, so
   the TTL *is* the revocation window.
-- `exp`/`nbf`/`iat` fail against the clock, within the configured leeway.
+- `exp`/`nbf`/`iat` fail against the clock, within the configured leeway. Leeway
+  is itself capped at **300s** and clamped at verification time: it extends the
+  window in which an expired — and possibly revoked — token is still accepted,
+  so an unbounded value silently undoes the TTL ceiling above. One env-var typo
+  (`300000` for `300`) would otherwise buy three and a half days of it.
+- `sub` or `jti` are absent, or exceed 255 printable-ASCII characters. `jti` is
+  handed to the operator's revocation lookup, which is a database key in every
+  realistic implementation.
 - `tid`, `pt`, `scope`, `sub`, or `jti` are missing or malformed.
 
 Tenant is checked **before** scopes, so a wrong-organization token is never
 reported as merely under-scoped.
+
+### The token string is not an identity — never key anything on it
+
+`Buffer.from(sig, "base64url")` accepts trailing `=` padding and standard-base64
+`+`/`/`, so **many distinct token strings decode to the same signature and
+authenticate as the same principal.** That is harmless here: the signature is
+what is checked and `jti` is the revocation handle.
+
+It is NOT harmless for a relying party that denylists, rate-limits, caches, or
+deduplicates on the raw token string — every such control is bypassed by
+appending a `=`. Key those on `jti`, never on the token text.
 
 ### Revocation — a known gap, stated rather than hidden
 

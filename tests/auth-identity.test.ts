@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import { createPublicKey, generateKeyPairSync, sign as edSign } from "node:crypto";
 import {
   FLEET_TOKEN_ALG,
   FLEET_TOKEN_TYP,
+  MAX_FLEET_TOKEN_LEEWAY_SECONDS,
   MAX_FLEET_TOKEN_TTL_SECONDS,
   createIdentityVerifier,
   identityEnvKeys,
@@ -74,30 +76,179 @@ const base = { jwks: issuer.jwks, issuer: ISSUER, audience: AUDIENCE, nowMs: NOW
 
 // --- offline by construction ---
 
-describe("offline by construction", () => {
-  test("the identity module contains no network primitive", () => {
-    const source = readFileSync(join(import.meta.dir, "..", "src", "auth", "identity.ts"), "utf8");
-    // Structural guard, not a style rule: "never call back to the IdP" has to
-    // be impossible, not merely documented. If a future edit adds a fetch to
-    // the verify path, this fails.
-    for (const forbidden of [
-      /\bfetch\s*\(/,
-      /from\s+["']node:https?["']/,
-      /from\s+["']node:net["']/,
-      /from\s+["']node:dgram["']/,
-      /\bXMLHttpRequest\b/,
-      /\bWebSocket\b/,
-      /\bnew\s+Request\s*\(/,
-      /\bawait\s+import\s*\(/,
-      /\brequire\s*\(/,
-    ]) {
-      expect(source, `identity.ts must not contain ${forbidden}`).not.toMatch(forbidden);
+/**
+ * Strip comments and string/template literals, leaving only code.
+ *
+ * Without this the guard matches its own prose: `identity.ts` explains at
+ * length that it must never `fetch`, and its URI validator compares
+ * `scheme === "https"`. Searching raw text for those words reports the
+ * documentation and the validator as network access — noise that would get the
+ * guard deleted rather than obeyed.
+ */
+function codeOnly(source: string): string {
+  let out = "";
+  let index = 0;
+  while (index < source.length) {
+    const two = source.slice(index, index + 2);
+    if (two === "//") {
+      const end = source.indexOf("\n", index);
+      index = end === -1 ? source.length : end;
+      continue;
     }
+    if (two === "/*") {
+      const end = source.indexOf("*/", index + 2);
+      index = end === -1 ? source.length : end + 2;
+      continue;
+    }
+    const character = source[index]!;
+    if (character === '"' || character === "'" || character === "`") {
+      index += 1;
+      while (index < source.length && source[index] !== character) {
+        index += source[index] === "\\" ? 2 : 1;
+      }
+      index += 1;
+      out += '""';
+      continue;
+    }
+    out += character;
+    index += 1;
+  }
+  return out;
+}
+
+/** Every module specifier a file imports, requires, or re-exports. */
+function moduleSpecifiers(source: string): string[] {
+  return [
+    ...source.matchAll(/(?:\bfrom|\bimport|\brequire)\s*\(?\s*["']([^"']+)["']/g),
+  ].map((match) => match[1]!);
+}
+
+/** Relative specifiers only, resolved to real files. */
+function importGraph(entry: string): string[] {
+  const seen = new Set<string>();
+  const queue = [entry];
+  while (queue.length > 0) {
+    const file = queue.shift()!;
+    if (seen.has(file) || !existsSync(file)) continue;
+    seen.add(file);
+    for (const specifier of moduleSpecifiers(readFileSync(file, "utf8"))) {
+      if (!specifier.startsWith(".") && !specifier.startsWith("/")) continue;
+      const stem = specifier.replace(/\.js$/, "");
+      for (const candidate of [`${stem}.ts`, `${stem}/index.ts`, stem]) {
+        const resolved = resolve(dirname(file), candidate);
+        if (existsSync(resolved) && statSync(resolved).isFile()) {
+          queue.push(resolved);
+          break;
+        }
+      }
+    }
+  }
+  return [...seen];
+}
+
+/** Anything that can open a socket, plus every module that can reach one. */
+const NETWORK_CAPABLE_MODULES = new Set([
+  "http", "https", "http2", "net", "tls", "dgram", "dns", "dns/promises",
+  "child_process", "worker_threads", "cluster", "inspector", "repl", "vm",
+]);
+
+/** Network entry points that need no import at all. */
+const NETWORK_GLOBAL_PATTERNS: Array<[string, RegExp]> = [
+  ["fetch(", /\bfetch\s*\(/],
+  ["new Request(", /\bnew\s+Request\s*\(/],
+  ["XMLHttpRequest", /\bXMLHttpRequest\b/],
+  ["WebSocket", /\bWebSocket\b/],
+  ["EventSource", /\bEventSource\b/],
+  ["sendBeacon", /\bsendBeacon\b/],
+  ["dynamic import()", /\bimport\s*\(/],
+  ["require()", /\brequire\s*\(/],
+  ["globalThis[...]", /\bglobalThis\s*\[/],
+  ["process.binding", /\bprocess\s*\.\s*binding\b/],
+];
+
+function networkFindings(source: string): string[] {
+  const findings: string[] = [];
+  for (const specifier of moduleSpecifiers(source)) {
+    const bare = specifier.replace(/^node:/, "");
+    if (NETWORK_CAPABLE_MODULES.has(bare)) findings.push(`imports ${specifier}`);
+  }
+  const code = codeOnly(source);
+  for (const [label, pattern] of NETWORK_GLOBAL_PATTERNS) {
+    if (pattern.test(code)) findings.push(`uses ${label}`);
+  }
+  return findings;
+}
+
+describe("offline by construction", () => {
+  test("the guard itself has teeth: it flags each evasion the first version missed", () => {
+    // The first version of this guard grepped ONE file's text against a
+    // hand-written list. Both of these passed it while shipping a live fetch in
+    // the built auth bundle. A guard is only worth having if it fails on the
+    // thing it exists to prevent, so that is asserted here directly.
+    expect(networkFindings('import { get } from "node:https";')).toContain("imports node:https");
+    expect(networkFindings('import { connect } from "node:tls";')).toContain("imports node:tls");
+    expect(networkFindings('import { spawn } from "node:child_process";')).toContain("imports node:child_process");
+    expect(
+      networkFindings(['export { refresh } from "./refresher.js";', "const x = fetch(url);"].join("\n")),
+    ).toContain("uses fetch(");
+    expect(networkFindings('const f = globalThis["fet" + "ch"];')).toContain("uses globalThis[...]");
+    expect(networkFindings('const m = await import("node:http2");')).toContain("uses dynamic import()");
+
+    // And it does NOT flag prose or a scheme comparison, or it would be deleted
+    // rather than obeyed.
+    expect(networkFindings('// never fetch; the operator refreshes out of band')).toEqual([]);
+    expect(networkFindings('if (scheme === "https") return null;')).toEqual([]);
   });
+
+  test("NOTHING reachable from @hasna/contracts/auth can touch the network", () => {
+    // "Downstream services never call back to the IdP" is only true if it is
+    // impossible, and it is only impossible across the WHOLE graph — a fetch in
+    // a sibling module that identity.ts re-exports ships just as surely as one
+    // written inline.
+    const entry = join(import.meta.dir, "..", "src", "auth", "index.ts");
+    const graph = importGraph(entry);
+    // Non-emptiness: a walker that resolved nothing would pass vacuously.
+    expect(graph.length).toBeGreaterThan(4);
+    expect(graph.some((file) => file.endsWith("identity.ts"))).toBe(true);
+    expect(graph.some((file) => file.endsWith("tenant.ts"))).toBe(true);
+
+    const offenders = graph
+      .map((file) => ({
+        file: relative(join(import.meta.dir, ".."), file),
+        findings: networkFindings(readFileSync(file, "utf8")),
+      }))
+      .filter((entry) => entry.findings.length > 0);
+    expect(offenders).toEqual([]);
+  });
+
+  test("the BUILT auth bundle contains no network primitive", () => {
+    // The graph walk reasons about source. This asserts on the artifact that
+    // actually ships, which is where any evasion would have to survive.
+    const outdir = mkdtempSync(join(tmpdir(), "auth-bundle-"));
+    try {
+      const built = Bun.spawnSync(
+        ["bun", "build", "src/auth/index.ts", "--outdir", outdir, "--target", "bun"],
+        { cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe" },
+      );
+      expect(built.exitCode).toBe(0);
+      const bundle = readFileSync(join(outdir, "index.js"), "utf8");
+      expect(bundle).toContain("verifyFleetToken");
+      expect(networkFindings(bundle)).toEqual([]);
+      // crypto is expected and required; its presence proves the specifier scan
+      // is reading this bundle rather than finding nothing. Bun emits the bare
+      // form, so accept either spelling — the network check strips `node:`
+      // before comparing, so a bundled "http" is still caught.
+      expect(
+        moduleSpecifiers(bundle).map((specifier) => specifier.replace(/^node:/, "")),
+      ).toContain("crypto");
+    } finally {
+      rmSync(outdir, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   test("verifyFleetToken's key input is a value, not a locator", () => {
     // A signature that accepted a URI would make an offline guarantee
-    // unenforceable. Passing a URI where the key set belongs must not verify.
+    // unenforceable. An empty key set where the keys belong must not verify.
     const result = verifyFleetToken(issuer.mint(), {
       ...base,
       jwks: { keys: [] as Ed25519PublicJwk[] },
@@ -263,12 +414,38 @@ describe("issuer, audience, and lifetime", () => {
   });
 
   test("a lifetime beyond the ceiling is rejected — TTL is the revocation window", () => {
-    const result = verifyFleetToken(
-      issuer.mint({ exp: NOW_SEC + MAX_FLEET_TOKEN_TTL_SECONDS + 1 }),
-      base,
-    );
+    // 86400 written out: asserting against MAX_FLEET_TOKEN_TTL_SECONDS + 1 is
+    // self-referential and passes just as happily if someone widens the
+    // constant to a week.
+    expect(MAX_FLEET_TOKEN_TTL_SECONDS).toBe(86_400);
+    const result = verifyFleetToken(issuer.mint({ exp: NOW_SEC + 86_400 + 1 }), base);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe("excessive_ttl");
+    expect(verifyFleetToken(issuer.mint({ exp: NOW_SEC + 86_400 }), base).ok).toBe(true);
+  });
+
+  test("clock-skew leeway is CAPPED — it widens the revocation window", () => {
+    expect(MAX_FLEET_TOKEN_LEEWAY_SECONDS).toBe(300);
+    // A token that expired ten years ago must not become acceptable because a
+    // caller passed an enormous leeway.
+    const ancient = issuer.mint({ iat: NOW_SEC - 400_000_000, exp: NOW_SEC - 315_360_000 });
+    const result = verifyFleetToken(ancient, { ...base, leewaySeconds: 315_360_000 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("excessive_ttl");
+
+    // An oversized leeway is CLAMPED, not rejected: a token 60s expired is still
+    // accepted (that is what 300s of leeway means), but the caller cannot buy
+    // more than the ceiling. A token expired well beyond the ceiling stays dead
+    // no matter what leeway is asked for.
+    const justExpired = issuer.mint({ iat: NOW_SEC - 3600, exp: NOW_SEC - 60 });
+    expect(verifyFleetToken(justExpired, { ...base, leewaySeconds: 120 }).ok).toBe(true);
+    expect(verifyFleetToken(justExpired, { ...base, leewaySeconds: 1_000_000 }).ok).toBe(true);
+
+    const longExpired = issuer.mint({ iat: NOW_SEC - 7200, exp: NOW_SEC - 3600 });
+    expect(verifyFleetToken(longExpired, { ...base, leewaySeconds: 300 }).ok).toBe(false);
+    const stretched = verifyFleetToken(longExpired, { ...base, leewaySeconds: 1_000_000 });
+    expect(stretched.ok).toBe(false);
+    if (!stretched.ok) expect(stretched.reason).toBe("expired");
   });
 
   test("expiry and not-before are enforced, with leeway", () => {

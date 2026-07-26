@@ -62,6 +62,18 @@ export const FLEET_TOKEN_TYP = "at+jwt";
  */
 export const MAX_FLEET_TOKEN_TTL_SECONDS = 24 * 60 * 60;
 
+/**
+ * Ceiling on clock-skew leeway.
+ *
+ * Leeway extends the window in which an expired token is still accepted, and
+ * offline verification cannot see a revocation — so leeway is added directly to
+ * the revocation window this module spends the rest of its length defending. An
+ * unbounded value quietly undoes that: `..._LEEWAY_SECONDS=300000` instead of
+ * `300` is one keystroke and buys three and a half days of accepting revoked
+ * tokens. Five minutes is far more than any sane fleet needs for NTP drift.
+ */
+export const MAX_FLEET_TOKEN_LEEWAY_SECONDS = 300;
+
 /** Principal type carried in the `pt` claim. */
 export const PRINCIPAL_TYPES = ["user", "service"] as const;
 export type PrincipalType = (typeof PRINCIPAL_TYPES)[number];
@@ -191,6 +203,8 @@ export type IdentityVerifyFailureReason =
   | "unknown_kid"
   | "no_usable_key"
   | "bad_signature"
+  | "unsupported_crit"
+  | "private_material"
   | "issuer_mismatch"
   | "audience_mismatch"
   | "missing_expiry"
@@ -263,11 +277,27 @@ function audienceMatches(aud: unknown, audience: string): boolean {
   return false;
 }
 
+/** Upper bound on `sub` and `jti`. Generous for a UUID, ULID, or prefixed id. */
+export const MAX_IDENTIFIER_LENGTH = 255;
+
+/** Non-empty, bounded, printable ASCII with no whitespace or control bytes. */
+function isBoundedIdentifier(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_IDENTIFIER_LENGTH &&
+    /^[\u0021-\u007e]+$/.test(value)
+  );
+}
+
 function claimsProblem(claims: Record<string, unknown>): string | null {
   if (typeof claims.iss !== "string" || claims.iss.length === 0) return "iss must be a non-empty string";
-  if (typeof claims.sub !== "string" || claims.sub.length === 0) return "sub must be a non-empty string";
-  if (typeof claims.jti !== "string" || claims.jti.length === 0) {
-    return "jti must be a non-empty string (it is the revocation handle)";
+  if (!isBoundedIdentifier(claims.sub)) return `sub must be 1-${MAX_IDENTIFIER_LENGTH} printable ASCII characters`;
+  if (!isBoundedIdentifier(claims.jti)) {
+    // `jti` is handed straight to the operator's `isRevoked()`, which in every
+    // realistic implementation is a database lookup key. An unbounded,
+    // arbitrary-byte claim is a poor thing to put there.
+    return `jti must be 1-${MAX_IDENTIFIER_LENGTH} printable ASCII characters (it is the revocation handle)`;
   }
   if (!isValidTenantId(claims.tid)) return "tid must be a valid tenant id";
   if (!(PRINCIPAL_TYPES as readonly unknown[]).includes(claims.pt)) {
@@ -313,35 +343,68 @@ export function verifyFleetToken(token: string, options: VerifyFleetTokenOptions
       message: `Token alg must be '${FLEET_TOKEN_ALG}'.`,
     };
   }
+  // `typ` is checked WHEN PRESENT. A header that omits it still verifies; the
+  // reference issuer always stamps it, and rejecting its absence would break
+  // any conforming issuer that does not.
   if (header.typ !== undefined && header.typ !== FLEET_TOKEN_TYP) {
     return { ok: false, reason: "unsupported_typ", message: `Token typ must be '${FLEET_TOKEN_TYP}'.` };
+  }
+  // RFC 7515 s4.1.11: a `crit` header names extensions the recipient MUST
+  // understand. This verifier implements none, so any `crit` at all is a
+  // rejection — ignoring it would mean silently disregarding a header the
+  // issuer marked as must-understand. Same for RFC 7797's `b64`.
+  if (header.crit !== undefined) {
+    return { ok: false, reason: "unsupported_crit", message: "Token declares a 'crit' extension this verifier does not implement." };
+  }
+  if (header.b64 !== undefined) {
+    return { ok: false, reason: "unsupported_crit", message: "Token declares the 'b64' extension, which this verifier does not implement." };
   }
   if (typeof header.kid !== "string" || header.kid.length === 0) {
     return { ok: false, reason: "missing_kid", message: "Token header must carry a 'kid'." };
   }
 
-  const usableKeys = options.jwks?.keys?.filter(isUsableEd25519Jwk) ?? [];
+  // `Array.isArray` rather than optional chaining on the property: a JWKS whose
+  // `keys` is a string or an object — an ordinary `JSON.parse` of a truncated
+  // file or of an HTML error page — would otherwise throw an uncaught
+  // TypeError in the request path instead of denying.
+  const candidateKeys = Array.isArray(options.jwks?.keys) ? options.jwks.keys : [];
+  const usableKeys = candidateKeys.filter(isUsableEd25519Jwk);
   if (usableKeys.length === 0) {
     // An empty key set must FAIL. Anything else is a verifier that accepts
     // everything the moment its configuration goes missing.
     return { ok: false, reason: "no_usable_key", message: "No usable Ed25519 key in the configured JWKS." };
   }
-  const jwk = usableKeys.find((key) => key.kid === header.kid);
-  if (!jwk) {
+  // A published key set should never carry private material, and this is the
+  // hot path, so the check lives here and not only in `parseFleetJwks`.
+  if (candidateKeys.some((key) => isRecord(key) && typeof key.d === "string")) {
+    return {
+      ok: false,
+      reason: "private_material",
+      message: "Configured JWKS contains a private key component ('d'). Publish public keys only.",
+    };
+  }
+  // EVERY key matching the kid is tried, not just the first. A key set with a
+  // duplicated kid — mid-rotation, or two issuers merged into one file — would
+  // otherwise reject tokens signed by the second key for no visible reason.
+  const matching = usableKeys.filter((key) => key.kid === header.kid);
+  if (matching.length === 0) {
     return { ok: false, reason: "unknown_kid", message: "No configured key matches the token's 'kid'." };
   }
 
+  const signingInput = Buffer.from(`${headerSegment}.${payloadSegment}`, "utf8");
+  const signatureBytes = Buffer.from(signatureSegment, "base64url");
   let signatureValid = false;
-  try {
-    const publicKey = createPublicKey({ key: jwk as unknown as Record<string, unknown>, format: "jwk" });
-    signatureValid = edVerify(
-      null,
-      Buffer.from(`${headerSegment}.${payloadSegment}`, "utf8"),
-      publicKey,
-      Buffer.from(signatureSegment, "base64url"),
-    );
-  } catch {
-    return { ok: false, reason: "bad_signature", message: "Signature verification failed." };
+  for (const candidate of matching) {
+    try {
+      const publicKey = createPublicKey({ key: candidate as unknown as Record<string, unknown>, format: "jwk" });
+      if (edVerify(null, signingInput, publicKey, signatureBytes)) {
+        signatureValid = true;
+        break;
+      }
+    } catch {
+      // A key this runtime cannot load is not a verdict on the token; keep
+      // trying the remaining candidates.
+    }
   }
   if (!signatureValid) {
     return { ok: false, reason: "bad_signature", message: "Signature verification failed." };
@@ -378,7 +441,9 @@ export function verifyFleetToken(token: string, options: VerifyFleetTokenOptions
   }
 
   const now = Math.floor((options.nowMs ?? Date.now()) / 1000);
-  const leeway = options.leewaySeconds ?? 0;
+  // Clamped, not trusted. `resolveIdentityConfig` rejects an oversized value,
+  // but this function is public and a caller may construct options directly.
+  const leeway = Math.min(Math.max(options.leewaySeconds ?? 0, 0), MAX_FLEET_TOKEN_LEEWAY_SECONDS);
   if (now - leeway >= claims.exp) {
     return { ok: false, reason: "expired", message: "Token has expired." };
   }
@@ -490,14 +555,26 @@ export function createIdentityVerifier(
   }
 
   async function verify(token: string, context: IdentityAuthContext = {}): Promise<IdentityVerifyResult> {
-    let jwks: FleetJwks;
+    let resolved: unknown;
     try {
-      jwks = await jwksSource();
+      resolved = await jwksSource();
     } catch (error) {
       // A key set the operator cannot produce means DENY, never allow.
       const message = error instanceof Error ? error.message : String(error);
       return { ok: false, reason: "no_usable_key", message: `Could not resolve the JWKS: ${message}` };
     }
+    // The source is operator-supplied and its output is untrusted — it is
+    // typically an ordinary `JSON.parse` of a file that may be truncated, an
+    // HTML error page, or a key set someone pasted a PRIVATE key into. Validate
+    // it here, on the path every service actually uses, rather than trusting
+    // that the operator called `parseFleetJwks` themselves.
+    const parsed = parseFleetJwks(resolved);
+    if (!parsed.ok) {
+      const reason: IdentityVerifyFailureReason =
+        parsed.problem === "private_material" ? "private_material" : "no_usable_key";
+      return { ok: false, reason, message: `Configured JWKS is unusable: ${parsed.message}` };
+    }
+    const jwks = parsed.jwks;
 
     const result = verifyFleetToken(token, {
       jwks,
@@ -590,10 +667,24 @@ export type IdentityConfigResolution =
   | { enabled: false; reason: "invalid"; error: string; checkedKeys: string[] }
   | { enabled: true; config: IdentityProviderConfig; inlineJwks: FleetJwks | null; sources: Record<string, string> };
 
-function firstEnv(env: IdentityEnv, keys: readonly string[]): { key: string; value: string } | null {
+/**
+ * First key that is SET, distinguishing set-but-blank from absent.
+ *
+ * `HASNA_TODOS_IDENTITY_ISSUER= ` in a `.env` is a typo, not a decision to run
+ * without an issuer. Trimming and then truthiness-testing made the two
+ * indistinguishable, so a blank value fell through to "unconfigured" and the
+ * server silently degraded to API-keys-only — the exact outcome this function
+ * is documented as preventing.
+ */
+function firstEnv(
+  env: IdentityEnv,
+  keys: readonly string[]
+): { key: string; value: string; blank: boolean } | null {
   for (const key of keys) {
-    const value = env[key]?.trim();
-    if (value) return { key, value };
+    const raw = env[key];
+    if (raw === undefined) continue;
+    const value = raw.trim();
+    return { key, value, blank: value.length === 0 };
   }
   return null;
 }
@@ -616,7 +707,13 @@ function firstEnv(env: IdentityEnv, keys: readonly string[]): { key: string; val
  */
 export function resolveIdentityConfig(name: string, env: IdentityEnv = process.env as IdentityEnv): IdentityConfigResolution {
   const keys = identityEnvKeys(name);
-  const checkedKeys = [...keys.issuerKeys, ...keys.audienceKeys, ...keys.jwksUriKeys, ...keys.jwksKeys];
+  const checkedKeys = [
+    ...keys.issuerKeys,
+    ...keys.audienceKeys,
+    ...keys.jwksUriKeys,
+    ...keys.jwksKeys,
+    ...keys.leewayKeys
+  ];
 
   const issuer = firstEnv(env, keys.issuerKeys);
   const audience = firstEnv(env, keys.audienceKeys);
@@ -624,7 +721,10 @@ export function resolveIdentityConfig(name: string, env: IdentityEnv = process.e
   const inline = firstEnv(env, keys.jwksKeys);
   const leeway = firstEnv(env, keys.leewayKeys);
 
-  if (!issuer && !audience && !jwksUri && !inline) {
+  const present = [issuer, audience, jwksUri, inline, leeway].filter(
+    (hit): hit is { key: string; value: string; blank: boolean } => hit !== null
+  );
+  if (present.length === 0) {
     return { enabled: false, reason: "unconfigured", checkedKeys };
   }
 
@@ -634,6 +734,15 @@ export function resolveIdentityConfig(name: string, env: IdentityEnv = process.e
     error,
     checkedKeys,
   });
+
+  // Set-but-blank is a typo, never a decision. Naming it is the whole point of
+  // the `invalid` outcome.
+  const blank = present.filter((hit) => hit.blank);
+  if (blank.length > 0) {
+    return invalid(
+      `Identity option is misconfigured: ${blank.map((hit) => hit.key).join(", ")} is set but empty. Unset it to disable the identity option, or give it a value.`
+    );
+  }
 
   if (!issuer) {
     return invalid(`Identity option is partially configured: set ${keys.issuerKeys[0]} (expected token 'iss').`);
@@ -658,11 +767,21 @@ export function resolveIdentityConfig(name: string, env: IdentityEnv = process.e
 
   let leewaySeconds = 0;
   if (leeway) {
-    const parsed = Number(leeway.value);
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      return invalid(`${leeway.key} must be a non-negative number of seconds.`);
+    // `Number()` accepts "1e9", "0x10", and " 12 ". A leeway is a plain count
+    // of seconds; anything else is a typo worth failing on.
+    const parsed = /^[0-9]+$/.test(leeway.value) ? Number(leeway.value) : Number.NaN;
+    if (!Number.isInteger(parsed)) {
+      return invalid(`${leeway.key} must be a whole number of seconds.`);
     }
-    leewaySeconds = Math.floor(parsed);
+    if (parsed > MAX_FLEET_TOKEN_LEEWAY_SECONDS) {
+      // Leeway is added to the window in which an expired token is accepted,
+      // and offline verification cannot see a revocation, so this directly
+      // widens the revocation window the 24h TTL ceiling exists to bound.
+      return invalid(
+        `${leeway.key} is ${parsed}s, above the ${MAX_FLEET_TOKEN_LEEWAY_SECONDS}s ceiling. Leeway widens the window in which an expired — possibly revoked — token is still accepted.`
+      );
+    }
+    leewaySeconds = parsed;
   }
 
   const sources: Record<string, string> = { issuer: issuer.key };
