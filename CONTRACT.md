@@ -532,6 +532,18 @@ Hasna packed artifacts and against `zod`, `email-validator`, `commander` and
 `class-validator` it reports their genuine reference tables — the waiver case.
 A 20,414-member package scans in **5.9 s**.
 
+**What this check is, and is not.** Clause B is a **prohibition**; the check is a
+**count**. Those are not the same thing, and the gap is not academic: an
+artifact carrying a *small* number of vendor-owned hostnames — below the
+threshold — passes. Demonstrated by construction: an artifact built from the 13
+files of a real published package that carry owned hostnames (11 distinct,
+including two nginx configs and a `bin/` entry point) scans `pass`, exit 0.
+
+The clause still binds. A repo that ships an owned-asset inventory is in breach
+whether or not this check fires, and "the scanner passed" is not evidence of
+compliance for small-N disclosure. The check exists to make the *bulk* case
+mechanically impossible, which is the case that actually happened.
+
 **Stated limits.** All measured, none theoretical:
 
 - Detection rests on IANA's TLD list minus a small set that collides with
@@ -547,6 +559,9 @@ A 20,414-member package scans in **5.9 s**.
 - Runtime string concatenation, IDN/punycode spellings, and reversed or
   otherwise transformed encodings beyond one level of base64/hex are not
   detected by a static scan.
+- The gate binds `prepack`, which `npm publish --ignore-scripts` skips. Nothing
+  in a package can defend against the publisher choosing not to run its own
+  hooks; that is a release-process control, not a code one.
 - **IPv4 is read only from values** — whole quoted literals, or bare tokens in
   non-code members. Reading raw text matched SVG path coordinates in minified
   bundles, which would have failed every app shipping an icon set.

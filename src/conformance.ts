@@ -464,12 +464,44 @@ function resolveScriptGraph(scripts: Record<string, string>, entry: string): Set
  * bypassable hook is not a hook. This does not attempt to prove the script
  * scans correctly; it rejects the bodies that provably cannot.
  */
-const NO_OP_SCRIPT = /^\s*(?::|true|exit\s+0|echo\b[^&|;]*|#.*)?\s*$/;
+/**
+ * Commands that do nothing, however they are spelled.
+ *
+ * `true`, `/bin/true`, `/usr/bin/true`, `command true`, `builtin true`, `:`,
+ * `exit 0`, a bare `echo`. The earlier pattern matched only the bare forms, so
+ * appending ` # scan` — or writing `/bin/true` — restored a switched-off gate
+ * while still reading as deliberate.
+ */
+const NO_OP_COMMAND = /^(?:(?:\/usr)?\/bin\/)?(?::|true)$/;
+
+/** Strip an unquoted trailing `# comment` from one command segment. */
+function withoutComment(segment: string): string {
+  let inSingle = false;
+  let inDouble = false;
+  for (let index = 0; index < segment.length; index += 1) {
+    const character = segment[index]!;
+    if (character === "'" && !inDouble) inSingle = !inSingle;
+    else if (character === '"' && !inSingle) inDouble = !inDouble;
+    else if (character === "#" && !inSingle && !inDouble) return segment.slice(0, index);
+  }
+  return segment;
+}
+
+function segmentIsNoOp(segment: string): boolean {
+  const text = withoutComment(segment).trim();
+  if (text === "") return true;
+  // `command`/`builtin`/`exec` are prefixes, not work.
+  const tokens = text.split(/\s+/).filter((token) => !/^(?:command|builtin|exec|nohup)$/.test(token));
+  const [head, ...rest] = tokens;
+  if (head === undefined) return true;
+  if (NO_OP_COMMAND.test(head)) return true;
+  if (head === "exit" && (rest.length === 0 || rest[0] === "0")) return true;
+  if (/^(?:(?:\/usr)?\/bin\/)?echo$/.test(head)) return true;
+  return false;
+}
 
 function scriptIsNoOp(body: string): boolean {
-  return body
-    .split(/&&|\|\||;/)
-    .every((segment) => NO_OP_SCRIPT.test(segment));
+  return body.split(/&&|\|\||;|\n/).every(segmentIsNoOp);
 }
 
 /**

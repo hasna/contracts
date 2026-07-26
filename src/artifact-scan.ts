@@ -419,15 +419,57 @@ function decodeEscapes(value: string): string {
     if (!Number.isFinite(parsed) || parsed < 0 || parsed > 0x10ffff) return null;
     return String.fromCodePoint(parsed);
   };
-  return value
+
+  // ONE left-to-right pass over the backslash escapes, not a chain of
+  // `.replace()` calls. Sequential replaces cannot tell `\\n` (an escaped
+  // backslash followed by the letter n) from `\n` (a newline), and they
+  // silently corrupt one while decoding the other.
+  //
+  // `\n` in particular is not optional: every bundler emits `sourcesContent`
+  // as ONE JSON string with the original file's newlines escaped, so the glue
+  // between two entries is `,\n  ` — which contains a literal backslash, and
+  // `LITERAL_RUN_GLUE` excludes backslash, so the run broke at every element.
+  // A realistic `.map` carrying the full portfolio scanned clean because of it.
+  const SIMPLE: Record<string, string> = {
+    n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", v: "\v", "0": "\0",
+    '"': '"', "'": "'", "`": "`", "\\": "\\", "/": "/",
+  };
+  let out = "";
+  let index = 0;
+  while (index < value.length) {
+    const character = value[index]!;
+    if (character !== "\\" || index + 1 >= value.length) {
+      out += character;
+      index += 1;
+      continue;
+    }
+    const next = value[index + 1]!;
+    if (next === "u" && value[index + 2] === "{") {
+      const close = value.indexOf("}", index + 3);
+      const hex = close === -1 ? null : value.slice(index + 3, close);
+      const decoded = hex && /^[0-9a-f]{1,6}$/i.test(hex) ? codePoint(hex, 16) : null;
+      if (decoded !== null) { out += decoded; index = close + 1; continue; }
+    }
+    if (next === "u" && /^[0-9a-f]{4}$/i.test(value.slice(index + 2, index + 6))) {
+      const decoded = codePoint(value.slice(index + 2, index + 6), 16);
+      if (decoded !== null) { out += decoded; index += 6; continue; }
+    }
+    if (next === "x" && /^[0-9a-f]{2}$/i.test(value.slice(index + 2, index + 4))) {
+      const decoded = codePoint(value.slice(index + 2, index + 4), 16);
+      if (decoded !== null) { out += decoded; index += 4; continue; }
+    }
+    const simple = SIMPLE[next];
+    if (simple !== undefined) { out += simple; index += 2; continue; }
+    // An escape this pass does not know: keep both characters verbatim.
+    out += character + next;
+    index += 2;
+  }
+
+  // Percent- and entity-encoding are independent of backslash escaping.
+  return out
     .replace(/%([0-9a-f]{2})/gi, (match, hex: string) => codePoint(hex, 16) ?? match)
-    .replace(/\\u\{([0-9a-f]{1,6})\}/gi, (match, hex: string) => codePoint(hex, 16) ?? match)
-    .replace(/\\u([0-9a-f]{4})/gi, (match, hex: string) => codePoint(hex, 16) ?? match)
-    .replace(/\\x([0-9a-f]{2})/gi, (match, hex: string) => codePoint(hex, 16) ?? match)
     .replace(/&#x([0-9a-f]+);?/gi, (match, hex: string) => codePoint(hex, 16) ?? match)
-    .replace(/&#([0-9]+);?/g, (match, dec: string) => codePoint(dec, 10) ?? match)
-    .replace(/\\"/g, '"')
-    .replace(/\\'/g, "'");
+    .replace(/&#([0-9]+);?/g, (match, dec: string) => codePoint(dec, 10) ?? match);
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   registrableDomain,
   resolveAssetInventoryWaivers,
   scanPublishedArtifact,
+  MAX_INVENTORY_THRESHOLDS,
 } from "../src/artifact-scan";
 import { IANA_TLD_SNAPSHOT, PROGRAMMING_COLLISION_TLDS, RECOGNIZED_TLDS, isRecognizedTld } from "../src/tlds";
 import { runRepoConformance } from "../src/conformance";
@@ -248,6 +249,38 @@ describe("evasions that previously walked past this guard", () => {
     // A base64 blob, as a build step or an obfuscator would produce.
     const blob = Buffer.from(domains.join(",")).toString("base64");
     expect(inventoryCounts(`const D = atob("${blob}");`).domain.length).toBe(30);
+  });
+
+  test("a source map's original source is read IN THE SHAPE BUNDLERS EMIT", () => {
+    // The earlier fixture was `JSON.stringify(list)` — one line, no newline
+    // escapes — and passed while the real thing scanned clean. Every bundler
+    // emits `sourcesContent` as ONE JSON string with the file's newlines
+    // escaped, so the glue between entries is `,\n  `, which contains a
+    // literal backslash. `LITERAL_RUN_GLUE` excludes backslash, so the run
+    // broke at every element and a realistic `.map` carrying a full portfolio
+    // reported ok.
+    const portfolio = oneBrandPortfolio(40);
+    const original = `export const ALLOWED = [\n${portfolio.map((d) => `  "${d}",`).join("\n")}\n];\n`;
+    const map = JSON.stringify({
+      version: 3,
+      file: "index.js",
+      sources: ["../src/policy.ts"],
+      sourcesContent: [original],
+      names: [],
+      mappings: "AAAA",
+    });
+    // The escaped form is what lands on disk.
+    expect(map).toContain("\\n");
+    expect(inventoryCounts(map).domain.length).toBeGreaterThanOrEqual(38);
+
+    const archive = tarball("sourcemap-multiline", {
+      "package.json": JSON.stringify({ name: "mapped", version: "1.0.0", files: ["dist"] }),
+      "dist/index.js": "export const ALLOWED=[];\n//# sourceMappingURL=index.js.map\n",
+      "dist/index.js.map": map,
+    });
+    const report = scanPublishedArtifact(archive);
+    expect(report.ok).toBe(false);
+    expect(report.findings.some((finding) => finding.kind === "domain")).toBe(true);
   });
 
   test("a JSON-escaped source map's original source is read", () => {
@@ -851,6 +884,97 @@ describe("thresholds and waivers", () => {
   }, 60_000);
 });
 
+describe("fixes that had no regression coverage", () => {
+  test("thresholds are CLAMPED — the gate cannot be switched off through its own flags", () => {
+    // `--domain-threshold 1000000` returned exit 0 on the real leaked artifact
+    // while `published_artifact_gate` still passed, because the gate inspects
+    // the script graph and never the flags.
+    const archive = tarball("threshold-ceiling", {
+      "package.json": JSON.stringify({ name: "ceiling", version: "1.0.0" }),
+      "dist/index.js": JSON.stringify(oneBrandPortfolio(40)),
+    });
+    expect(scanPublishedArtifact(archive).ok).toBe(false);
+
+    // Over the ceiling: refused by name.
+    for (const domain of [1_000_000, 101, 1e9]) {
+      expect(() => scanPublishedArtifact(archive, { thresholds: { domain } }), String(domain)).toThrow(
+        /ceiling/,
+      );
+    }
+    // Not a usable number at all: refused before the ceiling is consulted.
+    for (const domain of [Number.POSITIVE_INFINITY, Number.NaN, 0, -1]) {
+      expect(() => scanPublishedArtifact(archive, { thresholds: { domain } }), String(domain)).toThrow(
+        /positive number/,
+      );
+    }
+    // Tightening is always allowed; only loosening past the ceiling is refused.
+    expect(() => scanPublishedArtifact(archive, { thresholds: { domain: 5 } })).not.toThrow();
+    expect(MAX_INVENTORY_THRESHOLDS.domain).toBe(100);
+  });
+
+  test("the redaction salt is PER RUN, not a constant", () => {
+    // A fixed salt makes every digest a stable identifier for the value across
+    // every report ever published — a rainbow table over candidate names, and
+    // the same finding correlatable between two artifacts. The salt must differ per
+    // process, so the same input digests differently in a separate run.
+    const archive = tarball("salt-per-run", {
+      "package.json": JSON.stringify({ name: "salted", version: "1.0.0" }),
+      "dist/index.js": JSON.stringify(oneBrandPortfolio(40)),
+    });
+    const here = scanPublishedArtifact(archive).findings.flatMap((finding) => finding.sample);
+    expect(here.length).toBeGreaterThan(0);
+
+    const script = `
+      const { scanPublishedArtifact } = await import(${JSON.stringify(join(import.meta.dir, "..", "src", "artifact-scan.ts"))});
+      const report = scanPublishedArtifact(${JSON.stringify(archive)});
+      console.log(JSON.stringify(report.findings.flatMap((f) => f.sample)));
+    `;
+    const scriptPath = join(workspace, "salt-probe.ts");
+    writeFileSync(scriptPath, script);
+    const other = Bun.spawnSync(["bun", "run", scriptPath], { stdout: "pipe", stderr: "pipe" });
+    expect(other.exitCode).toBe(0);
+    const elsewhere = JSON.parse(new TextDecoder().decode(other.stdout).trim()) as string[];
+
+    // Same shape, different digests: nothing about the value survives the run.
+    expect(elsewhere.length).toBe(here.length);
+    expect(elsewhere).not.toEqual(here);
+    for (const sample of [...here, ...elsewhere]) expect(sample).toMatch(/^<(?:host|email|ipv4):[0-9a-f]{8}>$/);
+  });
+
+  test("a SHORT quoted token does not break the run", () => {
+    // `{3,}` left a 2-character key unmatched, its quotes fell into the run
+    // glue (which excludes `"`), and the run broke at every element.
+    const portfolio = oneBrandPortfolio(40);
+    for (const key of ["id", "x", "idx", "ключ"]) {
+      const rows = portfolio.map((domain, index) => `{"${key}":${index},"domain":"${domain}"}`).join(",");
+      expect(inventoryCounts(`[${rows}]`).domain.length, `key "${key}"`).toBeGreaterThanOrEqual(38);
+    }
+  });
+
+  test("IPv4 is read from VALUES only — not from SVG path data in a bundle", () => {
+    // `@hasna/tables` failed on 26 coordinate pairs in a minified Vite bundle.
+    // The comment claiming a dotted quad "cannot be confused with code" was
+    // measurably false, and every app shipping an icon set would have hit it.
+    // Real path data: coordinate runs delimited by spaces, which is what makes
+    // them look like dotted quads to a `\b`-anchored matcher. (An earlier
+    // fixture wrote `M12.3.5.7` with no delimiter — `\b` never matched after
+    // `M`, so it reproduced nothing.)
+    const svg = Array.from(
+      { length: 30 },
+      (_, index) => `c ${index + 10}.${index + 2}.${index + 4}.${index + 6} 1 2`,
+    ).join(" ");
+    const bundle = `const icons=[${JSON.stringify(svg)}];export{icons};`;
+    expect(inventoryCounts(bundle, { codeLike: true }).ip).toEqual([]);
+    // The fixture really does look like addresses to a bare-token matcher —
+    // otherwise this test would pass for the wrong reason.
+    expect(inventoryCounts(bundle, { codeLike: false }).ip.length).toBeGreaterThanOrEqual(25);
+
+    // A genuine address inventory is still caught, in a value position.
+    const real = Array.from({ length: 30 }, (_, index) => `"51.15.${index}.10"`).join(",");
+    expect(inventoryCounts(`const fleet=[${real}];`, { codeLike: true }).ip.length).toBe(30);
+  });
+});
+
 // --- clause C: the prepack gate ---
 
 function conformanceRepo(name: string, pkg: Record<string, unknown>, manifestExtra: Record<string, unknown> = {}): string {
@@ -980,6 +1104,40 @@ describe("published_artifact_gate (clause C)", () => {
       const check = gate(root);
       expect(check.status, body).toBe("fail");
       expect(check.detail).toContain("no-op");
+    }
+  });
+
+  test("a no-op is rejected however it is SPELLED", () => {
+    // The earlier pattern matched only bare forms, so appending ` # scan` — or
+    // writing `/bin/true` — restored a switched-off gate while still reading
+    // as deliberate.
+    const noops = [
+      "true", "true # scan", ": # scan", "exit 0 # ok", "/bin/true", "/usr/bin/true # x",
+      "command true", "builtin :", "echo scanned", "  ", "exec /bin/true",
+    ];
+    for (const body of noops) {
+      const root = conformanceRepo(
+        `gate-noop-${Buffer.from(body).toString("hex").slice(0, 10)}`,
+        { exports: { ".": "./d.js" }, scripts: { prepack: "bun run scan:artifact", "scan:artifact": body } },
+        release,
+      );
+      const check = gate(root);
+      expect(check.status, JSON.stringify(body)).toBe("fail");
+      expect(check.detail).toContain("no-op");
+    }
+
+    // Real work is still accepted, including work that merely mentions echo.
+    for (const body of [
+      "contracts artifact-scan p.tgz",
+      "bun scripts/scan-artifact.ts",
+      "echo scanning && contracts artifact-scan p.tgz",
+    ]) {
+      const root = conformanceRepo(
+        `gate-real-${Buffer.from(body).toString("hex").slice(0, 10)}`,
+        { exports: { ".": "./d.js" }, scripts: { prepack: "bun run scan:artifact", "scan:artifact": body } },
+        release,
+      );
+      expect(gate(root).status, JSON.stringify(body)).toBe("pass");
     }
   });
 
