@@ -18,7 +18,7 @@
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { isValidScope } from "./scopes.js";
-import { canonicalizeTenantId, isValidTenantId, normalizeTenantId, tenantIdsEqual } from "./tenant.js";
+import { canonicalizeTenantId, isValidTenantId, normalizeTenantId, ownTenantId, tenantIdsEqual } from "./tenant.js";
 
 /** Token wire-format version. Bump only on a breaking format change. */
 export const API_KEY_TOKEN_VERSION = 1;
@@ -157,8 +157,11 @@ export function mintApiKey(options: MintApiKeyOptions): MintedApiKey {
   // `undefined` means untenanted and stays out of the body entirely, so a token
   // minted without a tenant is byte-identical to one minted before `tid`
   // existed. Any other value must be well-formed — a silently-dropped bad
-  // tenant id would mint a key that authenticates as untenanted.
-  const tid = options.tid === undefined ? undefined : normalizeTenantId(options.tid);
+  // tenant id would mint a key that authenticates as untenanted. Read as an OWN
+  // property (see `ownTenantId`) so a polluted prototype cannot put a tenant
+  // into a token the caller minted without one.
+  const requestedTid = ownTenantId(options);
+  const tid = requestedTid === undefined ? undefined : normalizeTenantId(requestedTid);
 
   const nowMs = options.nowMs ?? Date.now();
   const iat = Math.floor(nowMs / 1000);
@@ -224,8 +227,11 @@ export function parseApiKey(token: string): ParsedApiKey | null {
   }
   // A present-but-malformed `tid` is a malformed token, not an untenanted one.
   // Treating it as absent would let a body with `tid: null` or `tid: 0` slip
-  // past a `requireTenant` gate as "no tenant claimed".
-  if (Object.hasOwn(claims as object, "tid") && !isValidTenantId(claims.tid)) {
+  // past a `requireTenant` gate as "no tenant claimed". The value validated
+  // here is the OWN one, and so is every later read of it — validating the own
+  // property while consuming the inherited one would be worse than no check.
+  const claimedTid = ownTenantId(claims);
+  if (claimedTid !== undefined && !isValidTenantId(claimedTid)) {
     return null;
   }
   return { app, body, sig, claims };
@@ -336,7 +342,8 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
   // Tenant binding is an identity check, so it runs before authorization: a
   // token for the wrong organization must not be reported as merely
   // under-scoped.
-  const tid = claims.tid === undefined ? null : canonicalizeTenantId(claims.tid);
+  const verifiedTid = ownTenantId(claims);
+  const tid = verifiedTid === undefined ? null : canonicalizeTenantId(verifiedTid);
   // Any truthy value enables the gate. `=== true` would fail OPEN for a config
   // value that arrived as the string "true" or the number 1 — the wrong
   // direction for a security control to be strict in.

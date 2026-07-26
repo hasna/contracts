@@ -9,7 +9,7 @@
 // is no cache and no local mirror; a revocation check reads the row each time.
 
 import type { ApiKeyClaims, MintedApiKey } from "./keys.js";
-import { canonicalizeTenantId, normalizeTenantId } from "./tenant.js";
+import { normalizeTenantId, ownTenantId } from "./tenant.js";
 
 /** Minimal row shape. Compatible with `pg` QueryResultRow. */
 export type Row = Record<string, unknown>;
@@ -119,11 +119,15 @@ function parseScopes(value: unknown): string[] {
 }
 
 function rowToRecord(row: Row): ApiKeyRecord {
+  // Own-property read (see `ownTenantId`): a driver returning a row from before
+  // migration 0003 has no `tid` key at all, and that absence must read as
+  // untenanted rather than as whatever sits on the prototype.
+  const tid = ownTenantId(row);
   return {
     kid: String(row.kid),
     app: String(row.app),
     agent: row.agent === null || row.agent === undefined ? null : String(row.agent),
-    tid: row.tid === null || row.tid === undefined ? null : String(row.tid),
+    tid: tid === null || tid === undefined ? null : String(tid),
     scopes: parseScopes(row.scopes),
     tokenHash: String(row.token_hash),
     issuedAt: toIso(row.issued_at) ?? new Date(0).toISOString(),
@@ -182,6 +186,9 @@ export class ApiKeyStore {
 
   /** Insert a hashed key record. Throws on duplicate kid/token hash. */
   async insert(input: InsertKeyInput): Promise<void> {
+    // Own-property read (see `ownTenantId`): a polluted prototype must not put
+    // a tenant on a row the caller inserted without one.
+    const tid = ownTenantId(input);
     await this.client.execute(
       `INSERT INTO ${this.table}
          (kid, app, agent, tid, scopes, token_hash, issued_at, expires_at, created_by)
@@ -190,7 +197,7 @@ export class ApiKeyStore {
         input.kid,
         input.app,
         input.agent ?? null,
-        input.tid === undefined || input.tid === null ? null : normalizeTenantId(input.tid),
+        tid === undefined || tid === null ? null : normalizeTenantId(tid),
         JSON.stringify(input.scopes),
         input.tokenHash,
         input.issuedAt.toISOString(),
@@ -207,7 +214,7 @@ export class ApiKeyStore {
       kid: minted.kid,
       app: claims.app,
       agent: claims.agent ?? null,
-      tid: claims.tid ?? null,
+      tid: ownTenantId(claims) ?? null,
       scopes: claims.scopes,
       tokenHash: minted.tokenHash,
       issuedAt: new Date(claims.iat * 1000),
@@ -282,7 +289,9 @@ export class ApiKeyStore {
    * List keys, optionally filtered by app and/or tenant, excluding revoked by
    * default. `tid` filters to exactly that tenant; it never falls back to
    * "all tenants" when the filter does not match, so an operator listing one
-   * organization's keys cannot accidentally enumerate another's.
+   * organization's keys cannot accidentally enumerate another's. A `tid` that
+   * is present but unusable (empty, whitespace, or outside the grammar) THROWS
+   * rather than listing anything.
    */
   async list(options: { app?: string; tid?: string; includeRevoked?: boolean } = {}): Promise<ApiKeyRecord[]> {
     const clauses: string[] = [];
@@ -291,10 +300,18 @@ export class ApiKeyStore {
       params.push(options.app);
       clauses.push(`app = $${params.length}`);
     }
-    if (options.tid) {
-      // Canonicalized, so listing by the UUID an operator pasted from a `uuid`
-      // column matches a row written from a `text` column, and vice versa.
-      params.push(canonicalizeTenantId(options.tid.trim()));
+    // PRESENCE, not truthiness. `tid: ""` — a `req.params.tid` that was empty,
+    // or a `String(req.query.tid ?? "")` — is a caller that MEANT to filter by
+    // tenant, so dropping the clause would widen the query to every
+    // organization's key records: the exact enumeration this filter exists to
+    // prevent, and the opposite of what the guarantee above promises.
+    // `normalizeTenantId` therefore does the work: it trims, canonicalizes so
+    // that listing by the UUID an operator pasted from a `uuid` column matches
+    // a row written from a `text` column and vice versa, and throws on anything
+    // no token could ever carry — the same rule `insert` already applies.
+    const tid = ownTenantId(options);
+    if (tid !== undefined) {
+      params.push(normalizeTenantId(tid));
       clauses.push(`tid = $${params.length}`);
     }
     if (!options.includeRevoked) {

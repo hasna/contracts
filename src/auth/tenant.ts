@@ -137,3 +137,21 @@ export function tenantIdsEqual(left: string | null | undefined, right: string | 
   const b = canonical(right);
   return a !== null && b !== null && a === b;
 }
+
+/**
+ * Read a `tid` field as an OWN property, `undefined` when it is absent.
+ *
+ * A plain `source.tid` resolves through the prototype chain, so a single
+ * `Object.prototype.tid = "..."` write anywhere in the process — the classic
+ * prototype-pollution primitive — hands a tenant to every claim set and every
+ * options bag that names none. Rule 4 above makes absence load-bearing: it is
+ * the untenanted case `requireTenant` exists to reject. So the test that a
+ * tenant is ABSENT and the read of its VALUE must be one and the same check.
+ * Split them and the absent path silently uses a value that nothing validated,
+ * which is strictly worse than never having checked. Every `tid` read in the
+ * auth kit whose source may legitimately omit the field — claim sets, options
+ * bags, database rows, denial results — goes through here.
+ */
+export function ownTenantId<T extends { tid?: unknown }>(source: T): T["tid"] | undefined {
+  return Object.hasOwn(source, "tid") ? source.tid : undefined;
+}

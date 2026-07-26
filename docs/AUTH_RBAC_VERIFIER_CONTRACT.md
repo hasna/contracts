@@ -151,6 +151,16 @@ security control must not fail open because a config value arrived as the string
 authentic and unexpired, it is simply not permitted for this organization — the
 same shape as `insufficient_scope`.
 
+**Absence must be read as absence.** Because the untenanted case is
+load-bearing, `tid` MUST be read as an **own property** (`ownTenantId`) wherever
+it is consumed — parse, verify, mint, and persist alike. A plain `claims.tid`
+resolves through the prototype chain, so one `Object.prototype.tid` write
+anywhere in the process would hand every untenanted token a tenant, and one that
+skipped validation precisely because the claim was absent. For the same reason a
+tenant FILTER is applied on presence, not truthiness: `ApiKeyStore.list({ tid })`
+throws on an empty or ungrammatical `tid` rather than dropping the clause and
+widening the query to every organization's records.
+
 **A per-call tenant narrows; it never replaces.** When a service is pinned with
 `verifyApiKey({ expectedTid })` *and* a route supplies
 `context.expectedTid` (typically from `/v1/orgs/:tid/…`), the two MUST agree.

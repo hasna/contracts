@@ -26,6 +26,38 @@ const LEGACY_TOKEN =
   "hasna_todos_eyJ2IjoxLCJraWQiOiJsZWdhY3lmaXhlZGtpZDAxIiwiYXBwIjoidG9kb3MiLCJzY29wZXMiOlsidG9kb3M6cmVhZCIsInRvZG9zOndyaXRlIl0sImlhdCI6MTcwMDAwMDAwMCwiZXhwIjpudWxsLCJhZ2VudCI6ImxlZ2FjeS1hZ2VudCJ9.xb8c-LdlAqTjznvVpsNSFYntTjCyKoCrVUnuIvzr_4g";
 const LEGACY_NOW_MS = 1_800_000_000_000; // well after the fixture's iat
 
+/** The value an attacker with an `Object.prototype` write primitive plants. */
+const POLLUTED_TID = "attacker-tenant";
+
+/**
+ * Run `fn` with `Object.prototype.tid` set, then remove it.
+ *
+ * This is the process-wide condition any `__proto__`/`constructor.prototype`
+ * write primitive elsewhere in a service creates. Under it, a plain `x.tid`
+ * read resolves to the attacker's value for every claim set and every options
+ * bag that names NO tenant — which is precisely the untenanted case the whole
+ * `requireTenant` gate rests on.
+ *
+ * Defined non-enumerable so the planted key cannot leak into unrelated
+ * `for...in` loops (the test runner's included) while remaining visible to the
+ * prototype-chain reads under test — the reads are identical either way.
+ */
+async function withPollutedObjectPrototype<T>(fn: () => T | Promise<T>): Promise<T> {
+  Object.defineProperty(Object.prototype, "tid", {
+    value: POLLUTED_TID,
+    configurable: true,
+    enumerable: false,
+    writable: true,
+  });
+  try {
+    // The pollution must actually be in place, or every assertion below is vacuous.
+    expect(({} as unknown as { tid?: string }).tid).toBe(POLLUTED_TID);
+    return await fn();
+  } finally {
+    delete (Object.prototype as unknown as { tid?: string }).tid;
+  }
+}
+
 // --- grammar ---
 describe("tenant id grammar", () => {
   test("accepts every identifier shape already in use across the fleet", () => {
@@ -277,14 +309,51 @@ describe("tenanted API keys", () => {
     if (!result.ok) expect(result.reason).toBe("bad_signature");
   });
 
-  test("tid is read as an OWN property, never through the prototype chain", () => {
-    const polluted = Object.create({ tid: "attacker-tenant" }) as Record<string, unknown>;
-    Object.assign(polluted, { v: 1, kid: "k1", app: "todos", scopes: ["todos:read"], iat: 1, exp: null });
-    // `"tid" in polluted` and `polluted.tid !== undefined` are both true here.
-    // Only an own-property check keeps an untenanted token untenanted if some
-    // other part of the process ever gains an Object.prototype write primitive.
-    expect(Object.hasOwn(polluted, "tid")).toBe(false);
-    expect((polluted as { tid?: string }).tid).toBe("attacker-tenant");
+  test("tid is read as an OWN property, never through the prototype chain", async () => {
+    // Exercised against the FROZEN pre-tid fixture, which carries no `tid` at
+    // all: a `claims.tid` read anywhere in the verify path hands it the
+    // attacker's tenant, and hands it a value the parser never validated —
+    // because the parser correctly skips validation when the claim is ABSENT.
+    await withPollutedObjectPrototype(async () => {
+      const base = { signingSecret: SIGNING, expectedApp: "todos", nowMs: LEGACY_NOW_MS } as const;
+
+      const open = verifyApiKeyToken(LEGACY_TOKEN, base);
+      expect(open.ok).toBe(true);
+      if (open.ok) expect(open.tid).toBeNull();
+
+      // The gate must still fire: absent is untenanted, not "some tenant".
+      const gated = verifyApiKeyToken(LEGACY_TOKEN, { ...base, requireTenant: true });
+      expect(gated.ok).toBe(false);
+      if (!gated.ok) {
+        expect(gated.reason).toBe("tenant_required");
+        expect(gated.tid).toBeNull();
+      }
+
+      // And it must not satisfy a service pinned to the planted value.
+      const pinned = verifyApiKeyToken(LEGACY_TOKEN, { ...base, expectedTid: POLLUTED_TID });
+      expect(pinned.ok).toBe(false);
+      if (!pinned.ok) expect(pinned.reason).toBe("tenant_required");
+
+      // A token that genuinely carries a tenant is unaffected.
+      const acme = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING, tid: "acme-corp" });
+      const real = verifyApiKeyToken(acme.token, { ...base, nowMs: Date.now(), requireTenant: true });
+      expect(real.ok).toBe(true);
+      if (real.ok) expect(real.tid).toBe("acme-corp");
+
+      // The audit trail must not name an organization either: a pre-signature
+      // denial carries no tenant, and absent must not resolve to the planted one.
+      const events: AuthAuditEvent[] = [];
+      const verifier = verifyApiKey({
+        app: "todos",
+        signingSecret: SIGNING,
+        nowMs: () => LEGACY_NOW_MS,
+        audit: (event) => void events.push(event),
+      });
+      const decision = await verifier.authenticate({ "x-api-key": `${LEGACY_TOKEN.slice(0, -4)}AAAA` });
+      expect(decision.ok).toBe(false);
+      expect(events[0]?.reason).toBe("bad_signature");
+      expect(events[0]?.tid).toBeNull();
+    });
   });
 
   test("a present-but-malformed tid is malformed, not untenanted", () => {
@@ -685,6 +754,104 @@ describe("api-keys tenant column", () => {
     // Regression guard: `list` built a params array and did not pass it, so a
     // real driver saw `WHERE app = $1 AND tid = $2` with zero bound values.
     expect(client.lastManyParams).toEqual(["todos", "acme-corp"]);
+  });
+
+  test("an unusable tid filter refuses — it never widens to every tenant", async () => {
+    const client = new FakeStoreClient();
+    const store = new ApiKeyStore(client);
+    await store.ensureSchema();
+    const acme = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING, tid: "acme-corp" });
+    const rival = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING, tid: "rival-corp" });
+    const orphan = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
+    for (const minted of [acme, rival, orphan]) await store.insertMinted(minted);
+    expect((await store.list({ tid: "acme-corp" })).map((record) => record.kid)).toEqual([acme.kid]);
+
+    // A tenant filter that cannot be expressed in the grammar is an operator
+    // error, and the only safe way to report it is loudly. Guarding on
+    // truthiness instead of presence dropped the clause for `""` and returned
+    // EVERY organization's key records — the precise opposite of the guarantee.
+    for (const unusable of ["", "   ", "rival corp", "acme/corp"]) {
+      const listed = await store.list({ tid: unusable }).then(
+        (records) => records.map((record) => record.kid),
+        () => "refused" as const,
+      );
+      expect(listed, unusable).toBe("refused");
+    }
+    // Belt and braces: whatever happens, no other tenant's rows come back.
+    const leaked = await store.list({ tid: "" }).catch(() => []);
+    expect(leaked).toEqual([]);
+  });
+
+  test("a row from before migration 0003 reads as untenanted, not as the prototype", async () => {
+    // A deployment whose ledger has not reached 0003 yet has no `tid` column,
+    // so `SELECT *` returns rows with no `tid` KEY. That absence is the
+    // untenanted case and must survive the mapping intact.
+    const legacyRow: Row = {
+      kid: "pre0003",
+      app: "todos",
+      agent: null,
+      scopes: ["todos:read"],
+      token_hash: "hash-pre0003",
+      issued_at: new Date(0),
+      expires_at: null,
+      revoked_at: null,
+      revoked_reason: null,
+      last_used_at: null,
+      created_by: null,
+    };
+    expect(Object.hasOwn(legacyRow, "tid")).toBe(false);
+    const client = {
+      async execute() {},
+      async get() {
+        return legacyRow;
+      },
+      async many() {
+        return [legacyRow];
+      },
+    } as unknown as AuthQueryClient;
+    const store = new ApiKeyStore(client);
+    expect((await store.findByKid("pre0003"))?.tid).toBeNull();
+    await withPollutedObjectPrototype(async () => {
+      expect((await store.findByKid("pre0003"))?.tid).toBeNull();
+      expect((await store.list())[0]?.tid).toBeNull();
+    });
+  });
+
+  test("prototype pollution cannot give an untenanted key a tenant on the way to the row", async () => {
+    const client = new FakeStoreClient();
+    const store = new ApiKeyStore(client);
+    await store.ensureSchema();
+    await withPollutedObjectPrototype(async () => {
+      // Minting with no tenant must still reproduce the frozen pre-tid token
+      // byte for byte — a planted `tid` would change the signed body.
+      const minted = mintApiKey({
+        app: "todos",
+        scopes: ["todos:read", "todos:write"],
+        signingSecret: SIGNING,
+        kid: "legacyfixedkid01",
+        agent: "legacy-agent",
+        ttlSeconds: null,
+        nowMs: 1_700_000_000_000,
+      });
+      expect(minted.token).toBe(LEGACY_TOKEN);
+
+      await store.insertMinted(minted);
+      expect((await store.findByKid("legacyfixedkid01"))?.tid).toBeNull();
+
+      await store.insert({
+        kid: "u2",
+        app: "todos",
+        scopes: ["todos:read"],
+        tokenHash: "hash-u2",
+        issuedAt: new Date(0),
+        expiresAt: null,
+      });
+      expect((await store.findByKid("u2"))?.tid).toBeNull();
+
+      // An unfiltered list stays unfiltered; it must not silently narrow to the
+      // planted tenant and hide rows from an operator.
+      expect((await store.list()).map((record) => record.kid).sort()).toEqual(["legacyfixedkid01", "u2"]);
+    });
   });
 });
 

@@ -11,7 +11,7 @@ import {
   type ApiKeyClaims,
   type ApiKeyVerifyFailureReason,
 } from "./keys.js";
-import { isValidTenantId, tenantIdsEqual } from "./tenant.js";
+import { isValidTenantId, ownTenantId, tenantIdsEqual } from "./tenant.js";
 
 /** Header sources the middleware can read tokens from. */
 export type HeaderSource =
@@ -231,8 +231,11 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
           ? 403
           : 401;
       // `kid`/`tid` are present only once the signature has verified, which is
-      // exactly when a denial is worth attributing to a specific key.
-      await emit({ outcome: "deny", app: options.app, kid: verified.kid ?? null, tid: verified.tid ?? null, reason: verified.reason, scopesRequired: requiredScopes, method, path, status, at });
+      // exactly when a denial is worth attributing to a specific key. Their
+      // ABSENCE is therefore meaningful, so `tid` is read as an own property
+      // (see `ownTenantId`) — an audit line must never name an organization the
+      // request never proved.
+      await emit({ outcome: "deny", app: options.app, kid: verified.kid ?? null, tid: ownTenantId(verified) ?? null, reason: verified.reason, scopesRequired: requiredScopes, method, path, status, at });
       return { ok: false, status, reason: verified.reason, message: verified.message };
     }
 
