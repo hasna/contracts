@@ -971,12 +971,14 @@ describe("repo conformance kit", () => {
       ...completeServiceManifest(),
       metadata: {
         ...completeReleaseMetadata,
+        // Keys that NAME a variable. The carve-out is anchored to these, not
+        // to any credential-shaped key whose value happens to be upper-snake.
         env: {
-          mode: "HASNA_DEMO_STORAGE_MODE",
-          databaseUrl: "HASNA_DEMO_DATABASE_URL",
-          apiBaseUrl: "HASNA_DEMO_API_BASE_URL",
-          identityJwksUri: "HASNA_DEMO_IDENTITY_JWKS_URI",
-          signingKeyName: "HASNA_DEMO_API_SIGNING_KEY"
+          modeEnvVar: "HASNA_DEMO_STORAGE_MODE",
+          databaseUrlEnvVar: "HASNA_DEMO_DATABASE_URL",
+          apiBaseUrlEnvVar: "HASNA_DEMO_API_BASE_URL",
+          identityJwksUriEnvVar: "HASNA_DEMO_IDENTITY_JWKS_URI",
+          signingKeyEnvName: "HASNA_DEMO_API_SIGNING_KEY"
         }
       }
     };
@@ -984,6 +986,22 @@ describe("repo conformance kit", () => {
       const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
       const safety = report.checks.find((check) => check.id === "public_manifest_safety");
       expect(safety?.status).toBe("pass");
+    });
+  });
+
+  test("the env-name carve-out does not hide an upper-snake SECRET", () => {
+    // `apiKey` names a credential, not a variable. Before the carve-out was
+    // anchored to variable-naming keys, any upper-snake value under any
+    // credential-shaped key passed silently.
+    const manifest = {
+      ...completeServiceManifest(),
+      metadata: { ...completeReleaseMetadata, apiKey: "PRODUCTION_KEY_MATERIAL_A1B2C3" }
+    };
+    withRepoFixture(manifest, completePackage, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      const safety = report.checks.find((check) => check.id === "public_manifest_safety");
+      expect(safety?.status).toBe("fail");
+      expect(safety?.detail).toContain("metadata.apiKey");
     });
   });
 

@@ -10,7 +10,7 @@ import {
   resolveAssetInventoryWaivers,
   scanPublishedArtifact,
 } from "../src/artifact-scan";
-import { isRecognizedTld } from "../src/tlds";
+import { IANA_TLD_SNAPSHOT, PROGRAMMING_COLLISION_TLDS, RECOGNIZED_TLDS, isRecognizedTld } from "../src/tlds";
 import { runRepoConformance } from "../src/conformance";
 
 let workspace = "";
@@ -87,6 +87,109 @@ describe("the failure this guard exists for", () => {
   });
 });
 
+// --- the evasions an adversarial review actually landed ---
+
+describe("evasions that previously walked past this guard", () => {
+  const portfolioOf = (count: number) => portfolio(count);
+
+  test("MIXED CASE is the same inventory — DNS is case-insensitive", () => {
+    const mixed = portfolioOf(40).map((domain, index) =>
+      index % 2 === 0 ? domain.toUpperCase() : domain.replace(/^./, (c) => c.toUpperCase()),
+    );
+    const counts = inventoryCounts(JSON.stringify(mixed));
+    expect(counts.domain.length).toBe(40);
+    // And the cased forms collapse onto the lowercase ones rather than doubling.
+    expect(inventoryCounts(JSON.stringify([...mixed, ...portfolioOf(40)])).domain.length).toBe(40);
+  });
+
+  test("UNQUOTED prose and tabular data are read", () => {
+    // A .csv or a markdown list has no string literals at all. Quote-anchoring
+    // alone missed every one of these, and a .csv of domains discloses exactly
+    // as well as a JS array of them.
+    const csv = tarball("unquoted-csv", {
+      "package.json": JSON.stringify({ name: "unquoted", version: "1.0.0" }),
+      "data/portfolio.csv": portfolioOf(40).map((domain, index) => `${index},${domain}`).join("\n"),
+    });
+    expect(scanPublishedArtifact(csv).ok).toBe(false);
+
+    const markdown = tarball("unquoted-md", {
+      "package.json": JSON.stringify({ name: "unquoted", version: "1.0.0" }),
+      "docs/assets.md": portfolioOf(40).map((domain) => `- ${domain}`).join("\n"),
+    });
+    expect(scanPublishedArtifact(markdown).ok).toBe(false);
+  });
+
+  test("dotted property access is never counted as a domain", () => {
+    // The counterweight to the rule above: reading bare tokens in code reported
+    // `array.map`, `cls.name` and `issues.map` and failed on this repo's own
+    // bundle. Code is read through its string literals.
+    const code = [
+      "const a = input.data;", "const b = items.map;", "const c = cls.name;",
+      "const d = actor.id;", "const e = tasks.next;", "const f = service.health;",
+      "const g = commander.help;", "const h = current.repair;",
+    ].join("\n");
+    expect(inventoryCounts(code).domain).toEqual([]);
+  });
+
+  test("ONE long delimited string is a list, not one unmatched blob", () => {
+    const packed = portfolioOf(40).join(",");
+    expect(inventoryCounts(`const DOMAINS = "${packed}".split(",");`).domain.length).toBe(40);
+  });
+
+  test("escaped and encoded forms are decoded before counting", () => {
+    const domains = portfolioOf(30);
+    // \u002e for the dot — a one-character change walked past literal matching.
+    const escaped = domains.map((d) => `"${d.replace(/\./g, "\\u002e")}"`).join(",");
+    expect(inventoryCounts(`[${escaped}]`).domain.length).toBe(30);
+
+    // Percent-encoding, as a URL-shaped disclosure would carry.
+    const percent = domains.map((d) => `"${d.replace(/\./g, "%2e")}"`).join(",");
+    expect(inventoryCounts(`[${percent}]`).domain.length).toBe(30);
+
+    // A base64 blob, as a build step or an obfuscator would produce.
+    const blob = Buffer.from(domains.join(",")).toString("base64");
+    expect(inventoryCounts(`const D = atob("${blob}");`).domain.length).toBe(30);
+  });
+
+  test("a JSON-escaped source map's original source is read", () => {
+    // `sourcesContent` embeds the ORIGINAL source with every quote escaped —
+    // which is exactly how the incident's excluded source file could still ship.
+    const inner = JSON.stringify(portfolioOf(40));
+    const map = JSON.stringify({ version: 3, sources: ["policy.ts"], sourcesContent: [`const D = ${inner};`] });
+    const archive = tarball("sourcemap", {
+      "package.json": JSON.stringify({ name: "mapped", version: "1.0.0", files: ["dist"] }),
+      "dist/index.js.map": map,
+    });
+    expect(scanPublishedArtifact(archive).ok).toBe(false);
+  });
+
+  test("SPLITTING the list across files does not defeat the threshold", () => {
+    // Ten files of eighteen beats any per-file threshold, and the clause is
+    // about what the ARTIFACT discloses, not what one file does.
+    const domains = portfolioOf(180);
+    const files: Record<string, string> = { "package.json": JSON.stringify({ name: "split", version: "1.0.0" }) };
+    for (let index = 0; index < 10; index++) {
+      files[`dist/chunk-${index}.js`] = JSON.stringify(domains.slice(index * 18, index * 18 + 18));
+    }
+    const report = scanPublishedArtifact(tarball("split", files));
+    expect(report.ok).toBe(false);
+    // No single file trips it; the aggregate does.
+    expect(report.findings.every((finding) => finding.path === "<artifact>")).toBe(true);
+    expect(report.aggregateFindings?.[0]?.count).toBe(180);
+  });
+
+  test("a trailing-dot FQDN is the same name", () => {
+    const fqdn = portfolioOf(40).map((domain) => `"${domain}."`).join(",");
+    expect(inventoryCounts(`[${fqdn}]`).domain.length).toBe(40);
+  });
+
+  test("URL authorities count — that is what an endpoint catalogue is", () => {
+    const urls = portfolioOf(40).map((domain) => `"https://api.${domain}/v1/health"`).join(",");
+    const counts = inventoryCounts(`[${urls}]`);
+    expect(counts.domain.length).toBe(40);
+  });
+});
+
 // --- vacuity ---
 
 describe("it cannot pass by having nothing to check", () => {
@@ -96,6 +199,38 @@ describe("it cannot pass by having nothing to check", () => {
     const archive = join(root, "empty.tgz");
     Bun.spawnSync(["tar", "-czf", archive, "-C", join(root, "nothing"), "."]);
     expect(() => scanPublishedArtifact(archive)).toThrow(/zero members/);
+  });
+
+  test("a member with a NUL byte is SCANNED, not skipped", () => {
+    // The previous version dropped any member with a NUL in its first 8 KB, so
+    // one NUL in a leading comment removed a file from the scan and produced a
+    // clean verdict — a one-character evasion of the whole guard.
+    const withNul = `/*${String.fromCharCode(0)}*/\n` + JSON.stringify(portfolio(40));
+    const archive = tarball("nul-byte", {
+      "package.json": JSON.stringify({ name: "nul", version: "1.0.0" }),
+      "dist/index.js": withNul,
+    });
+    const report = scanPublishedArtifact(archive);
+    expect(report.membersSkipped).toBe(0);
+    expect(report.ok).toBe(false);
+  });
+
+  test("an UNREAD member fails the scan — ok is not `no findings`", () => {
+    // A scan that skipped the member holding the inventory has not cleared the
+    // artifact, it has failed to look at it.
+    const archive = tarball("ignored", {
+      "package.json": JSON.stringify({ name: "ignored", version: "1.0.0" }),
+      "dist/index.js": "export const a = 1;",
+    });
+    const clean = scanPublishedArtifact(archive);
+    expect(clean.ok).toBe(true);
+
+    // An unread member is not a clean member: the scan has not cleared the
+    // artifact, it has failed to look at it.
+    const oversize = scanPublishedArtifact(archive, { maxMemberBytes: 4 });
+    expect(oversize.findings).toEqual([]);
+    expect(oversize.ok).toBe(false);
+    expect(oversize.unreadable.length).toBeGreaterThan(0);
   });
 
   test("a real scan reports how many members it actually read", () => {
@@ -233,17 +368,20 @@ describe("asset kinds", () => {
     expect(counts.domain).toEqual(["fleet-example-corp.com"]);
   });
 
-  test("an email inventory is counted once, not also as a host inventory", () => {
+  test("an email inventory is counted once, not also as a domain inventory", () => {
     const emails = Array.from({ length: 30 }, (_, i) => `"person${i}@customer-list-corp.com"`).join(",");
     const counts = inventoryCounts(`[${emails}]`);
     expect(counts.email.length).toBe(30);
+    // The address's own domain is not independent evidence; counting it again
+    // would let one contact list trip two detectors.
+    expect(counts.domain).toEqual([]);
     expect(counts.host).toEqual([]);
   });
 
   test("public IP inventories are detected", () => {
     const archive = tarball("machines", {
       "package.json": JSON.stringify({ name: "machines", version: "1.0.0" }),
-      "dist/fleet.js": Array.from({ length: 30 }, (_, i) => `51.15.${i}.10`).join(","),
+      "dist/fleet.js": Array.from({ length: 30 }, (_, i) => `"51.15.${i}.10"`).join(","),
     });
     const report = scanPublishedArtifact(archive);
     expect(report.findings.some((finding) => finding.kind === "ip")).toBe(true);
@@ -254,12 +392,39 @@ describe("asset kinds", () => {
     expect(registrableDomain("shop.brand-example.co.uk")).toBe("brand-example.co.uk");
   });
 
-  test("the TLD table recognizes real TLDs and rejects programming vocabulary", () => {
-    for (const tld of ["com", "net", "org", "uk", "de", "io", "xyz", "cloud"]) {
+  test("the TLD table is IANA's full list, not a hand-picked sample", () => {
+    // The first version enumerated ~310 TLDs by hand and recognized 40 of the
+    // 177 domains in the real disclosed artifact (22.6%). A guard against
+    // disclosure cannot rest on a guessed subset of the namespace.
+    expect(RECOGNIZED_TLDS.size).toBeGreaterThan(1300);
+    expect(IANA_TLD_SNAPSHOT).toMatch(/^\d{10}$/);
+
+    // Breadth: TLDs the hand-written list omitted and the portfolio used.
+    for (const tld of ["com", "net", "org", "uk", "de", "io", "xyz", "cloud", "academy", "agency", "art", "cafe", "care", "chat", "city", "club", "coach", "coffee"]) {
       expect(isRecognizedTld(tld), tld).toBe(true);
     }
-    for (const word of ["list", "map", "get", "json", "ts", "js", "md", "app", "dev"]) {
+    // Case-insensitive: DNS is, and requiring lowercase let one capital letter
+    // per entry defeat the guard.
+    expect(isRecognizedTld("COM")).toBe(true);
+
+    // Not TLDs at all — no exclusion needed.
+    for (const word of ["list", "get", "json", "ts", "js", "css"]) {
       expect(isRecognizedTld(word), word).toBe(false);
+    }
+  });
+
+  test("every collision exclusion is a REAL TLD, deliberately given up", () => {
+    // The first version's exclusion list was largely fiction: most entries were
+    // never delegated, so "excluding" them changed nothing while reading as a
+    // considered trade-off. Each entry here is a real TLD this guard chooses
+    // not to count, and that choice is a stated blind spot.
+    expect(PROGRAMMING_COLLISION_TLDS.size).toBeGreaterThan(0);
+    for (const tld of PROGRAMMING_COLLISION_TLDS) {
+      expect(isRecognizedTld(tld), `${tld} must be excluded, not merely absent`).toBe(false);
+    }
+    // Measured collisions from Hasna's own `<noun>.<verb>` operation grammar.
+    for (const tld of ["read", "next", "health", "post", "id", "map", "link"]) {
+      expect(PROGRAMMING_COLLISION_TLDS.has(tld), tld).toBe(true);
     }
   });
 });
@@ -449,6 +614,31 @@ describe("thresholds and waivers", () => {
     // audit trail worse than no waiver at all.
     expect(report.waived.some((finding) => finding.kind === "domain")).toBe(true);
     expect(formatArtifactScanReport(report)).toContain("waived");
+  });
+
+  test("an EXPIRED waiver excuses nothing", () => {
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    const dir = join(workspace, "waiver-manifest");
+    mkdirSync(dir, { recursive: true });
+    const manifestPath = join(dir, "hasna.contract.json");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        metadata: {
+          conformance: {
+            waivedAssetInventories: [
+              { kind: "domain", reason: "Public suffix list.", reviewedBy: "platform", expiresAt: future },
+              { kind: "email", reason: "Sample contacts.", reviewedBy: "platform", expiresAt: past },
+            ],
+          },
+        },
+      }),
+    );
+    const resolved = resolveAssetInventoryWaivers(manifestPath);
+    expect(resolved.kinds).toEqual(["domain"]);
+    // The refusal stays on the record rather than vanishing.
+    expect(resolved.notes.join(" ")).toMatch(/email/);
   });
 
   test("a lowered threshold makes an otherwise-clean artifact fail", () => {
@@ -661,6 +851,60 @@ describe("published_artifact_gate (clause C)", () => {
     const pinned = conformanceRepo(
       "gate-pinned",
       { exports: { ".": "./d.js" }, scripts: { prepack: "bun run scan:artifact", "scan:artifact": "bunx @hasna/contracts@0.8.0 artifact-scan ./pack.tgz" } },
+      release,
+    );
+    expect(gate(pinned).status).toBe("pass");
+  });
+
+  test("FAILS when the declared script is a NO-OP", () => {
+    // `"scan:artifact": "true"` satisfied every structural condition while
+    // scanning nothing — the exact bypass this clause exists to close.
+    for (const body of ["true", ":", "exit 0", "echo scanning", "  "]) {
+      const root = conformanceRepo(
+        `gate-noop-${body.trim().replace(/\W+/g, "-") || "blank"}`,
+        { exports: { ".": "./d.js" }, scripts: { prepack: "bun run scan:artifact", "scan:artifact": body } },
+        release,
+      );
+      const check = gate(root);
+      expect(check.status, body).toBe("fail");
+      expect(check.detail).toContain("no-op");
+    }
+  });
+
+  test("follows run-s / npm-run-all and npm's implicit pre/post hooks", () => {
+    // A resolver that knew only `bun run` reported "does not reach" for
+    // conventional layouts that plainly do reach it — and a gate that fails
+    // compliant repos gets switched off.
+    const viaRunS = conformanceRepo(
+      "gate-run-s",
+      { exports: { ".": "./d.js" }, scripts: { prepack: "run-s typecheck scan:artifact", typecheck: "tsc --noEmit", "scan:artifact": "contracts artifact-scan p.tgz" } },
+      release,
+    );
+    expect(gate(viaRunS).status).toBe("pass");
+
+    const viaLifecycle = conformanceRepo(
+      "gate-prepack-hook",
+      { exports: { ".": "./d.js" }, scripts: { prepack: "bun test", prepreapck: "noop", preprepack: "bun run scan:artifact", "scan:artifact": "contracts artifact-scan p.tgz" } },
+      release,
+    );
+    expect(gate(viaLifecycle).status).toBe("pass");
+  });
+
+  test("the unpinned-bunx check reads the package spec, not the whole line", () => {
+    // The previous regex used a line-wide lookahead for `@<digit>`, so a
+    // tarball named `pkg@1.tgz` suppressed the finding for an unpinned runner.
+    const masked = conformanceRepo(
+      "gate-masked",
+      { exports: { ".": "./d.js" }, scripts: { prepack: "bun run scan:artifact", "scan:artifact": "bunx @hasna/contracts artifact-scan pkg@1.tgz" } },
+      release,
+    );
+    const check = gate(masked);
+    expect(check.status).toBe("fail");
+    expect(check.detail).toContain("version pin");
+
+    const pinned = conformanceRepo(
+      "gate-pinned-with-at",
+      { exports: { ".": "./d.js" }, scripts: { prepack: "bun run scan:artifact", "scan:artifact": "bunx @hasna/contracts@0.8.0 artifact-scan pkg@1.tgz" } },
       release,
     );
     expect(gate(pinned).status).toBe("pass");

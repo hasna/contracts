@@ -280,6 +280,12 @@ export interface ArtifactScanOptions {
 }
 
 export interface ArtifactScanReport {
+  /**
+   * Findings raised only by the whole-artifact union, not by any single member.
+   * Kept separate so a reader can tell "one file holds a list" from "the list is
+   * spread across ten".
+   */
+  aggregateFindings?: AssetInventoryFinding[];
   ok: boolean;
   /** The scanned target, as given. */
   target: string;
@@ -316,6 +322,12 @@ function redact(entry: string): string {
  * fine, so extension is not a useful filter; the presence of NUL bytes in the
  * first few KB is.
  */
+/** Lossless decoding for scanning: UTF-8 where valid, latin1 otherwise. */
+function decodeMember(bytes: Buffer): string {
+  const utf8 = bytes.toString("utf8");
+  return utf8.includes("\ufffd") ? bytes.toString("latin1") : utf8;
+}
+
 function looksTextual(bytes: Buffer): boolean {
   const head = bytes.subarray(0, 8192);
   return !head.includes(0);
@@ -323,6 +335,60 @@ function looksTextual(bytes: Buffer): boolean {
 
 function distinct(values: Iterable<string>): string[] {
   return [...new Set(values)].sort();
+}
+
+/**
+ * Decode the escape forms a disclosure can hide behind.
+ *
+ * Percent, `\uXXXX`, `\u{...}`, `\xXX`, HTML entities, and the JSON-escaped
+ * quotes a source map's `sourcesContent` wraps original source in — which is
+ * exactly how a file excluded by `files` still ships its contents.
+ */
+function decodeEscapes(value: string): string {
+  const codePoint = (encoded: string, radix: number): string | null => {
+    const parsed = Number.parseInt(encoded, radix);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 0x10ffff) return null;
+    return String.fromCodePoint(parsed);
+  };
+  return value
+    .replace(/%([0-9a-f]{2})/gi, (match, hex: string) => codePoint(hex, 16) ?? match)
+    .replace(/\\u\{([0-9a-f]{1,6})\}/gi, (match, hex: string) => codePoint(hex, 16) ?? match)
+    .replace(/\\u([0-9a-f]{4})/gi, (match, hex: string) => codePoint(hex, 16) ?? match)
+    .replace(/\\x([0-9a-f]{2})/gi, (match, hex: string) => codePoint(hex, 16) ?? match)
+    .replace(/&#x([0-9a-f]+);?/gi, (match, hex: string) => codePoint(hex, 16) ?? match)
+    .replace(/&#([0-9]+);?/g, (match, dec: string) => codePoint(dec, 10) ?? match)
+    .replace(/\\"/g, '"')
+    .replace(/\\'/g, "'");
+}
+
+/**
+ * The text, its escape-decoded form, and any base64/hex blob inside it decoded
+ * one level.
+ *
+ * A decoded blob is DATA, not code, so it is also handed to the column
+ * collector — an inventory shipped as one encoded string decodes to an
+ * unquoted, comma-separated list, which no literal-shaped matcher would see.
+ * One level only, and length-bounded: recursive decoding over a whole tarball
+ * is unbounded work for diminishing returns.
+ */
+function decodedViews(text: string): string[] {
+  const views = [text];
+  const escaped = decodeEscapes(text);
+  if (escaped !== text) views.push(escaped);
+
+  const carriesAsset = /[a-z0-9]\.[a-z]/i;
+  for (const match of text.matchAll(/[A-Za-z0-9+/]{64,}={0,2}/g)) {
+    const token = match[0];
+    if (token.length % 4 === 1) continue;
+    const decoded = Buffer.from(token, "base64").toString("utf8");
+    if (carriesAsset.test(decoded)) views.push(decoded);
+  }
+  for (const match of text.matchAll(/\b[0-9a-f]{64,}\b/gi)) {
+    const token = match[0].length % 2 === 0 ? match[0] : match[0].slice(0, -1);
+    const decoded = Buffer.from(token, "hex").toString("utf8");
+    if (carriesAsset.test(decoded)) views.push(decoded);
+  }
+  return views;
 }
 
 /** Is this whole value a countable hostname — real TLD, not spec-reserved? */
@@ -351,24 +417,129 @@ function isCountableEmail(value: string): boolean {
  */
 function hostComponent(piece: string): string {
   const prefix = URL_AUTHORITY_PREFIX.exec(piece);
-  if (!prefix) return piece.replace(HOST_PORT_SUFFIX, "");
+  // A fully-qualified name ends in the root dot. `a-brand.com.` and
+  // `a-brand.com` are the same name, and leaving the dot on made an entire
+  // FQDN-formatted inventory invisible.
+  if (!prefix) return piece.replace(HOST_PORT_SUFFIX, "").replace(/\.$/, "");
   let authority = piece.slice(prefix[0].length);
   const end = authority.search(URL_AUTHORITY_END);
   if (end >= 0) authority = authority.slice(0, end);
   const userinfo = authority.lastIndexOf("@");
   if (userinfo >= 0) authority = authority.slice(userinfo + 1);
-  return authority.replace(HOST_PORT_SUFFIX, "");
+  return authority.replace(HOST_PORT_SUFFIX, "").replace(/\.$/, "");
 }
 
-/** The asset a piece carries — the email itself, or the host it names — or null. */
+/**
+ * The asset a piece carries — the email itself, or the host it names — or null.
+ *
+ * Lowercased first, because DNS is case-insensitive and the literal patterns are
+ * not. Without this, `Portfolio-Brand.com` matched nothing: one capital letter
+ * per entry defeated the entire guard, and a build step that upper-cases a
+ * constant table would have done it by accident.
+ */
 function countableAsset(piece: string): string | null {
-  if (isCountableEmail(piece)) return piece;
-  const host = hostComponent(piece);
+  const normalized = piece.toLowerCase();
+  if (isCountableEmail(normalized)) return normalized;
+  const host = hostComponent(normalized);
   return isCountableHostname(host) ? host : null;
 }
 
 function record(asset: string, hosts: Set<string>, emails: Set<string>): void {
   (isCountableEmail(asset) ? emails : hosts).add(asset);
+}
+
+/**
+ * Shape 3: one asset per line, for a run of lines.
+ *
+ * A markdown bullet list, a one-column CSV, a hosts-style file and a plain
+ * newline-separated dump all carry an inventory with no quotes and no field
+ * separator, so neither the literal collector nor the column collector sees
+ * them. The line IS the record in that shape.
+ *
+ * A run is required for the same reason it is required elsewhere: one asset
+ * mentioned on one line is a mention, not a list. List markers (`-`, `*`, `+`,
+ * `#`, a leading index, surrounding quotes/brackets) are stripped before the
+ * line is judged, and a line that carries anything else substantial breaks the
+ * run.
+ */
+/**
+ * Is this run one receiver being dereferenced, rather than a list of names?
+ *
+ * `exports.vi`, `exports.ua`, `exports.tr` … — every ISO language code is a
+ * delegated ccTLD, so a per-line rule reads a locale barrel file as a
+ * ten-domain portfolio. The tell is that the FIRST label never varies while the
+ * last one always does: a portfolio varies the brand, member access varies the
+ * property.
+ */
+function isMemberAccessRun(run: readonly LineEntry[]): boolean {
+  // A QUOTED entry is data, full stop. This distinction is load-bearing, and
+  // measured: a real portfolio is one brand repeated across many TLDs, which is
+  // structurally identical to `exports.vi, exports.ua, …` except that one is
+  // quoted and the other is an expression. Applying this guard to quoted runs
+  // as well dropped detection on the real disclosed artifact from 94.4% to
+  // 29.2%.
+  if (run.some((entry) => entry.quoted)) return false;
+  const twoLabel = run.filter((entry) => entry.asset.split(".").length === 2);
+  if (twoLabel.length !== run.length) return false;
+  const firstLabels = new Set(twoLabel.map((entry) => entry.asset.slice(0, entry.asset.indexOf("."))));
+  if (firstLabels.size !== 1) return false;
+  const tlds = new Set(twoLabel.map((entry) => entry.asset.slice(entry.asset.lastIndexOf(".") + 1)));
+  return tlds.size === twoLabel.length;
+}
+
+/** One line's asset, and whether the line presented it as a quoted value. */
+interface LineEntry {
+  asset: string;
+  quoted: boolean;
+}
+
+function collectLineInventories(text: string, hosts: Set<string>, emails: Set<string>): void {
+  let run: LineEntry[] = [];
+  const closeRun = (): void => {
+    if (run.length >= MIN_LITERAL_RUN && !isMemberAccessRun(run)) {
+      for (const entry of run) record(entry.asset, hosts, emails);
+    }
+    run = [];
+  };
+  for (const rawLine of text.split(/\r?\n/)) {
+    const stripped = rawLine
+      .trim()
+      .replace(/^[-*+#>\s]+/, "")
+      .replace(/^\d+[.):,]?\s*/, "")
+      .trim();
+    if (!stripped) {
+      // A blank line separates sections; it does not end a list.
+      continue;
+    }
+    const quoted = /^[\['"`(]/.test(stripped);
+    const line = stripped.replace(/^[\['"`(]+|[\]'"`),;]+$/g, "").trim();
+    const asset = line ? countableAsset(line) : null;
+    if (asset) {
+      run.push({ asset, quoted });
+      continue;
+    }
+    closeRun();
+  }
+  closeRun();
+}
+
+/**
+ * Shape 4: a delimited run inside ONE piece of text, with no quoting at all.
+ *
+ * This is what a base64 or hex blob decodes to — `a.com,b.net,c.org` on a
+ * single line — and what `"…".split(",")` holds before it is split. Only
+ * applied to decoded views and to text with no line structure, so an ordinary
+ * source file's punctuation cannot be read as a list.
+ */
+function collectDelimitedRun(text: string, hosts: Set<string>, emails: Set<string>): void {
+  const pieces = text.split(LITERAL_SEPARATORS).filter(Boolean);
+  if (pieces.length < MIN_LITERAL_RUN) return;
+  const assets = pieces.map(countableAsset);
+  const countable = assets.filter((asset): asset is string => asset !== null);
+  // The run must be what the text mostly IS, not something it merely contains.
+  if (countable.length < MIN_LITERAL_RUN) return;
+  if (countable.length * 2 < pieces.length) return;
+  for (const asset of countable) record(asset, hosts, emails);
 }
 
 /** Shape 1: a literal whose content is mostly assets, or a run of sibling ones. */
@@ -457,8 +628,22 @@ export function inventoryCounts(text: string): Record<AssetInventoryKind, string
   const emails = new Set<string>();
   const hosts = new Set<string>();
 
-  collectLiteralInventories(text, hosts, emails);
-  collectColumnInventories(text, hosts, emails);
+  // Every decoded view, not just the literal bytes. An inventory that survives
+  // a build step arrives percent-, `\uXXXX`- or entity-escaped, or packed into
+  // a base64 blob, and a one-character change (`\u002e` for `.`) walked past
+  // literal-only matching. `tests/published-package-security.test.ts` in this
+  // same repository already decodes these forms before hunting a hostname; a
+  // guard weaker than a test already in the tree is not a guard.
+  const views = decodedViews(text);
+  for (const [index, view] of views.entries()) {
+    collectLiteralInventories(view, hosts, emails);
+    collectColumnInventories(view, hosts, emails);
+    collectLineInventories(view, hosts, emails);
+    // Index 0 is the member as written; anything after it came out of an
+    // escape or a blob, and a decoded blob is data with no code structure left
+    // to confuse a bare list with an expression.
+    if (index > 0) collectDelimitedRun(view, hosts, emails);
+  }
 
   // A hostname inside an email address is not independent evidence; counting it
   // twice would let one contact list trip two detectors.
@@ -470,8 +655,8 @@ export function inventoryCounts(text: string): Record<AssetInventoryKind, string
   // report one list twice and inflate every finding.
   const hostList = named.filter((host) => host !== registrableDomain(host));
   const ips = distinct(
-    [...text.matchAll(IPV4_PATTERN)]
-      .map((match) => match[0])
+    views
+      .flatMap((view) => [...view.matchAll(IPV4_PATTERN)].map((match) => match[0]))
       .filter((ip) => IPV4_LITERAL.test(ip) && !isReservedIpv4(ip)),
   );
 
@@ -564,26 +749,41 @@ export function scanPublishedArtifact(target: string, options: ArtifactScanOptio
 
   const findings: AssetInventoryFinding[] = [];
   const waivedFindings: AssetInventoryFinding[] = [];
+  const aggregateFindings: AssetInventoryFinding[] = [];
   const unreadable: UnreadableMember[] = [];
+  // Union across members: ten files of eighteen beats any per-file threshold,
+  // and the clause is about what the ARTIFACT discloses, not what one file does.
+  const union: Record<AssetInventoryKind, Set<string>> = {
+    domain: new Set(),
+    host: new Set(),
+    ip: new Set(),
+    email: new Set(),
+  };
   let seen = 0;
   let scanned = 0;
-  let skippedBinary = 0;
+  let excludedByCaller = 0;
 
   for (const member of members) {
     seen += 1;
-    if (ignore.has(member.path)) continue;
+    if (ignore.has(member.path)) {
+      excludedByCaller += 1;
+      continue;
+    }
     if ("reason" in member) {
       unreadable.push({ path: member.path, reason: member.reason });
       continue;
     }
-    if (!looksTextual(member.bytes)) {
-      skippedBinary += 1;
-      continue;
-    }
+    // Every member is decoded and scanned. Skipping "binary" members meant one
+    // NUL byte in a leading comment removed a file from the scan and still
+    // produced a clean verdict — a one-character evasion of the whole guard.
+    // `latin1` never fails and never loses a byte, so a genuinely binary member
+    // is decoded to noise instead of excluded; noise is harmless here, because a
+    // finding needs many distinct names under real TLDs.
     scanned += 1;
-    const counts = inventoryCounts(member.bytes.toString("utf8"));
+    const counts = inventoryCounts(decodeMember(member.bytes));
     for (const kind of ASSET_INVENTORY_KINDS) {
       const entries = counts[kind];
+      for (const entry of entries) union[kind].add(entry);
       const threshold = thresholds[kind];
       if (entries.length < threshold) continue;
       const finding: AssetInventoryFinding = {
@@ -597,6 +797,24 @@ export function scanPublishedArtifact(target: string, options: ArtifactScanOptio
     }
   }
 
+  for (const kind of ASSET_INVENTORY_KINDS) {
+    const entries = [...union[kind]].sort();
+    const threshold = thresholds[kind];
+    if (entries.length < threshold) continue;
+    // Already reported against a single member; do not double-report.
+    if (findings.some((finding) => finding.kind === kind)) continue;
+    if (waivedFindings.some((finding) => finding.kind === kind)) continue;
+    const finding: AssetInventoryFinding = {
+      path: "<artifact>",
+      kind,
+      count: entries.length,
+      threshold,
+      sample: entries.slice(0, 3).map(redact),
+    };
+    aggregateFindings.push(finding);
+    (waived.has(kind) ? waivedFindings : findings).push(finding);
+  }
+
   if (seen === 0) {
     throw new Error(
       `Artifact scan read zero members from ${basename(target)}. Refusing to report a clean verdict on nothing.`,
@@ -608,8 +826,9 @@ export function scanPublishedArtifact(target: string, options: ArtifactScanOptio
     target,
     scanMode,
     membersScanned: scanned,
-    membersSkipped: skippedBinary,
+    membersSkipped: excludedByCaller,
     findings,
+    aggregateFindings,
     waived: waivedFindings,
     unreadable,
   };
@@ -618,7 +837,7 @@ export function scanPublishedArtifact(target: string, options: ArtifactScanOptio
 /** One-line-per-finding summary for CLI output and CI logs. */
 export function formatArtifactScanReport(report: ArtifactScanReport): string {
   const lines = [
-    `${report.ok ? "pass" : "FAIL"} artifact-scan ${basename(report.target)} (${report.scanMode}, ${report.membersScanned} members scanned, ${report.membersSkipped} binary skipped, ${report.unreadable.length} unreadable)`,
+    `${report.ok ? "pass" : "FAIL"} artifact-scan ${basename(report.target)} (${report.scanMode}, ${report.membersScanned} members scanned, ${report.membersSkipped} excluded, ${report.unreadable.length} unreadable)`,
   ];
   for (const finding of report.findings) {
     lines.push(
