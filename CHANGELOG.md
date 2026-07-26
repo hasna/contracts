@@ -10,12 +10,23 @@ All notable changes to `@hasna/contracts` are documented here.
   that mirrors the existing surface-waiver pattern:
   `{ engine, reason, reviewedBy?, expiresAt? }`, typed and unique per engine
   with a non-empty reason.
-- A CLI-only `cli-with-store` repo may now declare `storage.engines:
+- A waiver-eligible `cli-with-store` repo may now declare `storage.engines:
   ["sqlite"]` when `postgres` carries a waiver, instead of fabricating
   PostgreSQL support to pass the gate. Only `postgres` is waivable — SQLite
-  stays the non-waivable local source of truth — and `service`, `saas`, and
-  service-capable `cli-with-store` repos that ship `<name>-serve` still
-  declare the full matrix.
+  stays the non-waivable local source of truth.
+- A waiver is refused for every manifest that already claims PostgreSQL is in
+  play: `service` and `saas` classes, a `cli-with-store` shipping
+  `<name>-serve`, `storage.mode: "cloud"` (which reads and writes PostgreSQL
+  directly), the `cloud` runtime placement, and the `hasna-saas` product story.
+  `self_hosted` placement stays eligible, because `storage.mode` is what decides
+  the backing engine. Eligibility is computed once by the exported
+  `storageWaiverIneligibilityReason()` and shared by the schema and the gate, so
+  the two layers cannot drift.
+- Waiver `reason` and `reviewedBy` are echoed into the conformance report, which
+  is an audit artifact, so they reject control characters and are bounded to 500
+  and 200 characters. A reason or reviewer carrying a private infrastructure
+  reference is redacted in the report rather than echoed, including for
+  `manifestTier: "private"` callers where `public_manifest_safety` is skipped.
 - `storage_capabilities` passes a waived repo with a detail such as
   `sqlite declared; postgres explicitly waived: <reason>`, mirroring the
   `surface_matrix` "declared or explicitly waived" wording. It fails an
@@ -35,11 +46,21 @@ All notable changes to `@hasna/contracts` are documented here.
   `StorageEngineWaiverSchema` / `WAIVABLE_STORAGE_ENGINES` types cover the new
   field.
 
+- `runRepoConformance` accepts an optional `now` clock so time-boxed checks such
+  as waiver expiry are deterministically testable.
+
 ### Compatibility
 
-- Fully additive. A manifest without `waivedStorageEngines` is validated and
-  gated exactly as in `0.7.1`; every existing check id, status, and pass detail
-  is unchanged.
+- Additive for verdicts. A manifest without `waivedStorageEngines` is validated
+  and gated exactly as in `0.7.1`; every existing check id, status, and pass
+  detail is unchanged, verified by a byte-for-byte report comparison against
+  `0.7.1` over a no-waiver manifest corpus.
+- Two caveats for anyone matching on strings or reusing the key name. The
+  `manifest_valid` *failure* detail for a sqlite-only `cli-with-store` now names
+  the waiver mechanism, so a CI job asserting the old exact message needs
+  updating. And `metadata.conformance` has always carried `catchall`, so a repo
+  that already used a `waivedStorageEngines` key with different semantics now
+  has it interpreted — an ineligible or non-waivable entry fails closed.
 
 ## [0.7.1] - 2026-07-24
 

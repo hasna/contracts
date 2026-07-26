@@ -171,14 +171,26 @@ support:
 ```
 
 - A storage waiver is typed, unique per engine, and **MUST** carry a non-empty
-  `reason`.
-- `reviewedBy` and `expiresAt` are optional. `expiresAt` is an RFC 3339
-  timestamp; conformance **fails** the storage gate once it has passed, so a
-  time-boxed exception cannot silently become permanent.
-- Only CLI-only `cli-with-store` repos may waive an engine, and only
-  `postgres` is waivable. SQLite is the local source of truth and is never
-  waivable. `service` and `saas` repos, and any `cli-with-store` repo that
-  ships `<name>-serve`, still declare the full engine matrix.
+  `reason`. `reason` and `reviewedBy` are echoed into the conformance report, so
+  they are length-bounded (500 / 200 characters) and **MUST NOT** contain
+  control characters.
+- `reviewedBy` and `expiresAt` are optional. `expiresAt` is a UTC RFC 3339
+  timestamp (`Z`, e.g. `2027-01-01T00:00:00.000Z`); conformance **fails** the
+  storage gate once it has passed, so a time-boxed exception cannot silently
+  become permanent.
+- Only `postgres` is waivable. SQLite is the local source of truth and is never
+  waivable.
+- A waiver is an admission that a repo has no PostgreSQL support, so it is
+  refused for every manifest that already claims PostgreSQL is in play. Only a
+  `cli-with-store` repo that
+  1. does **not** ship `<name>-serve` (a serve bin makes it service-capable),
+  2. declares `storage.mode` `local` (`cloud` mode reads and writes PostgreSQL
+     directly),
+  3. does **not** declare the `cloud` runtime placement, and
+  4. does **not** declare the `hasna-saas` product story
+  may waive an engine. `service` and `saas` repos never may. The `self_hosted`
+  placement stays eligible: it is a placement, and `storage.mode` decides which
+  engine actually backs the repo.
 - A waiver for an engine the manifest already declares is redundant: the engine
   keeps its normal proof obligations, including `storage.pgTestGate`.
 - Waivers are additive. A manifest without `waivedStorageEngines` is evaluated
@@ -219,7 +231,8 @@ Ships types/validators/helpers. No store, no service.
 A CLI that owns local (and optionally cloud) data.
 - **MUST** declare `storage`.
 - **MUST** declare both `sqlite` and `postgres` in `storage.engines`, unless it
-  is CLI-only and `postgres` carries an explicit
+  is waiver-eligible (CLI-only, `local` storage mode, no `cloud` placement, no
+  `hasna-saas` story) and `postgres` carries an explicit
   `metadata.conformance.waivedStorageEngines` waiver (see §6). `sqlite` is
   never waivable.
 - If `storage.mode` is `local`, **MUST** set `storage.sqlitePath`

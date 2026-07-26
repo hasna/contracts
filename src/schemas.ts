@@ -5118,6 +5118,26 @@ export const SurfaceConformanceWaiverSchema = z
   .strict();
 export type SurfaceConformanceWaiver = z.infer<typeof SurfaceConformanceWaiverSchema>;
 
+/** Longest waiver `reason` conformance will echo into a report detail. */
+export const STORAGE_WAIVER_REASON_MAX_LENGTH = 500;
+/** Longest waiver `reviewedBy` conformance will echo into a report detail. */
+export const STORAGE_WAIVER_REVIEWER_MAX_LENGTH = 200;
+
+/**
+ * Waiver prose is echoed verbatim into the `storage_capabilities` report
+ * detail, which is the audit artifact operators and CI read. Control
+ * characters would let a manifest rewrite that line (ANSI erase + carriage
+ * return forges a clean "declared" verdict), so they are rejected outright and
+ * the field is length-bounded.
+ */
+const WaiverTextSchema = (maxLength: number) =>
+  z
+    .string()
+    .trim()
+    .min(1)
+    .max(maxLength)
+    .regex(/^[^\u0000-\u001f\u007f]+$/, "Waiver text must not contain control characters");
+
 /**
  * Explicit, auditable waiver for a storage engine a store-owning repo does not
  * yet support. It mirrors `SurfaceConformanceWaiverSchema`: typed, unique per
@@ -5127,14 +5147,58 @@ export type SurfaceConformanceWaiver = z.infer<typeof SurfaceConformanceWaiverSc
 export const StorageEngineWaiverSchema = z
   .object({
     engine: StorageEngineSchema,
-    reason: z.string().trim().min(1),
+    reason: WaiverTextSchema(STORAGE_WAIVER_REASON_MAX_LENGTH),
     /** Person, agent, or role accountable for the exception. */
-    reviewedBy: z.string().trim().min(1).optional(),
-    /** RFC 3339 timestamp after which conformance stops honouring the waiver. */
+    reviewedBy: WaiverTextSchema(STORAGE_WAIVER_REVIEWER_MAX_LENGTH).optional(),
+    /** UTC RFC 3339 timestamp (`Z`) after which conformance stops honouring the waiver. */
     expiresAt: TimestampSchema.optional()
   })
   .strict();
 export type StorageEngineWaiver = z.infer<typeof StorageEngineWaiverSchema>;
+
+/** Manifest facts that decide whether a storage-engine waiver may apply at all. */
+export interface StorageWaiverEligibilityInput {
+  class: RepoClass;
+  name: string;
+  bins: readonly string[];
+  hosting: readonly HostingMode[];
+  deploymentModes: readonly DeploymentMode[];
+  storageMode?: StorageMode | undefined;
+}
+
+/**
+ * Why a manifest may not waive a storage engine, or `null` when it may.
+ *
+ * A waiver is an admission that a repo has no PostgreSQL support, so it is
+ * refused for every manifest that already claims PostgreSQL is in play: a
+ * long-running service or SaaS, a `cli-with-store` that ships `<name>-serve`,
+ * a repo whose runtime store IS the cloud database (`storage.mode: "cloud"`
+ * reads and writes go straight to PostgreSQL), a repo that advertises the
+ * `cloud` runtime placement, and a repo offering the `hasna-saas` product
+ * story. `self_hosted` placement stays eligible: it is a placement, and
+ * `storage.mode` is what decides which engine actually backs the repo.
+ *
+ * Shared by the manifest schema and the conformance gate so the two layers
+ * cannot drift apart.
+ */
+export function storageWaiverIneligibilityReason(input: StorageWaiverEligibilityInput): string | null {
+  if (input.class !== "cli-with-store") {
+    return `storage waivers are not permitted for class ${input.class}`;
+  }
+  if (input.bins.includes(`${input.name}-serve`)) {
+    return `storage waivers are not permitted for a service-capable cli-with-store repo shipping ${input.name}-serve`;
+  }
+  if (input.storageMode === "cloud") {
+    return "storage waivers are not permitted while storage.mode is cloud, which reads and writes PostgreSQL directly";
+  }
+  if (input.deploymentModes.includes("cloud")) {
+    return "storage waivers are not permitted for a repo declaring the cloud runtime placement";
+  }
+  if (input.hosting.includes("hasna-saas")) {
+    return "storage waivers are not permitted for a repo declaring the hasna-saas product story";
+  }
+  return null;
+}
 
 export const ServiceContractMetadataSchema = z
   .object({
@@ -5491,15 +5555,23 @@ export const ServiceContractManifestSchema = z
           });
         }
         if (value.storage.engines) {
-          // A CLI-only `cli-with-store` repo may ship sqlite-only while it
+          // An eligible `cli-with-store` repo may ship sqlite-only while it
           // works toward PostgreSQL, but only behind an explicit waiver that
           // names the engine and the reason. SQLite itself is never waivable,
-          // and a repo that ships `<name>-serve` is service-capable, so it
-          // still owes the full engine matrix.
+          // and `storageWaiverIneligibilityReason` keeps the set of repos that
+          // may waive identical to the conformance gate's.
           const declaredEngines = new Set<StorageEngine>(value.storage.engines);
           const waivable = new Set<StorageEngine>(WAIVABLE_STORAGE_ENGINES);
+          const ineligible = storageWaiverIneligibilityReason({
+            class: value.class,
+            name: value.name,
+            bins: value.bins,
+            hosting: value.hosting,
+            deploymentModes: value.deploymentModes,
+            storageMode: value.storage.mode
+          });
           const waivedEngines = new Set<StorageEngine>(
-            hasBin("-serve")
+            ineligible
               ? []
               : (value.metadata?.conformance?.waivedStorageEngines ?? [])
                   .map((waiver) => waiver.engine)

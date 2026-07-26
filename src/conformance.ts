@@ -21,6 +21,7 @@ import {
   STORAGE_ENGINES,
   WAIVABLE_STORAGE_ENGINES,
   allowedBinsForName,
+  storageWaiverIneligibilityReason,
   type ServiceContractManifest,
   type ServiceSurfaceKind,
   type StorageEngine
@@ -54,6 +55,8 @@ export interface RepoConformanceOptions {
   skipNoCloudScan?: boolean;
   /** Public manifests are checked for private infrastructure references. */
   manifestTier?: "public" | "private";
+  /** Clock used for time-boxed checks such as storage-waiver expiry. */
+  now?: Date;
 }
 
 interface PackageJsonInfo {
@@ -268,13 +271,24 @@ interface StorageWaiverAnalysis {
 }
 
 /**
+ * Waiver prose reaches the report detail, and the detail is the artifact an
+ * operator reads. The schema already rejects control characters and bounds the
+ * length; this is the second half of that defence: a reason that carries a
+ * private infrastructure reference is replaced rather than echoed, because
+ * `public_manifest_safety` is skipped for private-tier callers and would not
+ * otherwise catch it.
+ */
+function echoableWaiverText(text: string): string {
+  return publicManifestFindings(text).length > 0 ? "[redacted: private infrastructure reference]" : text;
+}
+
+/**
  * Resolve `metadata.conformance.waivedStorageEngines` into the engines the
- * storage gate may skip. Only CLI-only `cli-with-store` repos may waive (a
- * `<name>-serve` bin makes a repo service-capable and it still owes the full
- * matrix), only PostgreSQL is waivable, and a waiver stops applying once it
- * expires. A waiver for an engine the manifest already declares is redundant,
- * so the engine keeps its normal proof obligations (notably
- * `storage.pgTestGate`).
+ * storage gate may skip. Eligibility is shared with the manifest schema via
+ * `storageWaiverIneligibilityReason`, only PostgreSQL is waivable, and a
+ * waiver stops applying once it expires. A waiver for an engine the manifest
+ * already declares is redundant, so the engine keeps its normal proof
+ * obligations (notably `storage.pgTestGate`).
  */
 function analyzeStorageWaivers(manifest: ServiceContractManifest, nowMs: number): StorageWaiverAnalysis {
   const declaredWaivers = manifest.metadata?.conformance?.waivedStorageEngines ?? [];
@@ -283,15 +297,16 @@ function analyzeStorageWaivers(manifest: ServiceContractManifest, nowMs: number)
   const failures: string[] = [];
   if (declaredWaivers.length === 0) return { waivedEngines, summaries, failures };
 
-  const waivedEngineList = declaredWaivers.map((waiver) => waiver.engine).join(", ");
-  if (manifest.class !== "cli-with-store") {
-    failures.push(`storage waivers are not permitted for class ${manifest.class}: ${waivedEngineList}`);
-    return { waivedEngines, summaries, failures };
-  }
-  if (manifest.bins.includes(`${manifest.name}-serve`)) {
-    failures.push(
-      `storage waivers are not permitted for a service-capable cli-with-store repo shipping ${manifest.name}-serve: ${waivedEngineList}`
-    );
+  const ineligible = storageWaiverIneligibilityReason({
+    class: manifest.class,
+    name: manifest.name,
+    bins: manifest.bins,
+    hosting: manifest.hosting,
+    deploymentModes: manifest.deploymentModes,
+    storageMode: manifest.storage?.mode
+  });
+  if (ineligible) {
+    failures.push(`${ineligible}: ${declaredWaivers.map((waiver) => waiver.engine).join(", ")}`);
     return { waivedEngines, summaries, failures };
   }
 
@@ -314,10 +329,10 @@ function analyzeStorageWaivers(manifest: ServiceContractManifest, nowMs: number)
     }
     waivedEngines.add(waiver.engine);
     const annotations: string[] = [];
-    if (waiver.reviewedBy) annotations.push(`reviewed by ${waiver.reviewedBy}`);
+    if (waiver.reviewedBy) annotations.push(`reviewed by ${echoableWaiverText(waiver.reviewedBy)}`);
     if (waiver.expiresAt) annotations.push(`expires ${waiver.expiresAt}`);
     const annotated = annotations.length > 0 ? ` (${annotations.join("; ")})` : "";
-    summaries.push(`${waiver.engine} explicitly waived: ${waiver.reason}${annotated}`);
+    summaries.push(`${waiver.engine} explicitly waived: ${echoableWaiverText(waiver.reason)}${annotated}`);
   }
   return { waivedEngines, summaries, failures };
 }
@@ -510,7 +525,7 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
   }
 
   // Check 4: storage capability matrix and PostgreSQL runtime proof.
-  const storageWaivers = analyzeStorageWaivers(manifest, Date.now());
+  const storageWaivers = analyzeStorageWaivers(manifest, (options.now ?? new Date()).getTime());
   if (manifest.class === "saas") {
     const failures = [...storageWaivers.failures];
     if (!manifest.storage?.envPrefix) failures.push("storage.envPrefix is required for the public SaaS DATABASE_URL contract");

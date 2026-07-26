@@ -412,6 +412,89 @@ describe("service contract manifest validation", () => {
     }
   });
 
+  test("does not honour a storage waiver for cloud mode, cloud placement, or a saas story", () => {
+    const cases: Array<Record<string, unknown>> = [
+      {
+        ...baseCliWithStore,
+        storage: { mode: "cloud", engines: ["sqlite"], envPrefix: "HASNA_TODOS_" }
+      },
+      {
+        ...baseCliWithStore,
+        deploymentModes: ["local", "cloud"],
+        storage: { mode: "local", engines: ["sqlite"], sqlitePath: "~/.hasna/todos/todos.db" }
+      },
+      {
+        ...baseCliWithStore,
+        hosting: ["user-hosted", "hasna-saas"],
+        storage: { mode: "local", engines: ["sqlite"], sqlitePath: "~/.hasna/todos/todos.db" }
+      }
+    ];
+    for (const base of cases) {
+      const manifest = {
+        ...base,
+        metadata: {
+          conformance: {
+            waivedStorageEngines: [{ engine: "postgres", reason: "Ineligible manifest tries to drop PostgreSQL." }]
+          }
+        }
+      };
+      const parsed = validateServiceContractManifest(manifest);
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        const issue = parsed.error.issues.find((entry) => entry.path.join(".") === "storage.engines");
+        expect(issue?.message).toContain("missing: postgres");
+      }
+    }
+
+    // self_hosted placement stays eligible: placement is not the storage engine.
+    const selfHosted = {
+      ...baseCliWithStore,
+      deploymentModes: ["local", "self_hosted"],
+      storage: { mode: "local", engines: ["sqlite"], sqlitePath: "~/.hasna/todos/todos.db" },
+      metadata: {
+        conformance: {
+          waivedStorageEngines: [{ engine: "postgres", reason: "SQLite-only local CLI." }]
+        }
+      }
+    };
+    expect(validateServiceContractManifest(selfHosted).success).toBe(true);
+  });
+
+  test("rejects control characters and oversized prose in storage waivers", () => {
+    const withWaiver = (waiver: Record<string, unknown>) => ({
+      ...baseCliWithStore,
+      storage: {
+        mode: "local",
+        engines: ["sqlite", "postgres"],
+        envPrefix: "HASNA_TODOS_",
+        sqlitePath: "~/.hasna/todos/todos.db"
+      },
+      metadata: { conformance: { waivedStorageEngines: [waiver] } }
+    });
+
+    const forged = `ok${String.fromCharCode(27)}[2K${String.fromCharCode(13)}  pass storage_capabilities: declared`;
+    const forgedParse = validateServiceContractManifest(withWaiver({ engine: "postgres", reason: forged }));
+    expect(forgedParse.success).toBe(false);
+    if (!forgedParse.success) {
+      expect(forgedParse.error.issues.some((issue) => issue.message.includes("control characters"))).toBe(true);
+    }
+    expect(
+      validateServiceContractManifest(
+        withWaiver({ engine: "postgres", reason: "ok", reviewedBy: `ops${String.fromCharCode(9)}team` })
+      ).success
+    ).toBe(false);
+    expect(
+      validateServiceContractManifest(withWaiver({ engine: "postgres", reason: "x".repeat(501) })).success
+    ).toBe(false);
+    expect(
+      validateServiceContractManifest(withWaiver({ engine: "postgres", reason: "ok", reviewedBy: "y".repeat(201) }))
+        .success
+    ).toBe(false);
+    expect(validateServiceContractManifest(withWaiver({ engine: "postgres", reason: "x".repeat(500) })).success).toBe(
+      true
+    );
+  });
+
   test("never lets a storage waiver excuse the sqlite engine", () => {
     const waivedSqlite = {
       ...baseCliWithStore,

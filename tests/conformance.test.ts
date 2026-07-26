@@ -443,6 +443,242 @@ describe("repo conformance kit", () => {
     });
   });
 
+  test("locks the no-waiver storage_capabilities detail strings", () => {
+    const complete = cliWithStoreManifest({
+      mode: "local",
+      engines: ["sqlite", "postgres"],
+      envPrefix: "HASNA_DEMO_",
+      sqlitePath: "~/.hasna/demo/demo.db",
+      pgTestGate: { envVar: "DEMO_TEST_DATABASE_URL", command: "bun test tests/postgres.test.ts" }
+    });
+    withRepoFixture(complete, cliOnlyPackage, (root) => {
+      const storage = runRepoConformance(root, { env: {}, skipNoCloudScan: true }).checks.find(
+        (check) => check.id === "storage_capabilities"
+      );
+      expect(storage?.status).toBe("pass");
+      expect(storage?.detail).toBe("sqlite and postgres capabilities plus live-PG gate declared");
+    });
+
+    const bare = cliWithStoreManifest({ mode: "local", sqlitePath: "~/.hasna/demo/demo.db" });
+    withRepoFixture(bare, cliOnlyPackage, (root) => {
+      const storage = runRepoConformance(root, { env: {}, skipNoCloudScan: true }).checks.find(
+        (check) => check.id === "storage_capabilities"
+      );
+      expect(storage?.status).toBe("fail");
+      expect(storage?.detail).toBe(
+        "missing storage engines: sqlite, postgres; storage.envPrefix is required for the PostgreSQL DATABASE_URL contract; storage.pgTestGate is required to prove live PostgreSQL support"
+      );
+    });
+
+    const library = runRepoConformance(repoRoot, { env: {} }).checks.find(
+      (check) => check.id === "storage_capabilities"
+    );
+    expect(library?.status).toBe("skip");
+    expect(library?.detail).toBe("library repo is outside the dual-storage core gate");
+  });
+
+  test("rejects storage waivers from a repo whose runtime store is cloud PostgreSQL", () => {
+    const manifest = cliWithStoreManifest({
+      mode: "cloud",
+      engines: ["sqlite", "postgres"],
+      envPrefix: "HASNA_DEMO_",
+      pgTestGate: { envVar: "DEMO_TEST_DATABASE_URL", command: "bun test tests/postgres.test.ts" }
+    });
+    manifest.metadata = {
+      conformance: {
+        waivedStorageEngines: [{ engine: "postgres", reason: "Cloud-mode repo tries to drop PostgreSQL." }]
+      }
+    };
+    withRepoFixture(manifest, cliOnlyPackage, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      const storage = report.checks.find((check) => check.id === "storage_capabilities");
+      expect(storage?.status).toBe("fail");
+      expect(storage?.detail).toContain("storage waivers are not permitted while storage.mode is cloud");
+      expect(report.ok).toBe(false);
+    });
+  });
+
+  test("rejects storage waivers from a repo advertising cloud placement or the hasna-saas story", () => {
+    const cloudPlacement = cliWithStoreManifest({
+      mode: "local",
+      engines: ["sqlite", "postgres"],
+      envPrefix: "HASNA_DEMO_",
+      sqlitePath: "~/.hasna/demo/demo.db",
+      pgTestGate: { envVar: "DEMO_TEST_DATABASE_URL", command: "bun test tests/postgres.test.ts" }
+    });
+    cloudPlacement.deploymentModes = ["local", "cloud"];
+    cloudPlacement.serviceSurfaces = (cloudPlacement.serviceSurfaces ?? []).map((surface) => ({
+      ...surface,
+      deploymentModes: ["local"]
+    }));
+    cloudPlacement.metadata = {
+      conformance: {
+        waivedStorageEngines: [{ engine: "postgres", reason: "Cloud placement tries to drop PostgreSQL." }]
+      }
+    };
+    withRepoFixture(cloudPlacement, cliOnlyPackage, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      const storage = report.checks.find((check) => check.id === "storage_capabilities");
+      expect(storage?.status).toBe("fail");
+      expect(storage?.detail).toContain("cloud runtime placement");
+    });
+
+    const saasStory = cliWithStoreManifest({
+      mode: "local",
+      engines: ["sqlite", "postgres"],
+      envPrefix: "HASNA_DEMO_",
+      sqlitePath: "~/.hasna/demo/demo.db",
+      pgTestGate: { envVar: "DEMO_TEST_DATABASE_URL", command: "bun test tests/postgres.test.ts" }
+    });
+    saasStory.hosting = ["user-hosted", "hasna-saas"];
+    saasStory.metadata = {
+      conformance: {
+        waivedStorageEngines: [{ engine: "postgres", reason: "SaaS story tries to drop PostgreSQL." }]
+      }
+    };
+    withRepoFixture(saasStory, cliOnlyPackage, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      const storage = report.checks.find((check) => check.id === "storage_capabilities");
+      expect(storage?.status).toBe("fail");
+      expect(storage?.detail).toContain("hasna-saas product story");
+    });
+  });
+
+  test("rejects a storage waiver on a saas manifest", () => {
+    const manifest = {
+      schema: SCHEMA_IDS.serviceContract,
+      name: "demo",
+      class: "saas",
+      contractVersion: SERVICE_CONTRACT_VERSION,
+      kitVersion: "0.8.0",
+      bins: ["demo", "demo-mcp", "demo-serve"],
+      hosting: ["hasna-saas", "user-hosted"],
+      deploymentModes: ["cloud"],
+      storage: { mode: "cloud", engines: ["sqlite", "postgres"], envPrefix: "HASNA_DEMO_" },
+      serviceSurfaces: completeServiceManifest().serviceSurfaces?.map((surface) => ({
+        ...surface,
+        deploymentModes: ["cloud"]
+      })),
+      metadata: {
+        conformance: {
+          waivedStorageEngines: [{ engine: "postgres", reason: "SaaS tries to drop PostgreSQL." }]
+        }
+      }
+    };
+    withRepoFixture(manifest, completePackage, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      const storage = report.checks.find((check) => check.id === "storage_capabilities");
+      expect(storage?.status).toBe("fail");
+      expect(storage?.detail).toContain("storage waivers are not permitted for class saas");
+      expect(report.ok).toBe(false);
+    });
+  });
+
+  test("treats an empty waiver array as no waiver at all", () => {
+    const manifest = cliWithStoreManifest({
+      mode: "local",
+      engines: ["sqlite", "postgres"],
+      envPrefix: "HASNA_DEMO_",
+      sqlitePath: "~/.hasna/demo/demo.db",
+      pgTestGate: { envVar: "DEMO_TEST_DATABASE_URL", command: "bun test tests/postgres.test.ts" }
+    });
+    manifest.metadata = { conformance: { waivedStorageEngines: [] } };
+    withRepoFixture(manifest, cliOnlyPackage, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      const storage = report.checks.find((check) => check.id === "storage_capabilities");
+      expect(storage?.status).toBe("pass");
+      expect(storage?.detail).toBe("sqlite and postgres capabilities plus live-PG gate declared");
+    });
+  });
+
+  test("still requires an explicit sqlite engine when storage.engines is omitted", () => {
+    const manifest = cliWithStoreManifest({
+      mode: "local",
+      envPrefix: "HASNA_DEMO_",
+      sqlitePath: "~/.hasna/demo/demo.db"
+    });
+    manifest.metadata = {
+      conformance: {
+        waivedStorageEngines: [{ engine: "postgres", reason: "SQLite-only local CLI." }]
+      }
+    };
+    withRepoFixture(manifest, cliOnlyPackage, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      expect(report.checks.find((check) => check.id === "manifest_valid")?.status).toBe("pass");
+      const storage = report.checks.find((check) => check.id === "storage_capabilities");
+      expect(storage?.status).toBe("fail");
+      expect(storage?.detail).toContain("missing storage engines: sqlite");
+      expect(report.ok).toBe(false);
+    });
+  });
+
+  test("evaluates waiver expiry against the injected clock, inclusive of the instant itself", () => {
+    const expiresAt = "2030-06-01T00:00:00.000Z";
+    const manifest = cliWithStoreManifest({
+      mode: "local",
+      engines: ["sqlite"],
+      sqlitePath: "~/.hasna/demo/demo.db"
+    });
+    manifest.metadata = {
+      conformance: {
+        waivedStorageEngines: [{ engine: "postgres", reason: "Time-boxed waiver.", expiresAt }]
+      }
+    };
+    withRepoFixture(manifest, cliOnlyPackage, (root) => {
+      const justBefore = runRepoConformance(root, {
+        env: {},
+        skipNoCloudScan: true,
+        now: new Date(Date.parse(expiresAt) - 1)
+      });
+      expect(justBefore.checks.find((check) => check.id === "storage_capabilities")?.status).toBe("pass");
+
+      const exactly = runRepoConformance(root, {
+        env: {},
+        skipNoCloudScan: true,
+        now: new Date(Date.parse(expiresAt))
+      });
+      const exactlyStorage = exactly.checks.find((check) => check.id === "storage_capabilities");
+      expect(exactlyStorage?.status).toBe("fail");
+      expect(exactlyStorage?.detail).toContain("expired at");
+    });
+  });
+
+  test("redacts credential-shaped waiver prose instead of echoing it, in both manifest tiers", () => {
+    const internalHost = ["ops@demo", ["hasna", "xyz"].join(".")].join(".");
+    const manifest = cliWithStoreManifest({
+      mode: "local",
+      engines: ["sqlite"],
+      sqlitePath: "~/.hasna/demo/demo.db"
+    });
+    manifest.metadata = {
+      conformance: {
+        waivedStorageEngines: [
+          {
+            engine: "postgres",
+            reason: "blocked on hasna/oss/demo/database-url in account 123456789012",
+            reviewedBy: internalHost
+          }
+        ]
+      }
+    };
+    withRepoFixture(manifest, cliOnlyPackage, (root) => {
+      for (const manifestTier of ["public", "private"] as const) {
+        const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true, manifestTier });
+        const storage = report.checks.find((check) => check.id === "storage_capabilities");
+        expect(storage?.status).toBe("pass");
+        expect(storage?.detail).toContain("[redacted: private infrastructure reference]");
+        expect(storage?.detail).not.toContain("hasna/oss/demo/database-url");
+        expect(storage?.detail).not.toContain("123456789012");
+        expect(storage?.detail).not.toContain(internalHost);
+      }
+      // The public tier still reports the underlying manifest finding.
+      const publicReport = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      const safety = publicReport.checks.find((check) => check.id === "public_manifest_safety");
+      expect(safety?.status).toBe("fail");
+      expect(safety?.detail).toContain("metadata.conformance.waivedStorageEngines[0].reason");
+    });
+  });
+
   test("rejects storage waivers from a service-capable cli-with-store", () => {
     const manifest = cliWithStoreManifest({
       mode: "local",
