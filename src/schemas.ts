@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 export const CONTRACTS_PACKAGE_NAME = "@hasna/contracts";
-export const CONTRACTS_PACKAGE_VERSION = "0.7.1";
+export const CONTRACTS_PACKAGE_VERSION = "0.8.0";
 
 export const SCHEMA_IDS = {
   actorRef: "hasna.actor_ref.v1",
@@ -5087,28 +5087,6 @@ export const ServiceSurfaceSchema = z
   });
 export type ServiceSurface = z.infer<typeof ServiceSurfaceSchema>;
 
-export const SurfaceConformanceWaiverSchema = z
-  .object({
-    kind: ServiceSurfaceKindSchema,
-    reason: z.string().trim().min(1)
-  })
-  .strict();
-export type SurfaceConformanceWaiver = z.infer<typeof SurfaceConformanceWaiverSchema>;
-
-export const ServiceContractMetadataSchema = z
-  .object({
-    conformance: z
-      .object({
-        waivedSurfaces: z.array(SurfaceConformanceWaiverSchema).default([]),
-        /** Explicit exception profile for non-Node monorepos. Libraries are eligible without a profile. */
-        waiverProfile: z.literal("non-node-monorepo").optional()
-      })
-      .catchall(z.unknown())
-      .optional()
-  })
-  .catchall(z.unknown());
-export type ServiceContractMetadata = z.infer<typeof ServiceContractMetadataSchema>;
-
 /** Runtime storage enum. `local | cloud` ONLY (Amendment A1: PURE REMOTE). */
 export const STORAGE_MODES = ["local", "cloud"] as const;
 export const StorageModeSchema = z.enum(STORAGE_MODES);
@@ -5118,9 +5096,61 @@ export const STORAGE_ENGINES = ["sqlite", "postgres"] as const;
 export const StorageEngineSchema = z.enum(STORAGE_ENGINES);
 export type StorageEngine = z.infer<typeof StorageEngineSchema>;
 
+/**
+ * Storage engines a store-owning repo may waive instead of declaring.
+ *
+ * SQLite is the local source of truth for every `cli-with-store` repo, so it is
+ * never waivable; PostgreSQL is the forward-looking capability a repo may defer
+ * behind an explicit, auditable waiver.
+ */
+export const WAIVABLE_STORAGE_ENGINES = ["postgres"] as const;
+export type WaivableStorageEngine = (typeof WAIVABLE_STORAGE_ENGINES)[number];
+
 /** Deprecated storage-mode aliases accepted at parse time and mapped to cloud. */
 export const DEPRECATED_STORAGE_MODE_ALIASES = ["remote", "hybrid", "self_hosted"] as const;
 export type DeprecatedStorageModeAlias = (typeof DEPRECATED_STORAGE_MODE_ALIASES)[number];
+
+export const SurfaceConformanceWaiverSchema = z
+  .object({
+    kind: ServiceSurfaceKindSchema,
+    reason: z.string().trim().min(1)
+  })
+  .strict();
+export type SurfaceConformanceWaiver = z.infer<typeof SurfaceConformanceWaiverSchema>;
+
+/**
+ * Explicit, auditable waiver for a storage engine a store-owning repo does not
+ * yet support. It mirrors `SurfaceConformanceWaiverSchema`: typed, unique per
+ * engine, and carrying a non-empty reason. `expiresAt` makes the exception
+ * time-boxed — conformance fails the storage gate once it has passed.
+ */
+export const StorageEngineWaiverSchema = z
+  .object({
+    engine: StorageEngineSchema,
+    reason: z.string().trim().min(1),
+    /** Person, agent, or role accountable for the exception. */
+    reviewedBy: z.string().trim().min(1).optional(),
+    /** RFC 3339 timestamp after which conformance stops honouring the waiver. */
+    expiresAt: TimestampSchema.optional()
+  })
+  .strict();
+export type StorageEngineWaiver = z.infer<typeof StorageEngineWaiverSchema>;
+
+export const ServiceContractMetadataSchema = z
+  .object({
+    conformance: z
+      .object({
+        waivedSurfaces: z.array(SurfaceConformanceWaiverSchema).default([]),
+        /** Explicit exception profile for non-Node monorepos. Libraries are eligible without a profile. */
+        waiverProfile: z.literal("non-node-monorepo").optional(),
+        /** Explicit storage-engine exceptions. Only `cli-with-store` repos may waive PostgreSQL. */
+        waivedStorageEngines: z.array(StorageEngineWaiverSchema).default([])
+      })
+      .catchall(z.unknown())
+      .optional()
+  })
+  .catchall(z.unknown());
+export type ServiceContractMetadata = z.infer<typeof ServiceContractMetadataSchema>;
 
 /** Lowercase dashed app short-name, e.g. `todos`, `mailery`, `loops`. */
 export const AppNameSchema = z
@@ -5460,12 +5490,31 @@ export const ServiceContractManifestSchema = z
             path: ["storage", "sqlitePath"]
           });
         }
-        if (value.storage.engines && (!value.storage.engines.includes("sqlite") || !value.storage.engines.includes("postgres"))) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "cli-with-store storage.engines must declare both sqlite and postgres",
-            path: ["storage", "engines"]
-          });
+        if (value.storage.engines) {
+          // A CLI-only `cli-with-store` repo may ship sqlite-only while it
+          // works toward PostgreSQL, but only behind an explicit waiver that
+          // names the engine and the reason. SQLite itself is never waivable,
+          // and a repo that ships `<name>-serve` is service-capable, so it
+          // still owes the full engine matrix.
+          const declaredEngines = new Set<StorageEngine>(value.storage.engines);
+          const waivable = new Set<StorageEngine>(WAIVABLE_STORAGE_ENGINES);
+          const waivedEngines = new Set<StorageEngine>(
+            hasBin("-serve")
+              ? []
+              : (value.metadata?.conformance?.waivedStorageEngines ?? [])
+                  .map((waiver) => waiver.engine)
+                  .filter((engine) => waivable.has(engine))
+          );
+          const missingEngines = STORAGE_ENGINES.filter(
+            (engine) => !declaredEngines.has(engine) && !waivedEngines.has(engine)
+          );
+          if (missingEngines.length > 0) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `cli-with-store storage.engines must declare both sqlite and postgres unless the engine carries a metadata.conformance.waivedStorageEngines waiver; missing: ${missingEngines.join(", ")}`,
+              path: ["storage", "engines"]
+            });
+          }
         }
       }
       if (!seenBins.has(value.name)) {
@@ -5555,6 +5604,19 @@ export const ServiceContractManifestSchema = z
         });
       }
       seenWaivers.add(waiver.kind);
+    }
+
+    const waivedStorageEngines = value.metadata?.conformance?.waivedStorageEngines ?? [];
+    const seenStorageWaivers = new Set<StorageEngine>();
+    for (const [index, waiver] of waivedStorageEngines.entries()) {
+      if (seenStorageWaivers.has(waiver.engine)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate storage-engine waiver for ${waiver.engine}`,
+          path: ["metadata", "conformance", "waivedStorageEngines", index, "engine"]
+        });
+      }
+      seenStorageWaivers.add(waiver.engine);
     }
   });
 export type ServiceContractManifest = z.infer<typeof ServiceContractManifestSchema>;

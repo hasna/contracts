@@ -2,6 +2,45 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.8.0] - 2026-07-26
+
+### Explicit storage-engine waivers (additive, v1)
+
+- Add `metadata.conformance.waivedStorageEngines`, an auditable storage waiver
+  that mirrors the existing surface-waiver pattern:
+  `{ engine, reason, reviewedBy?, expiresAt? }`, typed and unique per engine
+  with a non-empty reason.
+- A CLI-only `cli-with-store` repo may now declare `storage.engines:
+  ["sqlite"]` when `postgres` carries a waiver, instead of fabricating
+  PostgreSQL support to pass the gate. Only `postgres` is waivable — SQLite
+  stays the non-waivable local source of truth — and `service`, `saas`, and
+  service-capable `cli-with-store` repos that ship `<name>-serve` still
+  declare the full matrix.
+- `storage_capabilities` passes a waived repo with a detail such as
+  `sqlite declared; postgres explicitly waived: <reason>`, mirroring the
+  `surface_matrix` "declared or explicitly waived" wording. It fails an
+  ineligible waiver, a waiver for a non-waivable engine, and an expired
+  waiver (`expiresAt` in the past), so a time-boxed exception cannot silently
+  become permanent.
+- `storage.pgTestGate` and `storage.envPrefix` are now required only when
+  PostgreSQL is actually in play. Both exist to serve the PostgreSQL contract
+  (the live-PG proof and the `HASNA_<NAME>_DATABASE_URL` derivation), so a
+  validly waived PostgreSQL engine no longer demands them. A waiver next to a
+  declared `postgres` engine is redundant and does not remove either
+  obligation.
+- Expiry is evaluated by conformance, not by the schema, so a lapsed waiver
+  keeps the manifest parseable and reports one clear storage failure instead of
+  invalidating every other check.
+- The shipped JSON Schema (`hasna.contract.schema.json`) and the exported
+  `StorageEngineWaiverSchema` / `WAIVABLE_STORAGE_ENGINES` types cover the new
+  field.
+
+### Compatibility
+
+- Fully additive. A manifest without `waivedStorageEngines` is validated and
+  gated exactly as in `0.7.1`; every existing check id, status, and pass detail
+  is unchanged.
+
 ## [0.7.1] - 2026-07-24
 
 ### PR-drain finalize (release republish)

@@ -4,7 +4,8 @@
 //   1. hasna.contract.json is present and valid (manifest + class rules).
 //   2. Declared bins and SDK exports match package.json.
 //   3. Required API/SDK/MCP/CLI surfaces are declared or explicitly waived.
-//   4. Store-owning repos declare SQLite + PostgreSQL capability and a live-PG gate.
+//   4. Store-owning repos declare SQLite + PostgreSQL capability and a live-PG
+//      gate, or carry an explicit, unexpired storage-engine waiver.
 //   5. Public manifests do not expose private infrastructure references.
 //   6. Env parsing follows the HASNA_<NAME>_STORAGE_MODE spec and any mode env
 //      value normalizes to the local|cloud enum (mode enum compliance).
@@ -17,9 +18,12 @@ import { join, relative } from "node:path";
 import {
   HealthResponseSchema,
   SERVICE_SURFACE_KINDS,
+  STORAGE_ENGINES,
+  WAIVABLE_STORAGE_ENGINES,
   allowedBinsForName,
   type ServiceContractManifest,
-  type ServiceSurfaceKind
+  type ServiceSurfaceKind,
+  type StorageEngine
 } from "./schemas";
 import { loadServiceContractManifest, type LoadServiceContractResult } from "./service-contract";
 import { normalizeStorageMode, storageEnvKeys, type Env } from "./mode";
@@ -254,6 +258,70 @@ function publicManifestFindings(value: unknown, path = "<root>"): PublicManifest
   return findings;
 }
 
+interface StorageWaiverAnalysis {
+  /** Engines an eligible, unexpired waiver excuses from the capability matrix. */
+  waivedEngines: Set<StorageEngine>;
+  /** Pass-detail fragments such as `postgres explicitly waived: <reason>`. */
+  summaries: string[];
+  /** Failures raised by ineligible, non-waivable, or expired waivers. */
+  failures: string[];
+}
+
+/**
+ * Resolve `metadata.conformance.waivedStorageEngines` into the engines the
+ * storage gate may skip. Only CLI-only `cli-with-store` repos may waive (a
+ * `<name>-serve` bin makes a repo service-capable and it still owes the full
+ * matrix), only PostgreSQL is waivable, and a waiver stops applying once it
+ * expires. A waiver for an engine the manifest already declares is redundant,
+ * so the engine keeps its normal proof obligations (notably
+ * `storage.pgTestGate`).
+ */
+function analyzeStorageWaivers(manifest: ServiceContractManifest, nowMs: number): StorageWaiverAnalysis {
+  const declaredWaivers = manifest.metadata?.conformance?.waivedStorageEngines ?? [];
+  const waivedEngines = new Set<StorageEngine>();
+  const summaries: string[] = [];
+  const failures: string[] = [];
+  if (declaredWaivers.length === 0) return { waivedEngines, summaries, failures };
+
+  const waivedEngineList = declaredWaivers.map((waiver) => waiver.engine).join(", ");
+  if (manifest.class !== "cli-with-store") {
+    failures.push(`storage waivers are not permitted for class ${manifest.class}: ${waivedEngineList}`);
+    return { waivedEngines, summaries, failures };
+  }
+  if (manifest.bins.includes(`${manifest.name}-serve`)) {
+    failures.push(
+      `storage waivers are not permitted for a service-capable cli-with-store repo shipping ${manifest.name}-serve: ${waivedEngineList}`
+    );
+    return { waivedEngines, summaries, failures };
+  }
+
+  const waivable = new Set<StorageEngine>(WAIVABLE_STORAGE_ENGINES);
+  const nonWaivable = declaredWaivers.filter((waiver) => !waivable.has(waiver.engine));
+  if (nonWaivable.length > 0) {
+    failures.push(
+      `storage engines that cannot be waived: ${nonWaivable.map((waiver) => waiver.engine).join(", ")} (waivable: ${WAIVABLE_STORAGE_ENGINES.join(", ")})`
+    );
+  }
+
+  const declaredEngines = new Set(manifest.storage?.engines ?? []);
+  for (const waiver of declaredWaivers) {
+    if (!waivable.has(waiver.engine) || declaredEngines.has(waiver.engine)) continue;
+    if (waiver.expiresAt && Date.parse(waiver.expiresAt) <= nowMs) {
+      failures.push(
+        `storage waiver for ${waiver.engine} expired at ${waiver.expiresAt}; declare the engine or renew the waiver`
+      );
+      continue;
+    }
+    waivedEngines.add(waiver.engine);
+    const annotations: string[] = [];
+    if (waiver.reviewedBy) annotations.push(`reviewed by ${waiver.reviewedBy}`);
+    if (waiver.expiresAt) annotations.push(`expires ${waiver.expiresAt}`);
+    const annotated = annotations.length > 0 ? ` (${annotations.join("; ")})` : "";
+    summaries.push(`${waiver.engine} explicitly waived: ${waiver.reason}${annotated}`);
+  }
+  return { waivedEngines, summaries, failures };
+}
+
 export function runRepoConformance(repoRoot: string, options: RepoConformanceOptions = {}): RepoConformanceReport {
   const checks: ConformanceCheck[] = [];
   const loaded: LoadServiceContractResult = loadServiceContractManifest(repoRoot);
@@ -442,28 +510,50 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
   }
 
   // Check 4: storage capability matrix and PostgreSQL runtime proof.
+  const storageWaivers = analyzeStorageWaivers(manifest, Date.now());
   if (manifest.class === "saas") {
-    const failures = manifest.storage?.envPrefix
-      ? []
-      : ["storage.envPrefix is required for the public SaaS DATABASE_URL contract"];
+    const failures = [...storageWaivers.failures];
+    if (!manifest.storage?.envPrefix) failures.push("storage.envPrefix is required for the public SaaS DATABASE_URL contract");
     checks.push({
       id: "storage_capabilities",
       status: failures.length === 0 ? "pass" : "fail",
       detail: failures.length === 0 ? "SaaS PostgreSQL env contract declared" : failures.join("; ")
     });
   } else if (manifest.class !== "service" && manifest.class !== "cli-with-store") {
-    checks.push({ id: "storage_capabilities", status: "skip", detail: `${manifest.class} repo is outside the dual-storage core gate` });
+    checks.push({
+      id: "storage_capabilities",
+      status: storageWaivers.failures.length === 0 ? "skip" : "fail",
+      detail:
+        storageWaivers.failures.length === 0
+          ? `${manifest.class} repo is outside the dual-storage core gate`
+          : storageWaivers.failures.join("; ")
+    });
   } else {
-    const engines = new Set(manifest.storage?.engines ?? []);
-    const missingEngines = ["sqlite", "postgres"].filter((engine) => !engines.has(engine as "sqlite" | "postgres"));
-    const failures: string[] = [];
+    const engines = manifest.storage?.engines ?? [];
+    const declaredEngines = new Set(engines);
+    const missingEngines = STORAGE_ENGINES.filter(
+      (engine) => !declaredEngines.has(engine) && !storageWaivers.waivedEngines.has(engine)
+    );
+    const failures = [...storageWaivers.failures];
     if (missingEngines.length > 0) failures.push(`missing storage engines: ${missingEngines.join(", ")}`);
-    if (!manifest.storage?.envPrefix) failures.push("storage.envPrefix is required for the PostgreSQL DATABASE_URL contract");
-    if (!manifest.storage?.pgTestGate) failures.push("storage.pgTestGate is required to prove live PostgreSQL support");
+    // `storage.envPrefix` and `storage.pgTestGate` both exist to serve the
+    // PostgreSQL contract: the DATABASE_URL derivation and the live-PG proof.
+    // Neither is required while PostgreSQL is explicitly waived, because there
+    // is no PostgreSQL boundary to derive or prove.
+    if (!storageWaivers.waivedEngines.has("postgres")) {
+      if (!manifest.storage?.envPrefix) failures.push("storage.envPrefix is required for the PostgreSQL DATABASE_URL contract");
+      if (!manifest.storage?.pgTestGate) failures.push("storage.pgTestGate is required to prove live PostgreSQL support");
+    }
+    const declaredDetail = engines.length > 0 ? `${engines.join(", ")} declared` : "no storage engines declared";
     checks.push({
       id: "storage_capabilities",
       status: failures.length === 0 ? "pass" : "fail",
-      detail: failures.length === 0 ? "sqlite and postgres capabilities plus live-PG gate declared" : failures.join("; ")
+      detail:
+        failures.length > 0
+          ? failures.join("; ")
+          : storageWaivers.summaries.length > 0
+            ? `${declaredDetail}; ${storageWaivers.summaries.join("; ")}`
+            : "sqlite and postgres capabilities plus live-PG gate declared"
     });
   }
 

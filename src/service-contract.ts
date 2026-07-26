@@ -272,6 +272,23 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
                   reason: { type: "string", minLength: 1 }
                 }
               }
+            },
+            waivedStorageEngines: {
+              type: "array",
+              uniqueItems: true,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["engine", "reason"],
+                properties: {
+                  engine: { enum: ["sqlite", "postgres"] },
+                  reason: { type: "string", minLength: 1 },
+                  reviewedBy: { type: "string", minLength: 1 },
+                  expiresAt: { type: "string", format: "date-time" }
+                }
+              },
+              description:
+                "Explicit storage-engine exceptions. Only cli-with-store repos may waive postgres; sqlite is never waivable and conformance stops honouring a waiver once expiresAt has passed."
             }
           }
         }
