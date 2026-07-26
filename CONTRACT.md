@@ -525,44 +525,34 @@ leaves a compliant repo no recourse but to unwire the gate.
 
 **Measured, not asserted.** Against the real disclosed artifact
 (`@hasna/tenants@0.1.0`, 178 names compiled into `dist/`) the scanner detects
-**94.4%**. Against the packed artifacts of eleven Hasna repos it reports one
-finding, and that finding is a genuine 97-domain third-party catalogue. Against
-`zod`, `email-validator`, `commander` and `typescript` it reports nothing;
-against `nodemailer`, `validator` and `class-validator` it reports their real
-reference tables — the waiver case.
+**94.4%**, in the quoted-array form it actually shipped and in markdown,
+numbered-list, YAML and bare-line renderings of the same data. Against eleven
+Hasna packed artifacts and against `zod`, `email-validator`, `commander` and
+`typescript` it reports nothing; against `nodemailer`, `validator` and
+`class-validator` it reports their genuine reference tables — the waiver case.
+A 20,414-member package scans in **5.9 s**.
 
-**Stated limit.** The scanner counts an inventory in the two shapes a list
-actually takes in a shipped file: a quoted literal whose content is mostly
-assets (a joined string such as `"a.example,b.example".split(",")`, or a run of
-sibling literals such as `["a.example", "b.example", …]` — including one keyed
-by name, `{"edge-1": {"host": "…"}, …}`), and a delimited column — a `.csv`
-field, a markdown table cell, a one-per-line list — that holds an asset on
-several consecutive rows. Entries are read through their **host component**, so
-`https://svc-1.example/api`, `//svc-1.example/api` and `svc-1.example:443` count
-as the machine they name; an endpoint catalogue is written as endpoints, and
-clause B names endpoint catalogues explicitly.
+**Stated limits.** All measured, none theoretical:
 
-Three residuals, stated rather than implied:
+- Detection rests on IANA's TLD list minus a small set that collides with
+  Hasna's own `<noun>.<verb>` operation grammar (`tasks.next`,
+  `credential.read`, `service.health`) and with common filenames. Each exclusion
+  is backed by an observed false positive and each is a **deliberate blind
+  spot**: an inventory built only from those TLDs is not detected by count.
+- **In code members, a run of one brand across many TLDs written one per line
+  and unquoted is not counted** — that shape is indistinguishable from property
+  access on one receiver (`exports.vi`, `exports.ua`, … are all ccTLDs). Quoted
+  and array forms in code ARE counted, as are all unquoted forms in prose and
+  tabular members.
+- Runtime string concatenation, IDN/punycode spellings, and reversed or
+  otherwise transformed encodings beyond one level of base64/hex are not
+  detected by a static scan.
+- **IPv4 is read only from values** — whole quoted literals, or bare tokens in
+  non-code members. Reading raw text matched SVG path coordinates in minified
+  bundles, which would have failed every app shipping an icon set.
 
-- An inventory written as **running prose** — in bullets, or inside sentences —
-  is read but not counted.
-- A **lone mention repeated across a file** is not an inventory:
-  `expect(isEmail("user@a.example"))` on thirty lines is thirty assertions, not
-  a list. Counting those aggregated ordinary validator fixtures into a failure —
-  measured on `zod@4.4.3` (23 and 24 fixture emails in its shipped
-  `string.test.ts`) and `email-validator@2.0.4` (22) — and a mandatory gate that
-  fires on compliant repos is a gate that gets switched off.
-- The scanner counts only inventories under **recognized TLDs**, and excludes
-  TLDs that collide with ubiquitous programming vocabulary, so an inventory
-  built exclusively from those TLDs would not be detected by count.
-
-Those limits are deliberate and measured, not aspirational. `.name`, `.host`,
-`.info` and every ISO language code are real TLDs, so a rule that counted any
-dotted lowercase run would report `node.name` and `exports.tr` as domains: over
-`node_modules` it finds 139 distinct "domains" in TypeScript's own bundle. A
-mandatory gate that fires on compliant repos gets switched off, and then it
-protects nothing. Clause B is a prohibition, not a count: it holds whether or
-not the guard can see the violation.
+Clause B is a prohibition, not a count: it binds whether or not the guard can
+see the violation.
 
 ### Clause C — Published-artifact scanning is a hard release gate
 

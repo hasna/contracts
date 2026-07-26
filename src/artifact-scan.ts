@@ -31,7 +31,8 @@
 // rather than by a curated list, and the thresholds are set where an inventory
 // begins rather than where a mention does.
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { isRecognizedTld } from "./tlds";
 import {
@@ -39,7 +40,7 @@ import {
   isPackedArtifactPath,
   listArchiveEntries,
   normalizeArchiveEntry,
-  readArchiveMemberBytes,
+  extractArchive,
   MAX_SCANNED_MEMBER_BYTES,
 } from "./packed-artifact";
 // Type-only: the manifest schema declares the waiver shape, this module
@@ -168,7 +169,16 @@ const MULTI_LABEL_SUFFIXES = new Set(
  * asset mentioned once per expression however many times a file does it.
  * Clause B is a prohibition, not a count.
  */
-const QUOTED_LITERAL_PATTERN = /(?:"([^"\n]{3,})"|'([^'\n]{3,})'|`([^`]{3,})`)/g;
+// Any quoted token, including 1- and 2-character ones. The `{3,}` floor meant a
+// short key such as `"id"` was not matched at all, so its quote characters fell
+// into the run glue — which excludes `"` — and broke the run at EVERY element.
+// One two-character key anywhere in a keyed-object list took detection to zero.
+// ESCAPE-AWARE. `"a \"b\" c"` is ONE literal, not three: a naive tokenizer
+// pairs the inner quotes with the outer ones and every subsequent pairing is
+// shifted by one, which silently mis-reads the rest of the file. A source map's
+// `sourcesContent` is exactly that shape — the original source, quoted, with
+// every quote escaped — and it is how a file excluded by `files` still ships.
+const QUOTED_LITERAL_PATTERN = /"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\]|\\.)*)`/g;
 /** How a joined inventory separates its entries inside one literal. */
 const LITERAL_SEPARATORS = /[\s,;|]+/;
 /** How a row separates its fields: CSV commas, markdown pipes, TSV tabs. */
@@ -208,6 +218,25 @@ const IPV4_LITERAL = /^(?:\d{1,3}\.){3}\d{1,3}$/;
 const IPV4_PATTERN = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
 
 /** Documentation, private, loopback, link-local, and multicast IPv4 space. */
+/**
+ * Addresses a text presents as values: whole quoted literals always, and bare
+ * tokens only in non-code members. SVG path data, version quads and OIDs all
+ * live inside code and none of them is a quoted address on its own.
+ */
+function addressCandidates(view: string, codeLike: boolean): string[] {
+  const found: string[] = [];
+  for (const match of view.matchAll(QUOTED_LITERAL_PATTERN)) {
+    const literal = (match[1] ?? match[2] ?? match[3] ?? "").trim();
+    if (IPV4_LITERAL.test(literal)) found.push(literal);
+  }
+  if (!codeLike) {
+    for (const match of view.matchAll(IPV4_PATTERN)) {
+      if (IPV4_LITERAL.test(match[0])) found.push(match[0]);
+    }
+  }
+  return found;
+}
+
 function isReservedIpv4(value: string): boolean {
   const parts = value.split(".").map(Number);
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
@@ -263,6 +292,36 @@ export interface UnreadableMember {
   reason: string;
 }
 
+/**
+ * Hard ceiling per asset kind. A caller may tighten a threshold as far as it
+ * likes; loosening one past this point is refused, because beyond it the
+ * detector cannot fire on any artifact a human would call an inventory.
+ */
+export const MAX_INVENTORY_THRESHOLDS: Readonly<Record<AssetInventoryKind, number>> = Object.freeze({
+  domain: 100,
+  host: 100,
+  ip: 100,
+  email: 100,
+});
+
+function clampThresholds(
+  requested: Record<AssetInventoryKind, number>
+): Record<AssetInventoryKind, number> {
+  const clamped = { ...requested };
+  for (const kind of ASSET_INVENTORY_KINDS) {
+    const value = clamped[kind];
+    if (!Number.isFinite(value) || value < 1) {
+      throw new Error(`${kind} threshold must be a positive number.`);
+    }
+    if (value > MAX_INVENTORY_THRESHOLDS[kind]) {
+      throw new Error(
+        `${kind} threshold ${value} exceeds the ${MAX_INVENTORY_THRESHOLDS[kind]} ceiling. A threshold that high disables the detector, which is the gate being switched off through its own front door.`,
+      );
+    }
+  }
+  return clamped;
+}
+
 export interface ArtifactScanOptions {
   /** Per-kind overrides. Merged over {@link DEFAULT_INVENTORY_THRESHOLDS}. */
   thresholds?: Partial<Record<AssetInventoryKind, number>>;
@@ -305,23 +364,33 @@ export interface ArtifactScanReport {
   unreadable: UnreadableMember[];
 }
 
-/** Mask an entry so the report names the SHAPE without republishing the value. */
+/**
+ * Name a finding without republishing any part of it.
+ *
+ * Earlier versions emitted a prefix, the exact label length, and the full TLD
+ * (`ha***.agency`). A portfolio is ONE brand across many TLDs, so three samples
+ * of that form disclose two characters of the brand, its exact length, and
+ * three registrations it holds — enough to name it and look the rest up. The
+ * mask reconstructed the secret it existed to hide.
+ *
+ * Nothing identifying survives: no prefix, no length, no TLD. What remains is
+ * the KIND and a short salted digest, which is stable within one report (so two
+ * findings can be told apart) and useless outside it.
+ */
 function redact(entry: string): string {
-  if (entry.includes("@")) {
-    const [local, domain] = entry.split("@") as [string, string];
-    return `${local.slice(0, 1)}***@${redact(domain)}`;
-  }
-  const labels = entry.split(".");
-  const tld = labels.at(-1) ?? "";
-  const head = labels.slice(0, -1).join(".");
-  return `${head.slice(0, 2)}${"*".repeat(Math.max(head.length - 2, 1))}.${tld}`;
+  const kind = entry.includes("@") ? "email" : /^[0-9.]+$/.test(entry) ? "ipv4" : "host";
+  return `<${kind}:${reportDigest(entry)}>`;
 }
 
 /**
- * Is this buffer text? A `.map`, a `.md` and a minified bundle all disclose
- * fine, so extension is not a useful filter; the presence of NUL bytes in the
- * first few KB is.
+ * Per-report salt. Regenerated on every run, so a digest cannot be compared
+ * against a rainbow table of candidate names, or across two reports.
  */
+const REPORT_SALT = randomBytes(16);
+
+function reportDigest(value: string): string {
+  return createHash("sha256").update(REPORT_SALT).update(value, "utf8").digest("hex").slice(0, 8);
+}
 /** Lossless decoding for scanning: UTF-8 where valid, latin1 otherwise. */
 function decodeMember(bytes: Buffer): string {
   const utf8 = bytes.toString("utf8");
@@ -468,17 +537,34 @@ function record(asset: string, hosts: Set<string>, emails: Set<string>): void {
  * `exports.vi`, `exports.ua`, `exports.tr` … — every ISO language code is a
  * delegated ccTLD, so a per-line rule reads a locale barrel file as a
  * ten-domain portfolio. The tell is that the FIRST label never varies while the
- * last one always does: a portfolio varies the brand, member access varies the
- * property.
+ * last one always does.
+ *
+ * A real portfolio has the SAME shape — one brand across many TLDs — so this
+ * rule is only safe where property access is possible at all. It is applied to
+ * code members only; `collectLineInventories` takes `codeLike` for exactly that
+ * reason, and applying it to prose took markdown, numbered and YAML lists of
+ * the real incident shape to zero detections.
  */
+/**
+ * Members read as CODE, where a bare `a.b` is a property access.
+ *
+ * Everything else — markdown, YAML, CSV, plain text, extensionless — is read as
+ * data, where a bare `a.b` is a name. Getting this wrong is expensive in both
+ * directions: applied to data it hides the real incident shape, and not applied
+ * to code it reports every locale barrel as a portfolio.
+ */
+const CODE_EXTENSIONS = new Set([
+  "js", "mjs", "cjs", "jsx", "ts", "tsx", "mts", "cts", "json", "map", "css", "scss", "html", "vue", "svelte",
+]);
+
+export function isCodeLikeMember(path: string): boolean {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) return false;
+  return CODE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
+}
+
 function isMemberAccessRun(run: readonly LineEntry[]): boolean {
-  // A QUOTED entry is data, full stop. This distinction is load-bearing, and
-  // measured: a real portfolio is one brand repeated across many TLDs, which is
-  // structurally identical to `exports.vi, exports.ua, …` except that one is
-  // quoted and the other is an expression. Applying this guard to quoted runs
-  // as well dropped detection on the real disclosed artifact from 94.4% to
-  // 29.2%.
-  if (run.some((entry) => entry.quoted)) return false;
   const twoLabel = run.filter((entry) => entry.asset.split(".").length === 2);
   if (twoLabel.length !== run.length) return false;
   const firstLabels = new Set(twoLabel.map((entry) => entry.asset.slice(0, entry.asset.indexOf("."))));
@@ -487,16 +573,33 @@ function isMemberAccessRun(run: readonly LineEntry[]): boolean {
   return tlds.size === twoLabel.length;
 }
 
-/** One line's asset, and whether the line presented it as a quoted value. */
 interface LineEntry {
   asset: string;
-  quoted: boolean;
 }
 
-function collectLineInventories(text: string, hosts: Set<string>, emails: Set<string>): void {
+export interface InventoryCountOptions {
+  /**
+   * Read this text as code. Defaults to true, which is the conservative choice
+   * for a bare call: it only ever suppresses a finding in the one shape that is
+   * genuinely ambiguous.
+   */
+  codeLike?: boolean;
+}
+
+function collectLineInventories(
+  text: string,
+  hosts: Set<string>,
+  emails: Set<string>,
+  codeLike: boolean
+): void {
   let run: LineEntry[] = [];
   const closeRun = (): void => {
-    if (run.length >= MIN_LITERAL_RUN && !isMemberAccessRun(run)) {
+    // The member-access guard is a CODE rule. In prose and tabular data there
+    // is no property access to confuse, and a run of one brand across many TLDs
+    // is precisely what a portfolio looks like — the real disclosed artifact's
+    // exact shape. Applying the guard there took markdown, numbered and YAML
+    // lists of the real shape to zero.
+    if (run.length >= MIN_LITERAL_RUN && !(codeLike && isMemberAccessRun(run))) {
       for (const entry of run) record(entry.asset, hosts, emails);
     }
     run = [];
@@ -504,18 +607,22 @@ function collectLineInventories(text: string, hosts: Set<string>, emails: Set<st
   for (const rawLine of text.split(/\r?\n/)) {
     const stripped = rawLine
       .trim()
+      // List markers: `- x`, `* x`, `+ x`, `> x`, `1. x`, `1) x`, and the
+      // `- name: x` / `name: x` forms a YAML sequence uses. Ordering matters:
+      // the numeric marker must go before the key prefix, or `1. x` loses only
+      // its digit.
       .replace(/^[-*+#>\s]+/, "")
       .replace(/^\d+[.):,]?\s*/, "")
+      .replace(/^[A-Za-z0-9_-]{1,40}\s*:\s*/, "")
       .trim();
     if (!stripped) {
       // A blank line separates sections; it does not end a list.
       continue;
     }
-    const quoted = /^[\['"`(]/.test(stripped);
     const line = stripped.replace(/^[\['"`(]+|[\]'"`),;]+$/g, "").trim();
     const asset = line ? countableAsset(line) : null;
     if (asset) {
-      run.push({ asset, quoted });
+      run.push({ asset });
       continue;
     }
     closeRun();
@@ -543,7 +650,12 @@ function collectDelimitedRun(text: string, hosts: Set<string>, emails: Set<strin
 }
 
 /** Shape 1: a literal whose content is mostly assets, or a run of sibling ones. */
-function collectLiteralInventories(text: string, hosts: Set<string>, emails: Set<string>): void {
+function collectLiteralInventories(
+  text: string,
+  hosts: Set<string>,
+  emails: Set<string>,
+  depth = 0
+): void {
   // A one-piece literal is a mention on its own and an array element next to
   // its siblings, so it cannot be judged until the run it belongs to ends.
   let run: string[] = [];
@@ -558,14 +670,33 @@ function collectLiteralInventories(text: string, hosts: Set<string>, emails: Set
     const sibling = previousEnd >= 0 && LITERAL_RUN_GLUE.test(text.slice(previousEnd, start));
     previousEnd = start + match[0].length;
 
-    const literal = (match[1] ?? match[2] ?? match[3] ?? "").trim();
-    const pieces = literal ? literal.split(LITERAL_SEPARATORS).filter(Boolean) : [];
+    const raw = match[1] ?? match[2] ?? match[3] ?? "";
+    const literal = raw.replace(/\\(["'`\\])/g, "$1").trim();
+    // A literal that itself contains quotes is a nested document — a source
+    // map's `sourcesContent`, an embedded JSON blob, a serialized config. Read
+    // it as one, rather than as a bag of fragments.
+    if (depth < 2 && /["'`]/.test(literal)) {
+      collectLiteralInventories(literal, hosts, emails, depth + 1);
+    }
+    const pieces = literal
+      ? literal
+          .split(LITERAL_SEPARATORS)
+          .map((piece) => piece.replace(/^[\[\]{}()"'`]+|[\[\]{}()"'`;,]+$/g, ""))
+          .filter(Boolean)
+      : [];
     const assets = pieces.map(countableAsset).filter((asset): asset is string => asset !== null);
     const [first] = assets;
 
     if (!sibling) closeRun();
 
     if (first === undefined) {
+      // An EMPTY or very short literal is neutral: neither an entry nor a
+      // break. Matching only `{3,}` was the earlier bug — a 2-character key
+      // such as `"id"` went unmatched, its quote characters fell into the run
+      // glue (which excludes `"`), and the run broke at every element. Now
+      // every quoted token is matched, so short ones must be explicitly
+      // ignored rather than treated as list terminators.
+      if (literal.length < 3) continue;
       // A key or a description leaves the list intact; a value shaped like an
       // asset that did not count ends it.
       if (!LABEL_LITERAL.test(literal)) closeRun();
@@ -624,7 +755,11 @@ function collectColumnInventories(text: string, hosts: Set<string>, emails: Set<
  * encoding the file happens to use. IPv4 is read from anywhere, because a
  * dotted quad is not confusable with an identifier.
  */
-export function inventoryCounts(text: string): Record<AssetInventoryKind, string[]> {
+export function inventoryCounts(
+  text: string,
+  options: InventoryCountOptions = {}
+): Record<AssetInventoryKind, string[]> {
+  const codeLike = options.codeLike ?? true;
   const emails = new Set<string>();
   const hosts = new Set<string>();
 
@@ -638,7 +773,7 @@ export function inventoryCounts(text: string): Record<AssetInventoryKind, string
   for (const [index, view] of views.entries()) {
     collectLiteralInventories(view, hosts, emails);
     collectColumnInventories(view, hosts, emails);
-    collectLineInventories(view, hosts, emails);
+    collectLineInventories(view, hosts, emails, codeLike && index === 0);
     // Index 0 is the member as written; anything after it came out of an
     // escape or a blob, and a decoded blob is data with no code structure left
     // to confuse a bare list with an expression.
@@ -654,10 +789,13 @@ export function inventoryCounts(text: string): Record<AssetInventoryKind, string
   // registrable domain. Counting `a-brand.com` as both a domain and a host would
   // report one list twice and inflate every finding.
   const hostList = named.filter((host) => host !== registrableDomain(host));
+  // IPv4 is read only from places a value can stand alone. Scanning raw text
+  // matched SVG path data in a minified bundle — `hasna-tables-0.1.0.tgz`
+  // failed on 26 "addresses" that were coordinate pairs — so the comment
+  // claiming a dotted quad "cannot be confused with code" was measurably false.
+  // Every Hasna app shipping a bundled dashboard with icons would have hit it.
   const ips = distinct(
-    views
-      .flatMap((view) => [...view.matchAll(IPV4_PATTERN)].map((match) => match[0]))
-      .filter((ip) => IPV4_LITERAL.test(ip) && !isReservedIpv4(ip)),
+    views.flatMap((view) => addressCandidates(view, codeLike)).filter((ip) => !isReservedIpv4(ip)),
   );
 
   return { domain: domains, host: hostList, ip: ips, email: [...emails].sort() };
@@ -701,23 +839,24 @@ function* readDirectoryMembers(root: string, maxMemberBytes: number, dir: string
 }
 
 function* readArchiveMembers(target: string, maxMemberBytes: number): Generator<MemberRead> {
-  const entries = listArchiveEntries(target);
-  const archiveRoot = commonArchiveRoot(entries);
-  for (const entry of entries) {
-    const path = normalizeArchiveEntry(entry, archiveRoot);
-    if (!path) continue;
-    try {
-      yield { path, bytes: readArchiveMemberBytes(target, entry, maxMemberBytes) };
-    } catch (error) {
-      // A member that could not be decoded is reported as UNREADABLE and fails
-      // the scan. The earlier draft counted it and carried on, which meant the
-      // biggest file in the tarball — exactly where a compiled-in list ends
-      // up — could go unread while the report still said `ok`. A clean verdict
-      // over a file nobody read is worse than no scan at all.
-      yield { path, reason: readError(error) };
-    }
+  // ONE decompression for the whole archive, then the ordinary directory walk.
+  let extracted: string;
+  try {
+    extracted = extractArchive(target);
+  } catch (error) {
+    yield { path: basename(target), reason: `archive could not be extracted: ${readError(error)}` };
+    return;
+  }
+  try {
+    // npm packs everything under a single `package/` root; strip it so member
+    // paths match what the manifest and the tarball listing call them.
+    const root = existsSync(join(extracted, "package")) ? join(extracted, "package") : extracted;
+    yield* readDirectoryMembers(root, maxMemberBytes);
+  } finally {
+    rmSync(extracted, { recursive: true, force: true });
   }
 }
+
 
 /**
  * Scan a packed artifact (or, for local iteration, a directory) for bulk asset
@@ -743,7 +882,11 @@ export function scanPublishedArtifact(target: string, options: ArtifactScanOptio
     ? readDirectoryMembers(target, maxMemberBytes)
     : readArchiveMembers(target, maxMemberBytes);
 
-  const thresholds = { ...DEFAULT_INVENTORY_THRESHOLDS, ...options.thresholds };
+  // A threshold high enough to disable a detector is the gate being switched
+  // off through its own front door: `--domain-threshold 1000000` returned exit
+  // 0 on the real leaked artifact while `published_artifact_gate` still passed,
+  // because the gate inspects the script graph and never the flags.
+  const thresholds = clampThresholds({ ...DEFAULT_INVENTORY_THRESHOLDS, ...options.thresholds });
   const waived = new Set(options.waivedKinds ?? []);
   const ignore = new Set(options.ignorePaths ?? []);
 
@@ -780,7 +923,9 @@ export function scanPublishedArtifact(target: string, options: ArtifactScanOptio
     // is decoded to noise instead of excluded; noise is harmless here, because a
     // finding needs many distinct names under real TLDs.
     scanned += 1;
-    const counts = inventoryCounts(decodeMember(member.bytes));
+    const counts = inventoryCounts(decodeMember(member.bytes), {
+      codeLike: isCodeLikeMember(member.path),
+    });
     for (const kind of ASSET_INVENTORY_KINDS) {
       const entries = counts[kind];
       for (const entry of entries) union[kind].add(entry);
@@ -815,9 +960,12 @@ export function scanPublishedArtifact(target: string, options: ArtifactScanOptio
     (waived.has(kind) ? waivedFindings : findings).push(finding);
   }
 
-  if (seen === 0) {
+  // `scanned`, not `seen`. Members that were merely ENUMERATED prove nothing:
+  // `--ignore-paths '*'` produced `ok: true, membersScanned: 0` against a
+  // 35-member artifact, which is the vacuous pass this check exists to stop.
+  if (scanned === 0) {
     throw new Error(
-      `Artifact scan read zero members from ${basename(target)}. Refusing to report a clean verdict on nothing.`,
+      `Artifact scan read zero members from ${basename(target)} (${seen} seen, ${excludedByCaller} excluded). Refusing to report a clean verdict on nothing.`,
     );
   }
 

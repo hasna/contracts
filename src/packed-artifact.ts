@@ -14,6 +14,9 @@
 // as well as a `.js`. Only the archive mechanics are shared.
 
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 /** Largest member the buffered readers decode by default. */
 export const MAX_ARCHIVE_MEMBER_BYTES = 5 * 1024 * 1024;
@@ -34,6 +37,32 @@ export const MAX_SCANNED_MEMBER_BYTES = 512 * 1024 * 1024;
 /** Is `target` a path this module can read as a packed artifact? */
 export function isPackedArtifactPath(target: string): boolean {
   return /\.(tgz|tar\.gz)$/i.test(target);
+}
+
+/**
+ * Extract the whole archive ONCE into a directory and return its path.
+ *
+ * The per-member `tar -xOzf <archive> <entry>` this replaces re-decompressed
+ * the entire stream every time: measured at 0.243 s/member on a 20,414-member
+ * package, i.e. **82 minutes**, against 4.9 s for the same content as a
+ * directory — a ~1000x penalty on a mandatory, blocking `prepack` hook. A gate
+ * that costs an hour is a gate that gets switched off, which is the failure
+ * mode this module exists to argue against.
+ *
+ * Extraction to disk rather than to one buffer, deliberately: `tar -xzO` into a
+ * single pipe truncates on large packages (`gzip: unexpected end of file`), and
+ * a scan that silently reads a truncated stream is worse than a slow one. The
+ * caller owns the returned directory and must remove it.
+ */
+export function extractArchive(target: string): string {
+  const directory = mkdtempSync(join(tmpdir(), "hasna-artifact-scan-"));
+  try {
+    execFileSync("tar", ["-xzf", resolve(target), "-C", directory], { stdio: "pipe" });
+  } catch (error) {
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+  return directory;
 }
 
 /** Raw member paths inside the archive, in archive order. */

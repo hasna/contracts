@@ -72,6 +72,35 @@ describe("the failure this guard exists for", () => {
     expect(scanPublishedArtifact(archive).ok).toBe(true);
   });
 
+  test("a report leaks neither brand, length, nor TLD", () => {
+    // The previous mask emitted two characters of the brand, its exact length,
+    // and the full TLD (`ha***.agency`). Against a one-brand portfolio three
+    // samples of that form name the brand and three of its registrations.
+    // Asserting `toContain("*")` accepted any masking at all; it could catch
+    // NO masking but never BAD masking.
+    const portfolio = oneBrandPortfolio(40);
+    const archive = tarball("redaction-strict", {
+      "package.json": JSON.stringify({ name: "victim", version: "1.0.0" }),
+      "dist/index.js": JSON.stringify(portfolio),
+    });
+    const report = scanPublishedArtifact(archive);
+    const text = formatArtifactScanReport(report);
+
+    // The brand itself, in whole or in part.
+    expect(text).not.toContain("acme-widgets");
+    expect(text.toLowerCase()).not.toContain("acme");
+    // Any TLD it is registered under.
+    for (const domain of portfolio) {
+      const tld = domain.slice(domain.lastIndexOf(".") + 1);
+      expect(text, `must not disclose .${tld}`).not.toContain(`.${tld}`);
+      expect(text, `must not disclose ${domain}`).not.toContain(domain);
+    }
+    // And no length tell: every sample must be the same width.
+    const samples = report.findings.flatMap((finding) => finding.sample);
+    expect(samples.length).toBeGreaterThan(0);
+    expect(new Set(samples.map((sample) => sample.length)).size).toBe(1);
+  });
+
   test("a report never republishes what it found", () => {
     const archive = tarball("redaction", {
       "package.json": JSON.stringify({ name: "victim", version: "0.1.0" }),
@@ -82,8 +111,78 @@ describe("the failure this guard exists for", () => {
     // The report is pasted into tasks, channels, and CI logs. A guard that
     // prints the inventory it just found has disclosed it a second time.
     expect(text).not.toContain("secret-brand-0.com");
-    expect(text).toContain("*");
+    // Samples name a KIND and a per-report digest, never a fragment of the value.
+    expect(text).toMatch(/<(?:host|email|ipv4):[0-9a-f]{8}>/);
     expect(report.findings.every((finding) => finding.sample.length <= 3)).toBe(true);
+  });
+});
+
+/**
+ * THE REAL INCIDENT SHAPE: one brand, many TLDs.
+ *
+ * Every other fixture in this file generates a distinct brand per entry
+ * (`brand-0.com`, `brand-1.net`, …), which is the OPPOSITE structure. The real
+ * disclosed portfolio is a single brand label registered across 177 TLDs — so
+ * no many-brand fixture ever reaches `isMemberAccessRun`, the branch that keys
+ * on `firstLabels.size !== 1`. The collision that dropped detection from 94.4%
+ * to 29.2% was invisible to the entire suite for exactly that reason.
+ */
+function oneBrandPortfolio(count: number): string[] {
+  const tlds = [
+    "academy", "agency", "art", "cafe", "care", "chat", "city", "club", "coach", "coffee",
+    "company", "design", "digital", "expert", "farm", "finance", "gallery", "games", "global",
+    "gold", "green", "group", "guide", "guru", "holdings", "homes", "house", "institute",
+    "international", "land", "legal", "life", "live", "market", "media", "money", "network",
+    "news", "ninja", "partners",
+  ];
+  return tlds.slice(0, count).map((tld) => `acme-widgets.${tld}`);
+}
+
+describe("the real incident structure: one brand across many TLDs", () => {
+  test("a quoted one-brand portfolio is detected", () => {
+    // Removing the `quoted` short-circuit in `isMemberAccessRun` makes THIS
+    // test fail. Nothing else in the suite notices, because nothing else uses
+    // the real shape.
+    const counts = inventoryCounts(JSON.stringify(oneBrandPortfolio(40)));
+    expect(counts.domain.length).toBe(40);
+  });
+
+  test("the packed artifact form is detected end to end", () => {
+    const archive = tarball("one-brand-incident", {
+      "package.json": JSON.stringify({ name: "victim", version: "0.1.0", files: ["dist"] }),
+      "dist/index.js": `var ALLOWED = ${JSON.stringify(oneBrandPortfolio(40))};export{ALLOWED};`,
+    });
+    const report = scanPublishedArtifact(archive);
+    expect(report.ok).toBe(false);
+    expect(report.findings.some((finding) => finding.kind === "domain")).toBe(true);
+  });
+
+  test("and in every unquoted list layout a human would actually write", () => {
+    // Measured before the fix: markdown 0, numbered 0, YAML 0 — while the
+    // many-brand equivalent of each scored 40. The guard is a CODE rule and was
+    // being applied to prose.
+    const portfolio = oneBrandPortfolio(40);
+    const layouts: Array<[string, string]> = [
+      ["markdown bullets", portfolio.map((domain) => `- ${domain}`).join("\n")],
+      ["numbered list", portfolio.map((domain, index) => `${index + 1}. ${domain}`).join("\n")],
+      ["yaml sequence", portfolio.map((domain) => `  - host: ${domain}`).join("\n")],
+      ["bare lines", portfolio.join("\n")],
+    ];
+    for (const [label, text] of layouts) {
+      const counts = inventoryCounts(text, { codeLike: false });
+      expect(counts.domain.length + counts.host.length, label).toBeGreaterThanOrEqual(38);
+    }
+  });
+
+  test("but a locale barrel in CODE is still member access, not a portfolio", () => {
+    // The counterweight. Every ISO language code is a ccTLD, so a per-line rule
+    // reads this as a ten-domain portfolio. Both halves have to hold at once.
+    const locales = ["vi", "ua", "tr", "th", "sv", "ru", "pl", "no", "it", "id"]
+      .map((locale) => `  exports.${locale},`)
+      .join("\n");
+    const counts = inventoryCounts(locales, { codeLike: true });
+    expect(counts.domain).toEqual([]);
+    expect(counts.host).toEqual([]);
   });
 });
 
@@ -227,10 +326,23 @@ describe("it cannot pass by having nothing to check", () => {
 
     // An unread member is not a clean member: the scan has not cleared the
     // artifact, it has failed to look at it.
-    const oversize = scanPublishedArtifact(archive, { maxMemberBytes: 4 });
+    // One member readable, one over the limit: the scan runs, finds nothing,
+    // and still must NOT report ok — an unread member is not a clean member.
+    const mixed = tarball("partially-unreadable", {
+      "package.json": JSON.stringify({ name: "mixed", version: "1.0.0" }),
+      "dist/small.js": "export const a = 1;",
+      "dist/big.js": `export const pad = "${"x".repeat(4000)}";`,
+    });
+    const oversize = scanPublishedArtifact(mixed, { maxMemberBytes: 1000 });
     expect(oversize.findings).toEqual([]);
-    expect(oversize.ok).toBe(false);
+    expect(oversize.membersScanned).toBeGreaterThan(0);
     expect(oversize.unreadable.length).toBeGreaterThan(0);
+    expect(oversize.ok).toBe(false);
+
+    // And when EVERY member is excluded, there is no verdict to give at all.
+    expect(() => scanPublishedArtifact(archive, { ignorePaths: ["package.json", "dist/index.js"] })).toThrow(
+      /zero members/,
+    );
   });
 
   test("a real scan reports how many members it actually read", () => {
