@@ -5144,6 +5144,31 @@ const WaiverTextSchema = (maxLength: number) =>
  * engine, and carrying a non-empty reason. `expiresAt` makes the exception
  * time-boxed — conformance fails the storage gate once it has passed.
  */
+/** Asset classes the published-artifact guard counts. Mirrors ASSET_INVENTORY_KINDS. */
+export const ASSET_INVENTORY_KINDS = ["domain", "host", "ip", "email"] as const;
+export type AssetInventoryKind = (typeof ASSET_INVENTORY_KINDS)[number];
+
+/**
+ * A reviewed exception to the asset-inventory guard.
+ *
+ * Clause B is explicit about what this may NEVER cover: an inventory of assets
+ * the vendor owns is not waivable, at any threshold, in any encoding. The
+ * legitimate use is public reference data a package genuinely needs to ship —
+ * a public-suffix list, an ICANN TLD table. `reason` must therefore name the
+ * data, `reviewedBy` names who is accountable, and the waiver expires, so a
+ * one-off exception cannot quietly become permanent.
+ */
+export const AssetInventoryWaiverSchema = z
+  .object({
+    kind: z.enum(ASSET_INVENTORY_KINDS),
+    reason: WaiverTextSchema(STORAGE_WAIVER_REASON_MAX_LENGTH),
+    reviewedBy: WaiverTextSchema(STORAGE_WAIVER_REVIEWER_MAX_LENGTH),
+    /** UTC RFC 3339 timestamp (`Z`) after which the guard stops honouring it. */
+    expiresAt: TimestampSchema
+  })
+  .strict();
+export type AssetInventoryWaiver = z.infer<typeof AssetInventoryWaiverSchema>;
+
 export const StorageEngineWaiverSchema = z
   .object({
     engine: z.enum(WAIVABLE_STORAGE_ENGINES),
@@ -5208,7 +5233,30 @@ export const ServiceContractMetadataSchema = z
         /** Explicit exception profile for non-Node monorepos. Libraries are eligible without a profile. */
         waiverProfile: z.literal("non-node-monorepo").optional(),
         /** Explicit storage-engine exceptions. Only `cli-with-store` repos may waive PostgreSQL. */
-        waivedStorageEngines: z.array(StorageEngineWaiverSchema).default([])
+        waivedStorageEngines: z.array(StorageEngineWaiverSchema).default([]),
+        /** Reviewed, expiring exceptions to the published-artifact asset-inventory guard. */
+        waivedAssetInventories: z.array(AssetInventoryWaiverSchema).default([])
+      })
+      .catchall(z.unknown())
+      .optional(),
+    /**
+     * Release gating. `artifactScan.script` names the package script that scans
+     * the PACKED artifact; `published_artifact_gate` then verifies that
+     * `prepack` actually reaches it.
+     *
+     * Declared here rather than matched by name so the gate is contract-driven:
+     * a repo may call its script whatever it likes, and the check resolves the
+     * real script graph instead of grepping for a blessed string.
+     */
+    release: z
+      .object({
+        artifactScan: z
+          .object({
+            /** Package-script name, e.g. `scan:artifact`. */
+            script: z.string().trim().min(1)
+          })
+          .strict()
+          .optional()
       })
       .catchall(z.unknown())
       .optional()

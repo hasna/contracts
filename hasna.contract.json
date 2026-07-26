@@ -28,6 +28,9 @@
     }
   ],
   "metadata": {
+    "release": {
+      "artifactScan": { "script": "scan:artifact" }
+    },
     "conformance": {
       "waivedSurfaces": [
         {

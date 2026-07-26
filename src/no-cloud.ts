@@ -1,6 +1,12 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
+import {
+  commonArchiveRoot,
+  isPackedArtifactPath,
+  listArchiveEntries,
+  normalizeArchiveEntry,
+  readArchiveMemberText
+} from "./packed-artifact";
 import {
   FORBIDDEN_SHARED_CLOUD_RUNTIMES,
   AppCloudManifestSchema,
@@ -263,46 +269,19 @@ function collectDirectoryFiles(root: string): ScanFile[] {
   return files;
 }
 
-function normalizeArchiveEntry(entry: string, commonRoot: string | null): string | null {
-  let normalized = entry.replace(/^\.\/+/, "").replace(/^\/+/, "");
-  if (!normalized || normalized.endsWith("/")) return null;
-  if (commonRoot && (normalized === commonRoot || normalized.startsWith(`${commonRoot}/`))) {
-    normalized = normalized.slice(commonRoot.length).replace(/^\/+/, "");
-  } else {
-    normalized = normalized.replace(/^package\//, "");
-  }
-  return normalized || null;
-}
-
-function commonArchiveRoot(entries: string[]): string | null {
-  const firstSegments = new Set<string>();
-  for (const entry of entries) {
-    const normalized = entry.replace(/^\.\/+/, "").replace(/^\/+/, "");
-    if (!normalized || normalized.endsWith("/")) continue;
-    const [first, ...rest] = normalized.split("/");
-    if (!first || rest.length === 0) return null;
-    firstSegments.add(first);
-    if (firstSegments.size > 1) return null;
-  }
-  const [root] = [...firstSegments];
-  return root ?? null;
-}
-
 function collectTarballFiles(target: string): ScanFile[] {
-  const entries = execFileSync("tar", ["-tzf", target], { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 })
-    .split("\n")
-    .filter(Boolean);
+  const entries = listArchiveEntries(target);
   const archiveRoot = commonArchiveRoot(entries);
   const files: ScanFile[] = [];
   for (const entry of entries) {
     const normalized = normalizeArchiveEntry(entry, archiveRoot);
     if (!normalized) continue;
+    // This guard reads SOURCE-SHAPED members only: it is looking for imports
+    // and runtime config. The published-artifact guard reads everything, and
+    // deliberately so — see src/artifact-scan.ts.
     const kind = shouldReadPath(normalized);
     if (!kind) continue;
-    const text = execFileSync("tar", ["-xOzf", target, entry], {
-      encoding: "utf8",
-      maxBuffer: MAX_TEXT_BYTES
-    });
+    const text = readArchiveMemberText(target, entry);
     const artifactKind = kind === "package_manifest" || kind === "lockfile" ? kind : "packed_artifact";
     files.push({ path: normalized, text, kind: artifactKind });
   }
@@ -312,7 +291,7 @@ function collectTarballFiles(target: string): ScanFile[] {
 function collectScanFiles(target: string): { files: ScanFile[]; scanMode: NoCloudEvidencePack["scanMode"] } {
   const stat = statSync(target);
   if (stat.isDirectory()) return { files: collectDirectoryFiles(target), scanMode: "source_tree" };
-  if (stat.isFile() && /\.(tgz|tar\.gz)$/i.test(target)) return { files: collectTarballFiles(target), scanMode: "packed_artifact" };
+  if (stat.isFile() && isPackedArtifactPath(target)) return { files: collectTarballFiles(target), scanMode: "packed_artifact" };
   throw new Error("no-cloud scan target must be a directory, .tgz, or .tar.gz file");
 }
 

@@ -14,6 +14,7 @@ import { getEmbeddedSchemaId, validateContract } from "../validators";
 import { secureLocalStorePolicy } from "../secure-local-store";
 import { runVendorKit } from "./kit-runner";
 import { runIssueKey } from "./issue-key";
+import { formatArtifactScanReport, scanPublishedArtifact } from "../artifact-scan";
 
 function collectJsonFiles(root: string): string[] {
   const stat = statSync(root);
@@ -66,7 +67,7 @@ function preflightJsonUsageErrors(argv: string[]) {
     return false;
   }
 
-  if (!["schemas", "validate", "conformance", "no-cloud-scan", "repo-conformance", "vendor-kit", "issue-key", "secure-local-store"].includes(command)) {
+  if (!["schemas", "validate", "conformance", "no-cloud-scan", "repo-conformance", "vendor-kit", "issue-key", "artifact-scan", "secure-local-store"].includes(command)) {
     return reportParserJsonError("commander.unknownCommand", `unknown command '${command}'`);
   }
 
@@ -398,6 +399,46 @@ export function createContractsProgram() {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         reportCliError(options, `vendor-kit failed for ${target}: ${message}`, { path: target, code: "vendor_kit_error" });
+      }
+    });
+
+  program
+    .command("artifact-scan")
+    .description("Scan a PACKED artifact (.tgz) for bulk asset inventories — run this from prepack, never against src/")
+    .argument("<target>", "Path to a packed .tgz/.tar.gz, or a directory for local iteration")
+    .option("--domain-threshold <n>", "Distinct registrable domains in one file that constitute an inventory")
+    .option("--host-threshold <n>", "Distinct hostnames in one file that constitute an inventory")
+    .option("--ip-threshold <n>", "Distinct public IPv4 addresses in one file that constitute an inventory")
+    .option("--email-threshold <n>", "Distinct email addresses in one file that constitute an inventory")
+    .option("-j, --json", "Output JSON")
+    .action((target: string, options: Record<string, unknown>) => {
+      const thresholds: Record<string, number> = {};
+      for (const [flag, kind] of [
+        ["domainThreshold", "domain"],
+        ["hostThreshold", "host"],
+        ["ipThreshold", "ip"],
+        ["emailThreshold", "email"]
+      ] as const) {
+        const raw = options[flag];
+        if (raw === undefined) continue;
+        const parsed = Number(raw);
+        if (!Number.isInteger(parsed) || parsed < 1) {
+          reportCliError(options, `--${kind}-threshold must be a positive integer`, { code: "bad_threshold" });
+          return;
+        }
+        thresholds[kind] = parsed;
+      }
+      try {
+        const report = scanPublishedArtifact(target, { thresholds });
+        if (options.json) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(formatArtifactScanReport(report));
+        }
+        if (!report.ok) process.exitCode = 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        reportCliError(options, `artifact-scan failed for ${target}: ${message}`, { path: target, code: "artifact_scan_error" });
       }
     });
 
