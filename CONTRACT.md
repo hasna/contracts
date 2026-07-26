@@ -525,13 +525,28 @@ leaves a compliant repo no recourse but to unwire the gate.
 
 **Stated limit.** The scanner counts an inventory in the two shapes a list
 actually takes in a shipped file: a quoted literal whose content is mostly
-assets (an array, or a joined string such as `"a.example,b.example".split(",")`),
-and a delimited column — a `.csv` field, a markdown table cell, a one-per-line
-list — that holds an asset on several consecutive rows. An inventory written as
-running prose, in bullets or inside sentences, is read but not counted. The
-scanner also counts only inventories under recognized TLDs, and excludes TLDs
-that collide with ubiquitous programming vocabulary, so an inventory built
-exclusively from those TLDs would not be detected by count.
+assets (a joined string such as `"a.example,b.example".split(",")`, or a run of
+sibling literals such as `["a.example", "b.example", …]` — including one keyed
+by name, `{"edge-1": {"host": "…"}, …}`), and a delimited column — a `.csv`
+field, a markdown table cell, a one-per-line list — that holds an asset on
+several consecutive rows. Entries are read through their **host component**, so
+`https://svc-1.example/api`, `//svc-1.example/api` and `svc-1.example:443` count
+as the machine they name; an endpoint catalogue is written as endpoints, and
+clause B names endpoint catalogues explicitly.
+
+Three residuals, stated rather than implied:
+
+- An inventory written as **running prose** — in bullets, or inside sentences —
+  is read but not counted.
+- A **lone mention repeated across a file** is not an inventory:
+  `expect(isEmail("user@a.example"))` on thirty lines is thirty assertions, not
+  a list. Counting those aggregated ordinary validator fixtures into a failure —
+  measured on `zod@4.4.3` (23 and 24 fixture emails in its shipped
+  `string.test.ts`) and `email-validator@2.0.4` (22) — and a mandatory gate that
+  fires on compliant repos is a gate that gets switched off.
+- The scanner counts only inventories under **recognized TLDs**, and excludes
+  TLDs that collide with ubiquitous programming vocabulary, so an inventory
+  built exclusively from those TLDs would not be detected by count.
 
 Those limits are deliberate and measured, not aspirational. `.name`, `.host`,
 `.info` and every ISO language code are real TLDs, so a rule that counted any

@@ -318,6 +318,113 @@ describe("an inventory is not made invisible by how it is written", () => {
   });
 });
 
+// --- a mention is not a list, however many mentions a file makes ---
+
+describe("scattered mentions do not aggregate into an inventory", () => {
+  /** What a validator's fixture file looks like: one asset per assertion. */
+  function assertions(count: number): string {
+    return Array.from({ length: count }, (_, i) => `  expect(isEmail("user${i}@mailtest-${i}.com")).toBe(true);`).join(
+      "\n",
+    );
+  }
+
+  test("a shipped test file of distinct fixture emails passes the gate", () => {
+    // Measured on real packages, not imagined: counting a lone quoted asset as
+    // a list made `zod@4.4.3` fail on 23 and 24 ordinary validator fixtures in
+    // `src/**/tests/string.test.ts`, and `email-validator@2.0.4` on 22 in
+    // `test.js`. Clause C makes this gate mandatory and blocking on prepack, so
+    // that is `npm publish` refused on a compliant repo with no remedy but a
+    // whole-artifact `email` waiver — the gate getting switched off.
+    const archive = tarball("fixture-emails", {
+      "package.json": JSON.stringify({ name: "validator-ish", version: "1.0.0" }),
+      "src/is-email.test.ts": `describe("isEmail", () => {\n${assertions(30)}\n});\n`,
+    });
+    const report = scanPublishedArtifact(archive);
+    expect(report.findings).toEqual([]);
+    expect(report.ok).toBe(true);
+    expect(inventoryCounts(assertions(30)).email).toEqual([]);
+  });
+
+  test("a lone quoted asset does not join the other lone assets in its file", () => {
+    const mentions = portfolio(40).map((domain) => `const client = connect("${domain}");`).join("\n");
+    expect(inventoryCounts(mentions).domain).toEqual([]);
+    expect(inventoryCounts(`const primary = "${portfolio(1)[0]}";`).domain).toEqual([]);
+  });
+
+  test("but the SAME entries written as a list are still a list", () => {
+    // The fix is "require the list shape", not "stop counting". An array of the
+    // very entries the assertions mentioned is an inventory, before and after.
+    const emails = Array.from({ length: 30 }, (_, i) => `user${i}@mailtest-${i}.com`);
+    expect(inventoryCounts(JSON.stringify(emails)).email.length).toBe(30);
+    expect(inventoryCounts(portfolio(40).map((domain) => `"${domain}"`).join(",\n")).domain.length).toBe(40);
+  });
+
+  test("a run of sibling literals is what makes an array an array", () => {
+    // Five in a row is a list; the same five spread across five expressions is
+    // five mentions. The boundary is stated rather than emergent.
+    const five = portfolio(5, "run-brand");
+    expect(inventoryCounts(`[${five.map((domain) => `"${domain}"`).join(",")}]`).domain.length).toBe(5);
+    expect(inventoryCounts(five.map((domain) => `use("${domain}");`).join("\n")).domain).toEqual([]);
+  });
+});
+
+// --- clause B names endpoint catalogues, so endpoints have to be visible ---
+
+describe("an endpoint catalogue is not hidden by writing it as endpoints", () => {
+  const endpoints = Array.from({ length: 100 }, (_, i) => `svc-${i}.fleet-example-corp.com`);
+
+  test("URL, scheme-relative, host:port and userinfo forms all count the host", () => {
+    // An endpoint catalogue is written as endpoints. Counting only the bare
+    // name let the whole category — named in clause B — ship undetected: 100
+    // `https://…/api/v1` entries counted zero while the same 100 bare names
+    // counted 100.
+    const forms: Record<string, string[]> = {
+      bare: endpoints,
+      url: endpoints.map((host) => `https://${host}/api/v1`),
+      schemeRelative: endpoints.map((host) => `//${host}/api/v1`),
+      hostPort: endpoints.map((host) => `${host}:443`),
+      userinfo: endpoints.map((host) => `https://svc:token@${host}:8443/v1?trace=1#top`),
+    };
+    for (const [form, entries] of Object.entries(forms)) {
+      expect(inventoryCounts(JSON.stringify(entries)).host.length, `${form} (array)`).toBe(100);
+      expect(inventoryCounts(entries.join("\n")).host.length, `${form} (one per line)`).toBe(100);
+    }
+  });
+
+  test("a packed artifact carrying a URL catalogue fails the scan", () => {
+    const archive = tarball("endpoint-catalogue", {
+      "package.json": JSON.stringify({ name: "fleet", version: "1.0.0", files: ["dist"] }),
+      "dist/index.js": `var E=${JSON.stringify(endpoints.map((host) => `https://${host}/api/v1`))};export{E};`,
+    });
+    const report = scanPublishedArtifact(archive);
+    expect(report.ok).toBe(false);
+    const finding = report.findings.find((entry) => entry.kind === "host");
+    expect(finding?.path).toBe("dist/index.js");
+    expect(finding?.count).toBe(100);
+  });
+
+  test("a catalogue written as keyed records is still one list", () => {
+    // `{"edge-1": {"description": "…", "host": "…", "port": 443}, …}` is the
+    // shape a service table actually takes. The keys and the descriptions sit
+    // between the entries; they are labels, and a list of pairs is one list.
+    const table = Object.fromEntries(
+      endpoints.map((host, index) => [`edge-${index}`, { description: `Edge node ${index}`, host, port: 443 }]),
+    );
+    expect(inventoryCounts(JSON.stringify(table, null, 2)).host.length).toBe(100);
+  });
+
+  test("a path is only stripped where a scheme says the piece is a URL", () => {
+    // Without that marker `agents.list/get` is a member access. The guard reads
+    // `dist` bundles, where those outnumber real hosts by orders of magnitude.
+    const members = ["agents.list/get", "config.replace/all", "schema.json/definitions", "README.md/section"]
+      .map((identifier) => `"${identifier}"`)
+      .join(",");
+    const counts = inventoryCounts(`const surface = [${members}];`);
+    expect(counts.domain).toEqual([]);
+    expect(counts.host).toEqual([]);
+  });
+});
+
 describe("thresholds and waivers", () => {
   test("a mention is not an inventory", () => {
     const few = portfolio(DEFAULT_INVENTORY_THRESHOLDS.domain - 1)

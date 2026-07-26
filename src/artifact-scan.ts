@@ -128,11 +128,23 @@ const MULTI_LABEL_SUFFIXES = new Set(
  * So a candidate counts only where a LIST lives, and a list has two shapes:
  *
  *  1. A LITERAL INVENTORY. The candidate sits in a quoted string whose content
- *     is mostly assets — `["a-brand.com", …]`, `"a-brand.com,b-brand.com,…"
- *     .split(",")`, a newline-joined template literal. The ratio is what
- *     separates a list from a sentence, and it is also what keeps a `.map`
- *     file's `sourcesContent` — an entire source file inside one literal —
- *     from being read as an inventory of its own `x.name` expressions.
+ *     is mostly assets — `"a-brand.com,b-brand.com,…".split(",")`, a
+ *     newline-joined template literal — or in a RUN of sibling literals that
+ *     between them form one list: `["a-brand.com", "b-brand.com", …]`, which is
+ *     what an array of names looks like before and after minification. The
+ *     ratio is what separates a list from a sentence, and it is also what keeps
+ *     a `.map` file's `sourcesContent` — an entire source file inside one
+ *     literal — from being read as an inventory of its own `x.name`
+ *     expressions.
+ *
+ *     A LONE quoted asset is a MENTION, not a list, and this is not a nicety.
+ *     `expect(isEmail("user@a-brand.com")).toBe(true)` is one literal with one
+ *     piece; counting it made every scattered mention in a file aggregate into
+ *     an "inventory", and a validator's fixture file — `zod@4.4.3` ships 23 and
+ *     24 of them in its `string.test.ts`, `email-validator@2.0.4` 22 — failed a
+ *     gate clause C makes mandatory and blocking. So a one-piece literal counts
+ *     only where its neighbours are assets too, with nothing between them but
+ *     the punctuation and keys a list is written with.
  *  2. A COLUMN INVENTORY. The candidate is the WHOLE of a delimited field, in
  *     the same column, on several consecutive lines: a `.csv`, a markdown
  *     table, a one-per-line list. A column is what a table is, and code does
@@ -145,9 +157,16 @@ const MULTI_LABEL_SUFFIXES = new Set(
  * vocabulary), and every label must be lowercase `[a-z0-9-]`, which is what a
  * hostname is and what `connectionTimeoutMillis` is not.
  *
- * THE RESIDUAL, STATED: an inventory written as running prose — a bulleted
- * list, names inside sentences — is read but not counted. Clause B is a
- * prohibition, not a count.
+ * Both rules read a candidate through {@link hostComponent} first, because an
+ * endpoint catalogue is not written as bare hostnames. `https://svc-1.a.com/v1`,
+ * `//svc-1.a.com/v1` and `svc-1.a.com:443` are the forms an endpoint list
+ * actually takes, and clause B names internal endpoint catalogues explicitly —
+ * a rule that only saw the bare name let the whole category through.
+ *
+ * THE RESIDUALS, STATED: an inventory written as running prose — a bulleted
+ * list, names inside sentences — is read but not counted, and neither is one
+ * asset mentioned once per expression however many times a file does it.
+ * Clause B is a prohibition, not a count.
  */
 const QUOTED_LITERAL_PATTERN = /(?:"([^"\n]{3,})"|'([^'\n]{3,})'|`([^`]{3,})`)/g;
 /** How a joined inventory separates its entries inside one literal. */
@@ -156,6 +175,32 @@ const LITERAL_SEPARATORS = /[\s,;|]+/;
 const FIELD_SEPARATORS = /[,|\t]/;
 /** Consecutive rows that make a column a column rather than a coincidence. */
 const MIN_COLUMN_RUN = 5;
+/** Sibling literals in a row that make an array a list rather than a mention. */
+const MIN_LITERAL_RUN = 5;
+/**
+ * What may sit BETWEEN two quoted literals and still leave them siblings in one
+ * list: the punctuation and keys that an array, an object, or a JSON document
+ * puts between its elements — `,`, `:`, brackets, a number, an unquoted key.
+ * A call breaks the run, and that is the whole point: `expect(isEmail(…))` and
+ * `fetch(…)` around every entry are separate expressions that happen to mention
+ * an asset, not a list that holds one.
+ */
+const LITERAL_RUN_GLUE = /^[\s,;:=|<>+\-\w$[\]{}]*$/;
+/**
+ * A key, not an entry: a JSON field name, an object key, a short description.
+ * It carries no dot and no `@`, so it is not an asset that merely failed to
+ * count, and `{"1und1": {"description": "…", "host": "…"}, …}` is still one
+ * list of hosts. An entry that DOES look like an asset but is not countable —
+ * a spec-reserved name, an unrecognized TLD — breaks the run instead, because a
+ * list mostly made of those is a fixture table, not an inventory.
+ */
+const LABEL_LITERAL = /^[^.@\n]{1,80}$/;
+/** `scheme://` or a scheme-relative `//`, the prefix that makes a piece a URL. */
+const URL_AUTHORITY_PREFIX = /^(?:[a-z][a-z0-9+.-]*:)?\/\//;
+/** Where a URL's authority ends. */
+const URL_AUTHORITY_END = /[/?#]/;
+/** A `:443` an endpoint list hangs off the end of a host. */
+const HOST_PORT_SUFFIX = /:\d{1,5}$/;
 const HOSTNAME_LITERAL = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/;
 const EMAIL_LITERAL = /^[a-z0-9._%+-]+@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/;
 const IPV4_LITERAL = /^(?:\d{1,3}\.){3}\d{1,3}$/;
@@ -295,20 +340,76 @@ function isCountableEmail(value: string): boolean {
   return isRecognizedTld(domain.slice(domain.lastIndexOf(".") + 1));
 }
 
-/** Shape 1: a quoted literal whose content is mostly assets. */
+/**
+ * The host a piece names, whether it was written bare or as an endpoint.
+ *
+ * `https://user@svc-1.a-brand.com:8443/v1?x=1` and `svc-1.a-brand.com:443` are
+ * the same machine as `svc-1.a-brand.com`, and an endpoint catalogue is written
+ * in the first two forms far more often than the third. The path is stripped
+ * only where a scheme (or a scheme-relative `//`) says the piece really is a
+ * URL: without that marker `agents.list/get` is a member access, not a host.
+ */
+function hostComponent(piece: string): string {
+  const prefix = URL_AUTHORITY_PREFIX.exec(piece);
+  if (!prefix) return piece.replace(HOST_PORT_SUFFIX, "");
+  let authority = piece.slice(prefix[0].length);
+  const end = authority.search(URL_AUTHORITY_END);
+  if (end >= 0) authority = authority.slice(0, end);
+  const userinfo = authority.lastIndexOf("@");
+  if (userinfo >= 0) authority = authority.slice(userinfo + 1);
+  return authority.replace(HOST_PORT_SUFFIX, "");
+}
+
+/** The asset a piece carries — the email itself, or the host it names — or null. */
+function countableAsset(piece: string): string | null {
+  if (isCountableEmail(piece)) return piece;
+  const host = hostComponent(piece);
+  return isCountableHostname(host) ? host : null;
+}
+
+function record(asset: string, hosts: Set<string>, emails: Set<string>): void {
+  (isCountableEmail(asset) ? emails : hosts).add(asset);
+}
+
+/** Shape 1: a literal whose content is mostly assets, or a run of sibling ones. */
 function collectLiteralInventories(text: string, hosts: Set<string>, emails: Set<string>): void {
+  // A one-piece literal is a mention on its own and an array element next to
+  // its siblings, so it cannot be judged until the run it belongs to ends.
+  let run: string[] = [];
+  let previousEnd = -1;
+  const closeRun = (): void => {
+    if (run.length >= MIN_LITERAL_RUN) for (const asset of run) record(asset, hosts, emails);
+    run = [];
+  };
+
   for (const match of text.matchAll(QUOTED_LITERAL_PATTERN)) {
+    const start = match.index ?? 0;
+    const sibling = previousEnd >= 0 && LITERAL_RUN_GLUE.test(text.slice(previousEnd, start));
+    previousEnd = start + match[0].length;
+
     const literal = (match[1] ?? match[2] ?? match[3] ?? "").trim();
-    if (!literal) continue;
-    const pieces = literal.split(LITERAL_SEPARATORS).filter(Boolean);
-    const assets = pieces.filter((piece) => isCountableHostname(piece) || isCountableEmail(piece));
-    if (assets.length === 0) continue;
-    // A literal that is MOSTLY assets is a list; one that names an asset in a
-    // sentence is a mention, and the thresholds are set where an inventory
-    // begins rather than where a mention does.
-    if (assets.length * 2 < pieces.length) continue;
-    for (const asset of assets) (isCountableEmail(asset) ? emails : hosts).add(asset);
+    const pieces = literal ? literal.split(LITERAL_SEPARATORS).filter(Boolean) : [];
+    const assets = pieces.map(countableAsset).filter((asset): asset is string => asset !== null);
+    const [first] = assets;
+
+    if (!sibling) closeRun();
+
+    if (first === undefined) {
+      // A key or a description leaves the list intact; a value shaped like an
+      // asset that did not count ends it.
+      if (!LABEL_LITERAL.test(literal)) closeRun();
+      continue;
+    }
+    if (pieces.length === 1) {
+      run.push(first);
+      continue;
+    }
+    // A literal that is MOSTLY assets is a list in its own right, judged on its
+    // own ratio: it does not need neighbours and it does not join a run.
+    closeRun();
+    if (assets.length * 2 >= pieces.length) for (const asset of assets) record(asset, hosts, emails);
   }
+  closeRun();
 }
 
 /** Shape 2: the same field position, an asset on several consecutive rows. */
@@ -318,7 +419,7 @@ function collectColumnInventories(text: string, hosts: Set<string>, emails: Set<
     const values = runs.get(column);
     runs.delete(column);
     if (!values || values.length < MIN_COLUMN_RUN) return;
-    for (const value of values) (isCountableEmail(value) ? emails : hosts).add(value);
+    for (const value of values) record(value, hosts, emails);
   };
 
   for (const line of text.split(/\r?\n/)) {
@@ -332,12 +433,13 @@ function collectColumnInventories(text: string, hosts: Set<string>, emails: Set<
     const carried = new Set<number>();
     for (const [column, field] of fields.entries()) {
       const value = field.trim();
-      if (!isCountableHostname(value) && !isCountableEmail(value)) continue;
+      const asset = countableAsset(value);
+      if (asset === null) continue;
       if (populated < 2 && trimmed !== value) continue;
       carried.add(column);
       const run = runs.get(column);
-      if (run) run.push(value);
-      else runs.set(column, [value]);
+      if (run) run.push(asset);
+      else runs.set(column, [asset]);
     }
     for (const column of [...runs.keys()]) if (!carried.has(column)) close(column);
   }
