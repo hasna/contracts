@@ -457,6 +457,57 @@
                   }
                 }
               }
+            },
+            "waivedStorageEngines": {
+              "type": "array",
+              "uniqueItems": true,
+              "maxItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "engine",
+                  "reason"
+                ],
+                "properties": {
+                  "engine": {
+                    "enum": [
+                      "postgres"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "allOf": [
+                      {
+                        "pattern": "\\S"
+                      },
+                      {
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+                      }
+                    ]
+                  },
+                  "reviewedBy": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "allOf": [
+                      {
+                        "pattern": "\\S"
+                      },
+                      {
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+                      }
+                    ]
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              },
+              "description": "Explicit storage-engine exceptions, at most one per engine. Only a CLI-only cli-with-store repo (no <name>-serve bin, storage.mode local, no cloud placement, no hasna-saas story) may waive postgres; sqlite is never waivable, expiresAt is a UTC RFC 3339 timestamp, and conformance stops honouring a waiver once it has passed."
             }
           }
         }

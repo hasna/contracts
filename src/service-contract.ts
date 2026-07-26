@@ -7,14 +7,24 @@ import type { z } from "zod";
 import {
   ServiceContractManifestSchema,
   SCHEMA_IDS,
+  STORAGE_WAIVER_REASON_MAX_LENGTH,
+  STORAGE_WAIVER_REVIEWER_MAX_LENGTH,
+  WAIVABLE_STORAGE_ENGINES,
   allowedBinsForName,
   databaseUrlSecretRefFor,
   defaultSqlitePathFor,
   type ServiceContractManifest
 } from "./schemas";
+
 import { storageEnvKeys, type StorageEnvKeys } from "./mode";
 
 export const SERVICE_CONTRACT_MANIFEST_FILENAME = "hasna.contract.json";
+
+/**
+ * JSON-Schema mirror of the zod control-character rejection on waiver prose.
+ * Kept as a constant so the two copies of the shipped schema cannot drift.
+ */
+const WAIVER_TEXT_JSON_SCHEMA_PATTERN = "^[^\\u0000-\\u001f\\u007f]*$";
 
 /**
  * Draft-07 JSON Schema for `hasna.contract.json`. This is the source of truth
@@ -272,6 +282,37 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
                   reason: { type: "string", minLength: 1 }
                 }
               }
+            },
+            waivedStorageEngines: {
+              type: "array",
+              uniqueItems: true,
+              // uniqueItems compares whole objects, so it cannot catch two
+              // waivers for the same engine. With a single waivable engine the
+              // item cap enforces "at most one waiver per engine" exactly.
+              maxItems: WAIVABLE_STORAGE_ENGINES.length,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["engine", "reason"],
+                properties: {
+                  engine: { enum: [...WAIVABLE_STORAGE_ENGINES] },
+                  reason: {
+                    type: "string",
+                    minLength: 1,
+                    maxLength: STORAGE_WAIVER_REASON_MAX_LENGTH,
+                    allOf: [{ pattern: "\\S" }, { pattern: WAIVER_TEXT_JSON_SCHEMA_PATTERN }]
+                  },
+                  reviewedBy: {
+                    type: "string",
+                    minLength: 1,
+                    maxLength: STORAGE_WAIVER_REVIEWER_MAX_LENGTH,
+                    allOf: [{ pattern: "\\S" }, { pattern: WAIVER_TEXT_JSON_SCHEMA_PATTERN }]
+                  },
+                  expiresAt: { type: "string", format: "date-time" }
+                }
+              },
+              description:
+                "Explicit storage-engine exceptions, at most one per engine. Only a CLI-only cli-with-store repo (no <name>-serve bin, storage.mode local, no cloud placement, no hasna-saas story) may waive postgres; sqlite is never waivable, expiresAt is a UTC RFC 3339 timestamp, and conformance stops honouring a waiver once it has passed."
             }
           }
         }

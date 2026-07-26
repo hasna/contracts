@@ -136,6 +136,73 @@ per-repo waiver recorded in `hasna.contract.json` review. `library` repos
   the serve/migrate boundary can derive `HASNA_<NAME>_DATABASE_URL`.
 - `storage.pgTestGate` records the disposable live-Postgres test env var and
   command. Conformance records the command as data and never executes it.
+- A store-owning core **MUST** declare both `storage.envPrefix` and
+  `storage.pgTestGate` **unless** PostgreSQL is explicitly waived. Not declaring
+  the engine does not remove the obligation; only a valid waiver does.
+
+### Explicit storage-engine waivers
+
+PostgreSQL remains the target for every store-owning core, but a waiver-eligible
+`cli-with-store` repo (see the conditions below) MAY ship SQLite-only for an
+honest intermediate state by declaring an explicit, auditable waiver instead of
+fabricating PostgreSQL support:
+
+```json
+{
+  "storage": {
+    "mode": "local",
+    "engines": ["sqlite"],
+    "envPrefix": "HASNA_FACTORY_",
+    "sqlitePath": "~/.hasna/factory/factory.db"
+  },
+  "metadata": {
+    "conformance": {
+      "waivedStorageEngines": [
+        {
+          "engine": "postgres",
+          "reason": "SQLite-only local CLI; PostgreSQL adoption is tracked through the vendored storage kit.",
+          "reviewedBy": "platform-storage",
+          "expiresAt": "2027-01-01T00:00:00.000Z"
+        }
+      ]
+    }
+  }
+}
+```
+
+- A storage waiver is typed, unique per engine, and **MUST** carry a non-empty
+  `reason`. `reason` and `reviewedBy` are echoed into the conformance report, so
+  they are length-bounded (500 / 200 characters) and **MUST NOT** contain
+  control characters. A waiver whose prose cannot be printed — because it
+  carries a secret reference, internal host, ARN, or account id — **fails** the
+  storage gate: an exception nobody can read is not auditable.
+- `reviewedBy` and `expiresAt` are optional. `expiresAt` is a UTC RFC 3339
+  timestamp (`Z`, e.g. `2027-01-01T00:00:00.000Z`); conformance **fails** the
+  storage gate once it has passed, so a time-boxed exception cannot silently
+  become permanent.
+- Only `postgres` is waivable. SQLite is the local source of truth and is never
+  waivable.
+- A waiver is an admission that a repo has no PostgreSQL support, so it is
+  refused for every manifest that already claims PostgreSQL is in play. Only a
+  `cli-with-store` repo that
+  1. does **not** ship `<name>-serve` (a serve bin makes it service-capable),
+  2. declares `storage.mode` `local` (`cloud` mode reads and writes PostgreSQL
+     directly),
+  3. does **not** declare the `cloud` runtime placement, and
+  4. does **not** declare the `hasna-saas` product story
+  may waive an engine. `service` and `saas` repos never may. The `self_hosted`
+  placement stays eligible: it is a placement, and `storage.mode` decides which
+  engine actually backs the repo.
+- A waiver for an engine the manifest already declares is redundant: the engine
+  keeps its normal proof obligations, including `storage.pgTestGate`.
+- Waivers are additive. A manifest without `waivedStorageEngines` gets the same
+  verdict and the same report text as before, with one exception: the
+  `manifest_valid` failure message for a sqlite-only `cli-with-store` now names
+  the waiver mechanism.
+- Most existing `cli-with-store` repos are **not** eligible today, because they
+  ship `<name>-serve`. That is deliberate for a first version: widening the
+  waiver later is backwards-compatible, narrowing it after repos have banked a
+  green build is not.
 
 Public OSS manifests **MUST NOT** contain secret-reference paths, internal
 company hostnames, cloud ARNs, or account IDs. Concrete database secret
@@ -171,18 +238,24 @@ Ships types/validators/helpers. No store, no service.
 ### `cli-with-store`
 A CLI that owns local (and optionally cloud) data.
 - **MUST** declare `storage`.
-- **MUST** declare both `sqlite` and `postgres` in `storage.engines`.
+- **MUST** declare both `sqlite` and `postgres` in `storage.engines`, unless it
+  is waiver-eligible (CLI-only, `local` storage mode, no `cloud` placement, no
+  `hasna-saas` story) and `postgres` carries an explicit
+  `metadata.conformance.waivedStorageEngines` waiver (see §6). `sqlite` is
+  never waivable.
 - If `storage.mode` is `local`, **MUST** set `storage.sqlitePath`
   (`~/.hasna/<name>/<name>.db`).
-- **MUST** declare `storage.pgTestGate`.
+- **MUST** declare `storage.envPrefix` and `storage.pgTestGate` unless
+  PostgreSQL is explicitly waived; a waived engine has no DATABASE_URL boundary
+  to derive and no live-PG gate to declare.
 - **MUST** ship the `<name>` bin.
 - SHOULD ship a `<name>-mcp` bin for agent access.
 - A CLI-only repo is required to declare only its supported CLI surface;
   conformance does **not** force API, SDK, or MCP surfaces onto it.
 - If it ships `<name>-serve`, it becomes service-capable for conformance and
   **MUST** declare supported API, SDK, MCP, and CLI surfaces, expose
-  `GET /health`, `GET /ready`, and `GET /version`, and ship a root self-host
-  artifact.
+  `GET /health`, `GET /ready`, and `GET /version`, ship a root self-host
+  artifact, and declare the full storage-engine matrix (no storage waiver).
 
 ### `service`
 A long-running HTTP/MCP service.
@@ -322,6 +395,10 @@ A waiver is typed, unique per surface kind, and must carry a non-empty reason.
 `service`, `saas`, and service-capable `cli-with-store` repos without the
 non-Node profile cannot use waivers to bypass required supported surfaces.
 
+Storage capabilities use the same waiver pattern in
+`metadata.conformance.waivedStorageEngines`; see §6 for the eligibility,
+expiry, and `pgTestGate` rules.
+
 ---
 
 ## 10. Conformance
@@ -341,6 +418,10 @@ const report = runRepoConformance(process.cwd());
 if (!report.ok) throw new Error(JSON.stringify(report.checks, null, 2));
 ```
 
+`runRepoConformance` accepts `env`, `healthSample`, `skipNoCloudScan`,
+`manifestTier`, and `now` (the clock used for time-boxed checks such as storage
+waiver expiry; defaults to the current time).
+
 Checks:
 
 1. `manifest_valid` — `hasna.contract.json` present and valid (class rules enforced).
@@ -355,9 +436,14 @@ Checks:
    `GET /health`, `GET /ready`, and `GET /version` endpoints.
 7. `self_host_artifact` — service-capable repos ship a root Compose file or
    `Dockerfile`.
-8. `storage_capabilities` — store-owning cores declare SQLite + PostgreSQL,
-   `storage.envPrefix`, and a live-PG test gate; SaaS declares its public
-   PostgreSQL env prefix.
+8. `storage_capabilities` — store-owning cores declare SQLite + PostgreSQL (or
+   explicitly waive PostgreSQL), plus `storage.envPrefix` and a live-PG test
+   gate unless PostgreSQL is waived; SaaS declares its public PostgreSQL env
+   prefix. A waiver never silently excuses an engine: an ineligible waiver on a
+   manifest that is otherwise missing the engine is reported as a
+   `manifest_valid` error naming the refusal reason, and an ineligible,
+   unrecordable, or expired waiver on a manifest that declares both engines
+   fails this check.
 9. `public_manifest_safety` — public manifests contain no secret or credential
    refs, credential-shaped values, internal hosts, ARNs, or account IDs.
 10. `hosting_story` — public OSS cores include the user-hosted product story;
@@ -440,7 +526,11 @@ remain schema-valid while failing new checks until it:
    service API;
 3. points SDK declarations at real package exports;
 4. declares SQLite + PostgreSQL capabilities, `storage.envPrefix`, and a
-   `pgTestGate` where required;
+   `pgTestGate` where required, or records an explicit
+   `waivedStorageEngines` exception for a SQLite-only `cli-with-store` — a
+   repo adopting the waiver SHOULD keep an existing `storage.envPrefix`, since
+   the waiver only removes the requirement and deleting the field discards the
+   declared `HASNA_<NAME>_DATABASE_URL` contract;
 5. adds a root self-host artifact when it ships a service;
 6. removes private infrastructure references from the public manifest; and
 7. writes canonical `self_hosted` runtime placement spelling.

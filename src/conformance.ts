@@ -4,7 +4,8 @@
 //   1. hasna.contract.json is present and valid (manifest + class rules).
 //   2. Declared bins and SDK exports match package.json.
 //   3. Required API/SDK/MCP/CLI surfaces are declared or explicitly waived.
-//   4. Store-owning repos declare SQLite + PostgreSQL capability and a live-PG gate.
+//   4. Store-owning repos declare SQLite + PostgreSQL capability and a live-PG
+//      gate, or carry an explicit, unexpired storage-engine waiver.
 //   5. Public manifests do not expose private infrastructure references.
 //   6. Env parsing follows the HASNA_<NAME>_STORAGE_MODE spec and any mode env
 //      value normalizes to the local|cloud enum (mode enum compliance).
@@ -17,9 +18,13 @@ import { join, relative } from "node:path";
 import {
   HealthResponseSchema,
   SERVICE_SURFACE_KINDS,
+  STORAGE_ENGINES,
+  WAIVABLE_STORAGE_ENGINES,
   allowedBinsForName,
+  storageWaiverIneligibilityReason,
   type ServiceContractManifest,
-  type ServiceSurfaceKind
+  type ServiceSurfaceKind,
+  type StorageEngine
 } from "./schemas";
 import { loadServiceContractManifest, type LoadServiceContractResult } from "./service-contract";
 import { normalizeStorageMode, storageEnvKeys, type Env } from "./mode";
@@ -50,6 +55,8 @@ export interface RepoConformanceOptions {
   skipNoCloudScan?: boolean;
   /** Public manifests are checked for private infrastructure references. */
   manifestTier?: "public" | "private";
+  /** Clock used for time-boxed checks such as storage-waiver expiry. */
+  now?: Date;
 }
 
 interface PackageJsonInfo {
@@ -254,6 +261,97 @@ function publicManifestFindings(value: unknown, path = "<root>"): PublicManifest
   return findings;
 }
 
+interface StorageWaiverAnalysis {
+  /** Engines an eligible, unexpired waiver excuses from the capability matrix. */
+  waivedEngines: Set<StorageEngine>;
+  /**
+   * Engines a waiver speaks for, valid or not. An expired waiver still
+   * suppresses the "missing engine" and PostgreSQL-proof messages so the
+   * report states one remedy — renew or declare — instead of also telling the
+   * repo to build the support its waiver was about.
+   */
+  answeredEngines: Set<StorageEngine>;
+  /** Pass-detail fragments such as `postgres explicitly waived: <reason>`. */
+  summaries: string[];
+  /** Failures raised by ineligible, unusable, or expired waivers. */
+  failures: string[];
+}
+
+/**
+ * A waiver is only auditable if its justification can be shown. Waiver prose
+ * is echoed into the report detail, so prose carrying a private
+ * infrastructure reference cannot be printed — and silently redacting it would
+ * pass the gate with no recorded justification at all, which is worse than
+ * failing. `public_manifest_safety` catches this too, but it is skipped for
+ * private-tier callers.
+ */
+function unprintableWaiverFields(waiver: { reason: string; reviewedBy?: string | undefined }): string[] {
+  const fields: string[] = [];
+  if (publicManifestFindings(waiver.reason).length > 0) fields.push("reason");
+  if (waiver.reviewedBy && publicManifestFindings(waiver.reviewedBy).length > 0) fields.push("reviewedBy");
+  return fields;
+}
+
+/**
+ * Resolve `metadata.conformance.waivedStorageEngines` into the engines the
+ * storage gate may skip. Eligibility is shared with the manifest schema via
+ * `storageWaiverIneligibilityReason`, only PostgreSQL is waivable, and a
+ * waiver stops applying once it expires. A waiver for an engine the manifest
+ * already declares is redundant, so the engine keeps its normal proof
+ * obligations (notably `storage.pgTestGate`).
+ */
+function analyzeStorageWaivers(manifest: ServiceContractManifest, nowMs: number): StorageWaiverAnalysis {
+  const declaredWaivers = manifest.metadata?.conformance?.waivedStorageEngines ?? [];
+  const waivedEngines = new Set<StorageEngine>();
+  const answeredEngines = new Set<StorageEngine>();
+  const summaries: string[] = [];
+  const failures: string[] = [];
+  if (declaredWaivers.length === 0) return { waivedEngines, answeredEngines, summaries, failures };
+
+  const ineligible = storageWaiverIneligibilityReason({
+    class: manifest.class,
+    name: manifest.name,
+    bins: manifest.bins,
+    hosting: manifest.hosting,
+    deploymentModes: manifest.deploymentModes,
+    storageMode: manifest.storage?.mode
+  });
+  if (ineligible) {
+    failures.push(`${ineligible}: ${declaredWaivers.map((waiver) => waiver.engine).join(", ")}`);
+    return { waivedEngines, answeredEngines, summaries, failures };
+  }
+
+  const declaredEngines = new Set(manifest.storage?.engines ?? []);
+  for (const waiver of declaredWaivers) {
+    // A waiver next to an engine the manifest declares is redundant: the
+    // engine keeps its normal proof obligations.
+    if (declaredEngines.has(waiver.engine)) continue;
+    const unprintable = unprintableWaiverFields(waiver);
+    if (unprintable.length > 0) {
+      answeredEngines.add(waiver.engine);
+      failures.push(
+        `storage waiver for ${waiver.engine} cannot be recorded: ${unprintable.join(", ")} carries a private infrastructure reference; rewrite the waiver without secret refs, internal hosts, ARNs, or account ids`
+      );
+      continue;
+    }
+    if (waiver.expiresAt && Date.parse(waiver.expiresAt) <= nowMs) {
+      answeredEngines.add(waiver.engine);
+      failures.push(
+        `storage waiver for ${waiver.engine} expired at ${waiver.expiresAt}; declare the engine or renew the waiver`
+      );
+      continue;
+    }
+    waivedEngines.add(waiver.engine);
+    answeredEngines.add(waiver.engine);
+    const annotations: string[] = [];
+    if (waiver.reviewedBy) annotations.push(`reviewed by ${waiver.reviewedBy}`);
+    if (waiver.expiresAt) annotations.push(`expires ${waiver.expiresAt}`);
+    const annotated = annotations.length > 0 ? ` (${annotations.join("; ")})` : "";
+    summaries.push(`${waiver.engine} explicitly waived: ${waiver.reason}${annotated}`);
+  }
+  return { waivedEngines, answeredEngines, summaries, failures };
+}
+
 export function runRepoConformance(repoRoot: string, options: RepoConformanceOptions = {}): RepoConformanceReport {
   const checks: ConformanceCheck[] = [];
   const loaded: LoadServiceContractResult = loadServiceContractManifest(repoRoot);
@@ -442,28 +540,51 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
   }
 
   // Check 4: storage capability matrix and PostgreSQL runtime proof.
+  const storageWaivers = analyzeStorageWaivers(manifest, (options.now ?? new Date()).getTime());
   if (manifest.class === "saas") {
-    const failures = manifest.storage?.envPrefix
-      ? []
-      : ["storage.envPrefix is required for the public SaaS DATABASE_URL contract"];
+    const failures = [...storageWaivers.failures];
+    if (!manifest.storage?.envPrefix) failures.push("storage.envPrefix is required for the public SaaS DATABASE_URL contract");
     checks.push({
       id: "storage_capabilities",
       status: failures.length === 0 ? "pass" : "fail",
       detail: failures.length === 0 ? "SaaS PostgreSQL env contract declared" : failures.join("; ")
     });
   } else if (manifest.class !== "service" && manifest.class !== "cli-with-store") {
-    checks.push({ id: "storage_capabilities", status: "skip", detail: `${manifest.class} repo is outside the dual-storage core gate` });
+    checks.push({
+      id: "storage_capabilities",
+      status: storageWaivers.failures.length === 0 ? "skip" : "fail",
+      detail:
+        storageWaivers.failures.length === 0
+          ? `${manifest.class} repo is outside the dual-storage core gate`
+          : storageWaivers.failures.join("; ")
+    });
   } else {
-    const engines = new Set(manifest.storage?.engines ?? []);
-    const missingEngines = ["sqlite", "postgres"].filter((engine) => !engines.has(engine as "sqlite" | "postgres"));
-    const failures: string[] = [];
+    const engines = manifest.storage?.engines ?? [];
+    const declaredEngines = new Set(engines);
+    const missingEngines = STORAGE_ENGINES.filter(
+      (engine) => !declaredEngines.has(engine) && !storageWaivers.answeredEngines.has(engine)
+    );
+    const failures = [...storageWaivers.failures];
     if (missingEngines.length > 0) failures.push(`missing storage engines: ${missingEngines.join(", ")}`);
-    if (!manifest.storage?.envPrefix) failures.push("storage.envPrefix is required for the PostgreSQL DATABASE_URL contract");
-    if (!manifest.storage?.pgTestGate) failures.push("storage.pgTestGate is required to prove live PostgreSQL support");
+    // `storage.envPrefix` and `storage.pgTestGate` both exist to serve the
+    // PostgreSQL contract: the DATABASE_URL derivation and the live-PG proof.
+    // Neither is required while a waiver speaks for PostgreSQL, because there
+    // is no PostgreSQL boundary to derive or prove; a rejected waiver already
+    // reports its own single, actionable remedy.
+    if (!storageWaivers.answeredEngines.has("postgres")) {
+      if (!manifest.storage?.envPrefix) failures.push("storage.envPrefix is required for the PostgreSQL DATABASE_URL contract");
+      if (!manifest.storage?.pgTestGate) failures.push("storage.pgTestGate is required to prove live PostgreSQL support");
+    }
+    const declaredDetail = engines.length > 0 ? `${engines.join(", ")} declared` : "no storage engines declared";
     checks.push({
       id: "storage_capabilities",
       status: failures.length === 0 ? "pass" : "fail",
-      detail: failures.length === 0 ? "sqlite and postgres capabilities plus live-PG gate declared" : failures.join("; ")
+      detail:
+        failures.length > 0
+          ? failures.join("; ")
+          : storageWaivers.summaries.length > 0
+            ? `${declaredDetail}; ${storageWaivers.summaries.join("; ")}`
+            : "sqlite and postgres capabilities plus live-PG gate declared"
     });
   }
 
