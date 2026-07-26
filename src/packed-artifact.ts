@@ -15,8 +15,21 @@
 
 import { execFileSync } from "node:child_process";
 
-/** Largest member this module will decode. Bigger members are reported, not read. */
+/** Largest member the buffered readers decode by default. */
 export const MAX_ARCHIVE_MEMBER_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Ceiling for a scanner that is not allowed to decline.
+ *
+ * The published-artifact guard cannot have a working size limit. A member it
+ * declines to read is a member that could be carrying the inventory, and the
+ * biggest file in a tarball is exactly where a compiled-in list ends up:
+ * bundles and `.map` files routinely run past any cap worth setting, and the
+ * incident's own `dist/index.js` is the shape this guard exists for. This bound
+ * is therefore a memory backstop for a corrupt or hostile archive, not a policy
+ * knob — a member above it is reported as UNREADABLE, which FAILS the scan.
+ */
+export const MAX_SCANNED_MEMBER_BYTES = 512 * 1024 * 1024;
 
 /** Is `target` a path this module can read as a packed artifact? */
 export function isPackedArtifactPath(target: string): boolean {
@@ -61,9 +74,20 @@ export function normalizeArchiveEntry(entry: string, commonRoot: string | null):
   return normalized || null;
 }
 
-/** Extract one member's bytes. Throws if the member exceeds the size cap. */
-export function readArchiveMemberBytes(target: string, entry: string): Buffer {
-  return execFileSync("tar", ["-xOzf", target, entry], { maxBuffer: MAX_ARCHIVE_MEMBER_BYTES });
+/**
+ * Extract one member's bytes. Throws if the member exceeds `maxBytes`.
+ *
+ * The cap is a parameter because the two callers want opposite things from it:
+ * the no-cloud guard reads source-shaped files and a big one is not its
+ * problem, while the published-artifact guard must read whatever shipped and
+ * treats an undecoded member as a failure rather than a footnote.
+ */
+export function readArchiveMemberBytes(
+  target: string,
+  entry: string,
+  maxBytes: number = MAX_ARCHIVE_MEMBER_BYTES
+): Buffer {
+  return execFileSync("tar", ["-xOzf", target, entry], { maxBuffer: maxBytes });
 }
 
 /** Extract one member as UTF-8 text. Throws if the member exceeds the size cap. */

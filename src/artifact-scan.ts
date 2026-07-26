@@ -31,7 +31,7 @@
 // rather than by a curated list, and the thresholds are set where an inventory
 // begins rather than where a mention does.
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { isRecognizedTld } from "./tlds";
 import {
@@ -40,8 +40,12 @@ import {
   listArchiveEntries,
   normalizeArchiveEntry,
   readArchiveMemberBytes,
-  MAX_ARCHIVE_MEMBER_BYTES,
+  MAX_SCANNED_MEMBER_BYTES,
 } from "./packed-artifact";
+// Type-only: the manifest schema declares the waiver shape, this module
+// enforces it. Importing the type rather than the validator keeps the guard
+// free of a zod runtime while still breaking the build if the two drift.
+import type { AssetInventoryWaiver } from "./schemas";
 
 /** Asset classes an inventory can be made of. */
 export const ASSET_INVENTORY_KINDS = ["domain", "host", "ip", "email"] as const;
@@ -110,16 +114,48 @@ const MULTI_LABEL_SUFFIXES = new Set(
 );
 
 /**
- * A candidate is only counted when it is the ENTIRE content of a quoted string
- * or a standalone token — never when it is `object.method` in an expression.
+ * THE TWO SHAPES AN INVENTORY TAKES, AND WHY THERE ARE EXACTLY TWO.
  *
- * An asset inventory in a shipped artifact is a list of literals. Member access
- * is not, and treating the two alike is what made the first draft of this guard
- * report `config.replace` as a domain. Labels must also be lowercase
- * `[a-z0-9-]`, which is what a hostname is and what `connectionTimeoutMillis`
- * is not.
+ * A candidate never counts because it merely appears somewhere. In a shipped
+ * artifact `node.name`, `config.host`, `spec.info` and `exports.tr` are the
+ * same characters as `brand.name`, `mail.host`, `acme.info` and `shop.tr`, so a
+ * rule that counts any dotted lowercase run reports member access as a domain
+ * portfolio. Measured, not assumed: over `node_modules` such a rule finds 139
+ * distinct "domains" in TypeScript's own bundle and 25 in one of zod's locale
+ * files, where the "TLDs" are `.name` and the ISO language codes. That is a
+ * gate firing on every compliant repo, which is the gate getting switched off.
+ *
+ * So a candidate counts only where a LIST lives, and a list has two shapes:
+ *
+ *  1. A LITERAL INVENTORY. The candidate sits in a quoted string whose content
+ *     is mostly assets — `["a-brand.com", …]`, `"a-brand.com,b-brand.com,…"
+ *     .split(",")`, a newline-joined template literal. The ratio is what
+ *     separates a list from a sentence, and it is also what keeps a `.map`
+ *     file's `sourcesContent` — an entire source file inside one literal —
+ *     from being read as an inventory of its own `x.name` expressions.
+ *  2. A COLUMN INVENTORY. The candidate is the WHOLE of a delimited field, in
+ *     the same column, on several consecutive lines: a `.csv`, a markdown
+ *     table, a one-per-line list. A column is what a table is, and code does
+ *     not accidentally produce one — the same corpus that yields 139 false
+ *     domains under a token rule yields zero under this one.
+ *
+ * Both rules keep the requirements that always carried precision: the last
+ * label must be a recognized TLD (`config.replace` is not a domain because
+ * `replace` is not a TLD, `agents.list` because `list` is excluded
+ * vocabulary), and every label must be lowercase `[a-z0-9-]`, which is what a
+ * hostname is and what `connectionTimeoutMillis` is not.
+ *
+ * THE RESIDUAL, STATED: an inventory written as running prose — a bulleted
+ * list, names inside sentences — is read but not counted. Clause B is a
+ * prohibition, not a count.
  */
-const QUOTED_TOKEN_PATTERN = /(?:"([^"\n]{3,253})"|'([^'\n]{3,253})'|`([^`\n]{3,253})`)/g;
+const QUOTED_LITERAL_PATTERN = /(?:"([^"\n]{3,})"|'([^'\n]{3,})'|`([^`]{3,})`)/g;
+/** How a joined inventory separates its entries inside one literal. */
+const LITERAL_SEPARATORS = /[\s,;|]+/;
+/** How a row separates its fields: CSV commas, markdown pipes, TSV tabs. */
+const FIELD_SEPARATORS = /[,|\t]/;
+/** Consecutive rows that make a column a column rather than a coincidence. */
+const MIN_COLUMN_RUN = 5;
 const HOSTNAME_LITERAL = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/;
 const EMAIL_LITERAL = /^[a-z0-9._%+-]+@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/;
 const IPV4_LITERAL = /^(?:\d{1,3}\.){3}\d{1,3}$/;
@@ -175,6 +211,13 @@ export interface AssetInventoryFinding {
   sample: string[];
 }
 
+/** A member the scan could not decode, and why it could not. */
+export interface UnreadableMember {
+  /** Member path inside the artifact. */
+  path: string;
+  reason: string;
+}
+
 export interface ArtifactScanOptions {
   /** Per-kind overrides. Merged over {@link DEFAULT_INVENTORY_THRESHOLDS}. */
   thresholds?: Partial<Record<AssetInventoryKind, number>>;
@@ -182,6 +225,13 @@ export interface ArtifactScanOptions {
   waivedKinds?: readonly AssetInventoryKind[];
   /** Member paths to skip, as exact normalized paths. */
   ignorePaths?: readonly string[];
+  /**
+   * Ceiling on one member's decoded bytes; defaults to
+   * {@link MAX_SCANNED_MEMBER_BYTES}. A member above it is reported as
+   * unreadable, which fails the scan — the ceiling bounds memory, it does not
+   * excuse a file from being read.
+   */
+  maxMemberBytes?: number;
 }
 
 export interface ArtifactScanReport {
@@ -192,11 +242,16 @@ export interface ArtifactScanReport {
   scanMode: "packed_artifact" | "source_tree";
   /** Members that were read and searched. Non-empty on any real artifact. */
   membersScanned: number;
-  /** Members skipped because they were binary or oversized. */
+  /** Members skipped because they were binary — nothing to decode as text. */
   membersSkipped: number;
   findings: AssetInventoryFinding[];
   /** Findings suppressed by a declared waiver, kept for the audit trail. */
   waived: AssetInventoryFinding[];
+  /**
+   * Members that could not be decoded at all. NEVER a footnote: a member that
+   * was not read cannot be cleared, so any entry here fails the scan.
+   */
+  unreadable: UnreadableMember[];
 }
 
 /** Mask an entry so the report names the SHAPE without republishing the value. */
@@ -225,36 +280,83 @@ function distinct(values: Iterable<string>): string[] {
   return [...new Set(values)].sort();
 }
 
+/** Is this whole value a countable hostname — real TLD, not spec-reserved? */
+function isCountableHostname(value: string): boolean {
+  if (!HOSTNAME_LITERAL.test(value)) return false;
+  if (isReservedHostname(value)) return false;
+  return isRecognizedTld(value.slice(value.lastIndexOf(".") + 1));
+}
+
+/** Is this whole value a countable email address? */
+function isCountableEmail(value: string): boolean {
+  if (!EMAIL_LITERAL.test(value)) return false;
+  const domain = value.slice(value.indexOf("@") + 1);
+  if (isReservedHostname(domain)) return false;
+  return isRecognizedTld(domain.slice(domain.lastIndexOf(".") + 1));
+}
+
+/** Shape 1: a quoted literal whose content is mostly assets. */
+function collectLiteralInventories(text: string, hosts: Set<string>, emails: Set<string>): void {
+  for (const match of text.matchAll(QUOTED_LITERAL_PATTERN)) {
+    const literal = (match[1] ?? match[2] ?? match[3] ?? "").trim();
+    if (!literal) continue;
+    const pieces = literal.split(LITERAL_SEPARATORS).filter(Boolean);
+    const assets = pieces.filter((piece) => isCountableHostname(piece) || isCountableEmail(piece));
+    if (assets.length === 0) continue;
+    // A literal that is MOSTLY assets is a list; one that names an asset in a
+    // sentence is a mention, and the thresholds are set where an inventory
+    // begins rather than where a mention does.
+    if (assets.length * 2 < pieces.length) continue;
+    for (const asset of assets) (isCountableEmail(asset) ? emails : hosts).add(asset);
+  }
+}
+
+/** Shape 2: the same field position, an asset on several consecutive rows. */
+function collectColumnInventories(text: string, hosts: Set<string>, emails: Set<string>): void {
+  const runs = new Map<number, string[]>();
+  const close = (column: number): void => {
+    const values = runs.get(column);
+    runs.delete(column);
+    if (!values || values.length < MIN_COLUMN_RUN) return;
+    for (const value of values) (isCountableEmail(value) ? emails : hosts).add(value);
+  };
+
+  for (const line of text.split(/\r?\n/)) {
+    const fields = line.split(FIELD_SEPARATORS);
+    // A row is either a row of COLUMNS, or a line that is nothing but the entry
+    // itself. `    node.name,` is neither: one field with a comma hung off the
+    // end of it is an argument list, and reading it as a table is how a guard
+    // ends up reporting a bundle's member access as a portfolio.
+    const populated = fields.filter((field) => field.trim() !== "").length;
+    const trimmed = line.trim();
+    const carried = new Set<number>();
+    for (const [column, field] of fields.entries()) {
+      const value = field.trim();
+      if (!isCountableHostname(value) && !isCountableEmail(value)) continue;
+      if (populated < 2 && trimmed !== value) continue;
+      carried.add(column);
+      const run = runs.get(column);
+      if (run) run.push(value);
+      else runs.set(column, [value]);
+    }
+    for (const column of [...runs.keys()]) if (!carried.has(column)) close(column);
+  }
+  for (const column of [...runs.keys()]) close(column);
+}
+
 /**
  * Count distinct assets of each kind in one member's text.
  *
- * Domains and emails are read only from complete quoted literals with a
- * recognized TLD. IPv4 is read from anywhere, because a dotted quad is not
- * confusable with an identifier.
+ * Domains and emails are read from the two inventory shapes above, in whatever
+ * encoding the file happens to use. IPv4 is read from anywhere, because a
+ * dotted quad is not confusable with an identifier.
  */
 export function inventoryCounts(text: string): Record<AssetInventoryKind, string[]> {
   const emails = new Set<string>();
   const hosts = new Set<string>();
 
-  for (const match of text.matchAll(QUOTED_TOKEN_PATTERN)) {
-    const literal = (match[1] ?? match[2] ?? match[3] ?? "").trim();
-    if (!literal) continue;
-    const lowered = literal.toLowerCase();
-    if (lowered !== literal) continue; // camelCase identifiers are not hostnames
-
-    if (EMAIL_LITERAL.test(literal)) {
-      const domain = literal.slice(literal.indexOf("@") + 1);
-      if (!isReservedHostname(domain) && isRecognizedTld(domain.slice(domain.lastIndexOf(".") + 1))) {
-        emails.add(literal);
-      }
-      continue;
-    }
-    if (!HOSTNAME_LITERAL.test(literal)) continue;
-    if (isReservedHostname(literal)) continue;
-    if (!isRecognizedTld(literal.slice(literal.lastIndexOf(".") + 1))) continue;
-    hosts.add(literal);
-    continue;
-  }
+  collectLiteralInventories(text, hosts, emails);
+  collectColumnInventories(text, hosts, emails);
 
   // A hostname inside an email address is not independent evidence; counting it
   // twice would let one contact list trip two detectors.
@@ -274,54 +376,60 @@ export function inventoryCounts(text: string): Record<AssetInventoryKind, string
   return { domain: domains, host: hostList, ip: ips, email: [...emails].sort() };
 }
 
-interface ScannedMember {
-  path: string;
-  bytes: Buffer;
+/**
+ * One member, either decoded or explained.
+ *
+ * Members are yielded one at a time rather than collected, because there is no
+ * longer a small per-member cap to bound the total: holding the whole
+ * uncompressed package in memory to scan it a file at a time would trade one
+ * failure mode for another.
+ */
+type MemberRead = { path: string; bytes: Buffer } | { path: string; reason: string };
+
+function readError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
-function collectDirectoryMembers(root: string): { members: ScannedMember[]; skipped: number } {
-  const members: ScannedMember[] = [];
-  let skipped = 0;
+function* readDirectoryMembers(root: string, maxMemberBytes: number, dir: string = root): Generator<MemberRead> {
   const skipDirs = new Set([".git", "node_modules"]);
-
-  function walk(dir: string): void {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (!skipDirs.has(entry.name)) walk(full);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      if (statSync(full).size > MAX_ARCHIVE_MEMBER_BYTES) {
-        skipped += 1;
-        continue;
-      }
-      members.push({ path: relative(root, full).replaceAll("\\", "/"), bytes: readFileSync(full) });
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (!skipDirs.has(entry.name)) yield* readDirectoryMembers(root, maxMemberBytes, full);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const path = relative(root, full).replaceAll("\\", "/");
+    const size = statSync(full).size;
+    if (size > maxMemberBytes) {
+      yield { path, reason: `${size} bytes exceeds the ${maxMemberBytes}-byte scan ceiling` };
+      continue;
+    }
+    try {
+      yield { path, bytes: readFileSync(full) };
+    } catch (error) {
+      yield { path, reason: readError(error) };
     }
   }
-
-  walk(root);
-  return { members, skipped };
 }
 
-function collectArchiveMembers(target: string): { members: ScannedMember[]; skipped: number } {
+function* readArchiveMembers(target: string, maxMemberBytes: number): Generator<MemberRead> {
   const entries = listArchiveEntries(target);
   const archiveRoot = commonArchiveRoot(entries);
-  const members: ScannedMember[] = [];
-  let skipped = 0;
   for (const entry of entries) {
     const path = normalizeArchiveEntry(entry, archiveRoot);
     if (!path) continue;
     try {
-      members.push({ path, bytes: readArchiveMemberBytes(target, entry) });
-    } catch {
-      // Oversized members are counted, never silently dropped: a scan that
-      // quietly skipped the biggest file in the tarball would be worse than
-      // no scan, because it would report a clean verdict.
-      skipped += 1;
+      yield { path, bytes: readArchiveMemberBytes(target, entry, maxMemberBytes) };
+    } catch (error) {
+      // A member that could not be decoded is reported as UNREADABLE and fails
+      // the scan. The earlier draft counted it and carried on, which meant the
+      // biggest file in the tarball — exactly where a compiled-in list ends
+      // up — could go unread while the report still said `ok`. A clean verdict
+      // over a file nobody read is worse than no scan at all.
+      yield { path, reason: readError(error) };
     }
   }
-  return { members, skipped };
 }
 
 /**
@@ -331,7 +439,9 @@ function collectArchiveMembers(target: string): { members: ScannedMember[]; skip
  * Fails when the target yields zero readable members. A scanner that reports
  * `ok` after finding nothing to read is the vacuity trap this contract keeps
  * running into: it would pass on a broken path, a wrong filename, or an empty
- * tarball, and pass loudest exactly when it is protecting nothing.
+ * tarball, and pass loudest exactly when it is protecting nothing. The same
+ * rule applies one member at a time: a member the scan could not decode fails
+ * it, because an unread file has not been cleared.
  */
 export function scanPublishedArtifact(target: string, options: ArtifactScanOptions = {}): ArtifactScanReport {
   const stat = statSync(target);
@@ -341,12 +451,10 @@ export function scanPublishedArtifact(target: string, options: ArtifactScanOptio
     throw new Error("Artifact scan target must be a directory, .tgz, or .tar.gz file.");
   }
 
-  const { members, skipped } = stat.isDirectory() ? collectDirectoryMembers(target) : collectArchiveMembers(target);
-  if (members.length === 0) {
-    throw new Error(
-      `Artifact scan read zero members from ${basename(target)}. Refusing to report a clean verdict on nothing.`,
-    );
-  }
+  const maxMemberBytes = options.maxMemberBytes ?? MAX_SCANNED_MEMBER_BYTES;
+  const members = stat.isDirectory()
+    ? readDirectoryMembers(target, maxMemberBytes)
+    : readArchiveMembers(target, maxMemberBytes);
 
   const thresholds = { ...DEFAULT_INVENTORY_THRESHOLDS, ...options.thresholds };
   const waived = new Set(options.waivedKinds ?? []);
@@ -354,11 +462,18 @@ export function scanPublishedArtifact(target: string, options: ArtifactScanOptio
 
   const findings: AssetInventoryFinding[] = [];
   const waivedFindings: AssetInventoryFinding[] = [];
+  const unreadable: UnreadableMember[] = [];
+  let seen = 0;
   let scanned = 0;
-  let skippedBinary = skipped;
+  let skippedBinary = 0;
 
   for (const member of members) {
+    seen += 1;
     if (ignore.has(member.path)) continue;
+    if ("reason" in member) {
+      unreadable.push({ path: member.path, reason: member.reason });
+      continue;
+    }
     if (!looksTextual(member.bytes)) {
       skippedBinary += 1;
       continue;
@@ -380,29 +495,118 @@ export function scanPublishedArtifact(target: string, options: ArtifactScanOptio
     }
   }
 
+  if (seen === 0) {
+    throw new Error(
+      `Artifact scan read zero members from ${basename(target)}. Refusing to report a clean verdict on nothing.`,
+    );
+  }
+
   return {
-    ok: findings.length === 0,
+    ok: findings.length === 0 && unreadable.length === 0,
     target,
     scanMode,
     membersScanned: scanned,
     membersSkipped: skippedBinary,
     findings,
     waived: waivedFindings,
+    unreadable,
   };
 }
 
 /** One-line-per-finding summary for CLI output and CI logs. */
 export function formatArtifactScanReport(report: ArtifactScanReport): string {
   const lines = [
-    `${report.ok ? "pass" : "FAIL"} artifact-scan ${basename(report.target)} (${report.scanMode}, ${report.membersScanned} members scanned, ${report.membersSkipped} skipped)`,
+    `${report.ok ? "pass" : "FAIL"} artifact-scan ${basename(report.target)} (${report.scanMode}, ${report.membersScanned} members scanned, ${report.membersSkipped} binary skipped, ${report.unreadable.length} unreadable)`,
   ];
   for (const finding of report.findings) {
     lines.push(
       `  FAIL ${finding.path}: ${finding.count} distinct ${finding.kind} entries (threshold ${finding.threshold}) e.g. ${finding.sample.join(", ")}`,
     );
   }
+  for (const member of report.unreadable) {
+    lines.push(`  FAIL ${member.path}: could not be read, so it has not been cleared (${member.reason})`);
+  }
   for (const finding of report.waived) {
     lines.push(`  waived ${finding.path}: ${finding.count} distinct ${finding.kind} entries`);
   }
   return lines.join("\n");
+}
+
+/**
+ * Asset-inventory waivers a manifest declares, filtered to those still in force.
+ *
+ * The schema has carried `metadata.conformance.waivedAssetInventories` and
+ * CONTRACT.md has documented it as the escape hatch for public reference data,
+ * but until now nothing read it: a repo that declared the waiver exactly as the
+ * contract instructed still failed the gate, and its only recourse was to
+ * unwire the gate — the precise failure mode clause C exists to prevent.
+ *
+ * `expiresAt` is enforced here, so the time-boxing is a property rather than a
+ * promise: an expired waiver stops applying on its own, without anyone
+ * remembering to remove it. A waiver missing the accountability fields the
+ * contract requires is not honoured either — a waiver nobody signed is not a
+ * reviewed exception.
+ */
+export interface AssetInventoryWaiverResolution {
+  /** Kinds a reviewed, unexpired waiver excuses. */
+  kinds: AssetInventoryKind[];
+  /** One audit line per declared waiver, applied or not. */
+  notes: string[];
+}
+
+function isAssetInventoryKind(value: unknown): value is AssetInventoryKind {
+  return typeof value === "string" && (ASSET_INVENTORY_KINDS as readonly string[]).includes(value);
+}
+
+/** A declared waiver, or the reason it cannot be honoured. */
+function readDeclaredWaiver(value: unknown): AssetInventoryWaiver | string {
+  if (typeof value !== "object" || value === null) return "waiver entry is not an object";
+  const declared = value as Record<string, unknown>;
+  const { kind, reason, reviewedBy, expiresAt } = declared;
+  if (!isAssetInventoryKind(kind)) {
+    return `waiver kind ${JSON.stringify(kind)} is not one of ${ASSET_INVENTORY_KINDS.join(", ")}`;
+  }
+  if (typeof reason !== "string" || reason.trim() === "") return `waiver for ${kind} names no reason`;
+  if (typeof reviewedBy !== "string" || reviewedBy.trim() === "") return `waiver for ${kind} names no reviewer`;
+  if (typeof expiresAt !== "string" || Number.isNaN(Date.parse(expiresAt))) return `waiver for ${kind} has no usable expiresAt`;
+  return { kind, reason, reviewedBy, expiresAt };
+}
+
+export function resolveAssetInventoryWaivers(
+  manifestPath: string,
+  now: Date = new Date(),
+): AssetInventoryWaiverResolution {
+  if (!existsSync(manifestPath)) return { kinds: [], notes: [] };
+
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch (error) {
+    throw new Error(`Could not read asset-inventory waivers from ${manifestPath}: ${readError(error)}`);
+  }
+
+  const conformance = (manifest as { metadata?: { conformance?: { waivedAssetInventories?: unknown } } })?.metadata
+    ?.conformance;
+  const declared = conformance?.waivedAssetInventories;
+  if (declared === undefined) return { kinds: [], notes: [] };
+  if (!Array.isArray(declared)) {
+    return { kinds: [], notes: ["metadata.conformance.waivedAssetInventories is not an array; no waiver applied"] };
+  }
+
+  const kinds: AssetInventoryKind[] = [];
+  const notes: string[] = [];
+  for (const entry of declared) {
+    const waiver = readDeclaredWaiver(entry);
+    if (typeof waiver === "string") {
+      notes.push(`${waiver}; not applied`);
+      continue;
+    }
+    if (Date.parse(waiver.expiresAt) <= now.getTime()) {
+      notes.push(`${waiver.kind} waiver expired at ${waiver.expiresAt}; not applied`);
+      continue;
+    }
+    if (!kinds.includes(waiver.kind)) kinds.push(waiver.kind);
+    notes.push(`${waiver.kind} waived until ${waiver.expiresAt} (reviewed by ${waiver.reviewedBy}): ${waiver.reason}`);
+  }
+  return { kinds, notes };
 }

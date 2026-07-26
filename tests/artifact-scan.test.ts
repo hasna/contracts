@@ -7,6 +7,7 @@ import {
   formatArtifactScanReport,
   inventoryCounts,
   registrableDomain,
+  resolveAssetInventoryWaivers,
   scanPublishedArtifact,
 } from "../src/artifact-scan";
 import { isRecognizedTld } from "../src/tlds";
@@ -105,6 +106,38 @@ describe("it cannot pass by having nothing to check", () => {
     });
     expect(scanPublishedArtifact(archive).membersScanned).toBe(3);
   });
+
+  test("the BIGGEST member is read, not skipped — a 6 MB bundle is where the list lives", () => {
+    // The incident's inventory shipped inside `dist/index.js`. A scanner with a
+    // 5 MB ceiling declines to read exactly the file most likely to be carrying
+    // it, and bundles and `.map` files routinely run past any such cap.
+    const archive = tarball("oversize", {
+      "package.json": JSON.stringify({ name: "victim", version: "0.1.0", files: ["dist"] }),
+      "dist/index.js": `var D=${JSON.stringify(portfolio(177))};\n//${"x".repeat(6 * 1024 * 1024)}\n`,
+    });
+    const report = scanPublishedArtifact(archive);
+    expect(report.ok).toBe(false);
+    expect(report.unreadable).toEqual([]);
+    const finding = report.findings.find((entry) => entry.kind === "domain");
+    expect(finding?.path).toBe("dist/index.js");
+    expect(finding?.count).toBe(177);
+  }, 120_000);
+
+  test("a member that could NOT be read fails the scan instead of being a footnote", () => {
+    // Same vacuity rule, one member at a time: an undecoded file has not been
+    // cleared, so it cannot contribute to a clean verdict.
+    const archive = tarball("unreadable", {
+      "package.json": JSON.stringify({ name: "victim", version: "0.1.0" }),
+      "dist/index.js": `var D=${JSON.stringify(portfolio(177))};`,
+    });
+    const report = scanPublishedArtifact(archive, { maxMemberBytes: 512 });
+    expect(report.ok).toBe(false);
+    expect(report.findings).toEqual([]);
+    expect(report.unreadable.map((member) => member.path)).toContain("dist/index.js");
+    const text = formatArtifactScanReport(report);
+    expect(text).toContain("FAIL");
+    expect(text).toContain("could not be read");
+  });
 });
 
 // --- precision ---
@@ -149,6 +182,25 @@ describe("it does not cry wolf on ordinary code", () => {
       ...Array.from({ length: 30 }, (_, i) => `203.0.113.${i}`), // TEST-NET-3
     ].join(" ");
     expect(inventoryCounts(addresses).ip).toEqual([]);
+  });
+
+  test("member access on a real TLD is not a domain portfolio", () => {
+    // `.name`, `.host`, `.info` and every ISO language code are real TLDs, so a
+    // rule that counts any dotted lowercase run reports `node.name` as a
+    // domain. Measured over node_modules, such a rule finds 139 distinct
+    // "domains" in TypeScript's bundle and 25 in one zod locale file — a
+    // mandatory gate that fires on every compliant repo gets switched off.
+    const receivers = ["node", "callee", "property", "method", "option", "state", "spec", "exports", "inst", "def"];
+    const properties = ["name", "host", "info", "email", "store", "int", "in", "is", "at", "to"];
+    const expressions = receivers.flatMap((receiver) =>
+      properties.map((property) => `      return ${receiver}.${property}\n`),
+    );
+    const locales = ["vi", "ua", "tr", "th", "sv", "ru", "pl", "no", "it", "id"].map(
+      (locale) => `  exports.${locale},\n`,
+    );
+    const counts = inventoryCounts([...expressions, ...locales].join(""));
+    expect(counts.domain).toEqual([]);
+    expect(counts.host).toEqual([]);
   });
 
   test("this repository's own packed artifact passes", () => {
@@ -212,6 +264,60 @@ describe("asset kinds", () => {
   });
 });
 
+// --- encodings ---
+
+describe("an inventory is not made invisible by how it is written", () => {
+  test("a joined string literal is still a list", () => {
+    // `"a.com,b.com,…".split(",")` is the same 177 domains as the array
+    // literal, and a rule that only recognised a literal which IS a hostname
+    // could not see any of them.
+    const joined = portfolio(177).join(",");
+    expect(inventoryCounts(`var D="${joined}".split(",");`).domain.length).toBe(177);
+    // One line, so only the literal rule can see this one.
+    expect(inventoryCounts(`var D=\`${portfolio(40).join(" ")}\`.split(" ");`).domain.length).toBe(40);
+  });
+
+  test("a literal that MENTIONS an asset in a sentence is not a list", () => {
+    const sentence = `"Contact us about ${portfolio(1)[0]} before renewal"`;
+    expect(inventoryCounts(sentence).domain).toEqual([]);
+  });
+
+  test("an unquoted markdown table is still a list", () => {
+    const rows = portfolio(60).map((domain, index) => `| ${domain} | Registrar ${index} | 2027 |`);
+    const table = ["| Domain | Registrar | Renewal |", "|---|---|---|", ...rows].join("\n");
+    const archive = tarball("markdown-inventory", {
+      "package.json": JSON.stringify({ name: "docs", version: "1.0.0" }),
+      "docs/portfolio.md": table,
+    });
+    const report = scanPublishedArtifact(archive);
+    expect(report.ok).toBe(false);
+    expect(report.findings.find((finding) => finding.kind === "domain")?.path).toBe("docs/portfolio.md");
+  });
+
+  test("a CSV column is still a list", () => {
+    const csv = ["domain,owner,expires", ...portfolio(60).map((domain, index) => `${domain},team-${index},2027`)].join(
+      "\n",
+    );
+    const archive = tarball("csv-inventory", {
+      "package.json": JSON.stringify({ name: "data", version: "1.0.0" }),
+      "data/assets.csv": csv,
+    });
+    const report = scanPublishedArtifact(archive);
+    expect(report.ok).toBe(false);
+    expect(report.findings.find((finding) => finding.kind === "domain")?.path).toBe("data/assets.csv");
+  });
+
+  test("one asset per line is still a list", () => {
+    expect(inventoryCounts(portfolio(40).join("\n")).domain.length).toBe(40);
+  });
+
+  test("a handful of rows is a coincidence, not a column", () => {
+    // A column is what makes a table a table. Below that, an ordinary file that
+    // happens to line up two or three names is not reporting a portfolio.
+    expect(inventoryCounts(portfolio(3).join("\n")).domain).toEqual([]);
+  });
+});
+
 describe("thresholds and waivers", () => {
   test("a mention is not an inventory", () => {
     const few = portfolio(DEFAULT_INVENTORY_THRESHOLDS.domain - 1)
@@ -246,6 +352,94 @@ describe("thresholds and waivers", () => {
     expect(scanPublishedArtifact(archive).ok).toBe(true);
     expect(scanPublishedArtifact(archive, { thresholds: { domain: 3 } }).ok).toBe(false);
   });
+
+  // The manifest field, CONTRACT.md's instructions, and the enforcement have to
+  // be the same waiver. A documented escape hatch nothing reads leaves a repo
+  // that legitimately ships public reference data no recourse but to unwire the
+  // gate — the failure clause C exists to prevent.
+  function manifestWith(name: string, waivers: unknown[]): string {
+    const root = join(workspace, name);
+    mkdirSync(root, { recursive: true });
+    const file = join(root, "hasna.contract.json");
+    writeFileSync(file, JSON.stringify({ metadata: { conformance: { waivedAssetInventories: waivers } } }));
+    return file;
+  }
+
+  const publicData = { kind: "domain", reason: "Ships the ICANN public-suffix table.", reviewedBy: "release-review" };
+
+  test("a manifest-declared, unexpired waiver moves the finding onto the record", () => {
+    const manifest = manifestWith("waiver-live", [{ ...publicData, expiresAt: "2999-01-01T00:00:00Z" }]);
+    const resolved = resolveAssetInventoryWaivers(manifest);
+    expect(resolved.kinds).toEqual(["domain"]);
+    expect(resolved.notes.join(" ")).toContain("reviewed by release-review");
+
+    const archive = tarball("waiver-live-artifact", {
+      "package.json": JSON.stringify({ name: "reference-data", version: "1.0.0" }),
+      "dist/suffixes.js": JSON.stringify(portfolio(50)),
+    });
+    const report = scanPublishedArtifact(archive, { waivedKinds: resolved.kinds });
+    expect(report.ok).toBe(true);
+    expect(report.waived.some((finding) => finding.kind === "domain")).toBe(true);
+  });
+
+  test("an expired waiver stops applying on its own", () => {
+    const manifest = manifestWith("waiver-expired", [{ ...publicData, expiresAt: "2020-01-01T00:00:00Z" }]);
+    const resolved = resolveAssetInventoryWaivers(manifest);
+    expect(resolved.kinds).toEqual([]);
+    expect(resolved.notes.join(" ")).toContain("expired");
+
+    const archive = tarball("waiver-expired-artifact", {
+      "package.json": JSON.stringify({ name: "reference-data", version: "1.0.1" }),
+      "dist/suffixes.js": JSON.stringify(portfolio(50)),
+    });
+    expect(scanPublishedArtifact(archive, { waivedKinds: resolved.kinds }).ok).toBe(false);
+  });
+
+  test("a waiver nobody reviewed is not a reviewed exception", () => {
+    const manifest = manifestWith("waiver-unsigned", [
+      { kind: "domain", reason: "Ships the ICANN public-suffix table.", expiresAt: "2999-01-01T00:00:00Z" },
+    ]);
+    const resolved = resolveAssetInventoryWaivers(manifest);
+    expect(resolved.kinds).toEqual([]);
+    expect(resolved.notes.join(" ")).toContain("no reviewer");
+  });
+
+  test("a repo with no manifest simply has no waivers", () => {
+    expect(resolveAssetInventoryWaivers(join(workspace, "absent", "hasna.contract.json"))).toEqual({
+      kinds: [],
+      notes: [],
+    });
+  });
+
+  test("the CLI reads the waiver the contract tells a repo to declare", () => {
+    // End to end: `contracts artifact-scan <tarball> --manifest <file>` is what
+    // a repo's `scan:artifact` script runs from prepack.
+    const archive = tarball("waiver-cli-artifact", {
+      "package.json": JSON.stringify({ name: "reference-data", version: "1.0.2" }),
+      "dist/suffixes.js": JSON.stringify(portfolio(50)),
+    });
+    const live = manifestWith("waiver-cli-live", [{ ...publicData, expiresAt: "2999-01-01T00:00:00Z" }]);
+    const expired = manifestWith("waiver-cli-expired", [{ ...publicData, expiresAt: "2020-01-01T00:00:00Z" }]);
+
+    const run = (manifest: string) =>
+      Bun.spawnSync(["bun", "run", "src/cli/index.ts", "artifact-scan", archive, "--manifest", manifest, "--json"], {
+        cwd: join(import.meta.dir, ".."),
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+
+    const waived = run(live);
+    expect(waived.exitCode).toBe(0);
+    const waivedReport = JSON.parse(waived.stdout.toString());
+    expect(waivedReport.ok).toBe(true);
+    expect(waivedReport.waived.some((finding: { kind: string }) => finding.kind === "domain")).toBe(true);
+
+    const enforced = run(expired);
+    expect(enforced.exitCode).toBe(1);
+    const enforcedReport = JSON.parse(enforced.stdout.toString());
+    expect(enforcedReport.ok).toBe(false);
+    expect(enforcedReport.waiverNotes.join(" ")).toContain("expired");
+  }, 60_000);
 });
 
 // --- clause C: the prepack gate ---

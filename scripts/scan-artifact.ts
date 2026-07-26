@@ -12,7 +12,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { formatArtifactScanReport, scanPublishedArtifact } from "../src/artifact-scan";
+import {
+  formatArtifactScanReport,
+  resolveAssetInventoryWaivers,
+  scanPublishedArtifact,
+} from "../src/artifact-scan";
 
 function run(command: string[], cwd: string): string {
   const result = Bun.spawnSync(command, { cwd, stdout: "pipe", stderr: "pipe" });
@@ -30,7 +34,13 @@ const workspace = mkdtempSync(join(tmpdir(), "contracts-artifact-scan-"));
 try {
   const packed = run(["bun", "pm", "pack", "--destination", workspace, "--ignore-scripts", "--quiet"], repoRoot);
   const archive = isAbsolute(packed) ? packed : join(workspace, packed);
-  const report = scanPublishedArtifact(archive);
+  // The manifest is where a reviewed, time-boxed waiver is declared, so the
+  // gate has to read it. A waiver the enforcement never loads is not an escape
+  // hatch; it is a documented dead end that leaves a legitimate repo no way to
+  // publish except to unwire the gate.
+  const waivers = resolveAssetInventoryWaivers(join(repoRoot, "hasna.contract.json"));
+  for (const note of waivers.notes) console.log(`waiver: ${note}`);
+  const report = scanPublishedArtifact(archive, { waivedKinds: waivers.kinds });
   console.log(formatArtifactScanReport(report));
   if (!report.ok) {
     console.error(

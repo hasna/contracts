@@ -498,7 +498,12 @@ Three properties of that check are deliberate:
   detects the shape, which survives renaming, reformatting, minification, and
   bundling.
 - **It cannot pass by having nothing to check.** A target that yields zero
-  readable members raises an error rather than reporting a clean verdict.
+  readable members raises an error rather than reporting a clean verdict, and
+  the same rule applies one member at a time: a member the scan could not
+  decode is reported and **fails** the scan. There is no size at which a shipped
+  file stops being scanned — the biggest member in a tarball is exactly where a
+  compiled-in inventory ends up, and a clean verdict over a file nobody read
+  would be worse than no scan at all.
 - **Its report does not republish what it found.** Findings are counted and
   redacted; scan output is itself an artifact that gets pasted into tasks,
   channels, and CI logs.
@@ -510,11 +515,31 @@ public-suffix list, an ICANN TLD table — declares
 eligible**, at any threshold, in any encoding. A waiver suppresses the failure
 and keeps the finding on the record; it never erases it.
 
-**Stated limit.** The scanner counts inventories under recognized TLDs and
-excludes TLDs that collide with ubiquitous programming vocabulary, so an
-inventory built exclusively from those TLDs would not be detected by count.
-Clause B is a prohibition, not a count: it holds whether or not the guard can
-see the violation.
+The gate READS that declaration: `contracts artifact-scan <tarball>` loads
+`./hasna.contract.json` (or `--manifest <file>`) and applies the waivers still
+in force. `expiresAt` is enforced there, so the time-boxing is a property rather
+than a promise — an expired waiver stops applying on its own, and a waiver
+missing `reason` or `reviewedBy` never applied in the first place. A documented
+escape hatch that the enforcement does not read is not an escape hatch; it
+leaves a compliant repo no recourse but to unwire the gate.
+
+**Stated limit.** The scanner counts an inventory in the two shapes a list
+actually takes in a shipped file: a quoted literal whose content is mostly
+assets (an array, or a joined string such as `"a.example,b.example".split(",")`),
+and a delimited column — a `.csv` field, a markdown table cell, a one-per-line
+list — that holds an asset on several consecutive rows. An inventory written as
+running prose, in bullets or inside sentences, is read but not counted. The
+scanner also counts only inventories under recognized TLDs, and excludes TLDs
+that collide with ubiquitous programming vocabulary, so an inventory built
+exclusively from those TLDs would not be detected by count.
+
+Those limits are deliberate and measured, not aspirational. `.name`, `.host`,
+`.info` and every ISO language code are real TLDs, so a rule that counted any
+dotted lowercase run would report `node.name` and `exports.tr` as domains: over
+`node_modules` it finds 139 distinct "domains" in TypeScript's own bundle. A
+mandatory gate that fires on compliant repos gets switched off, and then it
+protects nothing. Clause B is a prohibition, not a count: it holds whether or
+not the guard can see the violation.
 
 ### Clause C — Published-artifact scanning is a hard release gate
 
