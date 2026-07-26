@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   DEFAULT_INVENTORY_THRESHOLDS,
+  decodeEscapes,
   formatArtifactScanReport,
   inventoryCounts,
   registrableDomain,
@@ -113,7 +114,7 @@ describe("the failure this guard exists for", () => {
     // prints the inventory it just found has disclosed it a second time.
     expect(text).not.toContain("secret-brand-0.com");
     // Samples name a KIND and a per-report digest, never a fragment of the value.
-    expect(text).toMatch(/<(?:host|email|ipv4):[0-9a-f]{8}>/);
+    expect(text).toMatch(/<(?:domain|host|ip|email):[0-9a-f]{8}>/);
     expect(report.findings.every((finding) => finding.sample.length <= 3)).toBe(true);
   });
 });
@@ -453,15 +454,38 @@ describe("it does not cry wolf on ordinary code", () => {
     expect(counts.host).toEqual([]);
   });
 
-  test("private, loopback, and documentation IP space is excluded by rule", () => {
-    const addresses = [
-      ...Array.from({ length: 30 }, (_, i) => `10.0.0.${i}`),
-      ...Array.from({ length: 30 }, (_, i) => `192.168.1.${i}`),
-      ...Array.from({ length: 30 }, (_, i) => `127.0.0.${i}`),
-      ...Array.from({ length: 30 }, (_, i) => `192.0.2.${i}`), // RFC 5737 TEST-NET-1
-      ...Array.from({ length: 30 }, (_, i) => `203.0.113.${i}`), // TEST-NET-3
-    ].join(" ");
-    expect(inventoryCounts(addresses).ip).toEqual([]);
+  test("private, loopback, and documentation IP space is excluded BY RULE", () => {
+    // This test used to prove nothing: the fixture was bare unquoted tokens and
+    // `inventoryCounts` defaults to `codeLike: true`, which reads no bare
+    // tokens at all — so the count was 0 whatever the reservation rule did.
+    // Stubbing `isReservedIpv4` to `return false` left the file green.
+    //
+    // It now reads them from a position the scanner actually counts, and it
+    // carries a POSITIVE CONTROL in the identical shape, so the assertion
+    // distinguishes the rule from the plumbing.
+    const reserved = [
+      ...Array.from({ length: 8 }, (_, i) => `10.0.0.${i}`),
+      ...Array.from({ length: 8 }, (_, i) => `192.168.1.${i}`),
+      ...Array.from({ length: 8 }, (_, i) => `127.0.0.${i}`),
+      ...Array.from({ length: 8 }, (_, i) => `192.0.2.${i}`), // RFC 5737 TEST-NET-1
+      ...Array.from({ length: 8 }, (_, i) => `203.0.113.${i}`), // TEST-NET-3
+      ...Array.from({ length: 8 }, (_, i) => `169.254.1.${i}`), // link-local
+      ...Array.from({ length: 8 }, (_, i) => `172.16.0.${i}`), // private
+    ];
+    const public_ = Array.from({ length: 40 }, (_, i) => `51.15.${i}.10`);
+
+    for (const [label, options] of [
+      ["quoted, code member", { codeLike: true }],
+      ["bare, prose member", { codeLike: false }],
+    ] as const) {
+      const render = (list: string[]) =>
+        options.codeLike ? `const fleet=[${list.map((a) => `"${a}"`).join(",")}];` : list.join("\n");
+
+      // The rule under test.
+      expect(inventoryCounts(render(reserved), options).ip, `reserved / ${label}`).toEqual([]);
+      // The positive control: same shape, same position, public addresses.
+      expect(inventoryCounts(render(public_), options).ip.length, `public / ${label}`).toBe(40);
+    }
   });
 
   test("member access on a real TLD is not a domain portfolio", () => {
@@ -896,7 +920,7 @@ describe("fixes that had no regression coverage", () => {
     expect(scanPublishedArtifact(archive).ok).toBe(false);
 
     // Over the ceiling: refused by name.
-    for (const domain of [1_000_000, 101, 1e9]) {
+    for (const domain of [1_000_000, 41, 1e9]) {
       expect(() => scanPublishedArtifact(archive, { thresholds: { domain } }), String(domain)).toThrow(
         /ceiling/,
       );
@@ -909,7 +933,11 @@ describe("fixes that had no regression coverage", () => {
     }
     // Tightening is always allowed; only loosening past the ceiling is refused.
     expect(() => scanPublishedArtifact(archive, { thresholds: { domain: 5 } })).not.toThrow();
-    expect(MAX_INVENTORY_THRESHOLDS.domain).toBe(100);
+    // Twice the default, not five times it: clause C never inspects the flags,
+    // so a repo can bake a loosened threshold into its scan script and still
+    // pass conformance. 2x leaves room to tune; it leaves none to switch off.
+    expect(MAX_INVENTORY_THRESHOLDS.domain).toBe(2 * DEFAULT_INVENTORY_THRESHOLDS.domain);
+    expect(MAX_INVENTORY_THRESHOLDS.domain).toBe(40);
   });
 
   test("the redaction salt is PER RUN, not a constant", () => {
@@ -938,7 +966,7 @@ describe("fixes that had no regression coverage", () => {
     // Same shape, different digests: nothing about the value survives the run.
     expect(elsewhere.length).toBe(here.length);
     expect(elsewhere).not.toEqual(here);
-    for (const sample of [...here, ...elsewhere]) expect(sample).toMatch(/^<(?:host|email|ipv4):[0-9a-f]{8}>$/);
+    for (const sample of [...here, ...elsewhere]) expect(sample).toMatch(/^<(?:domain|host|ip|email):[0-9a-f]{8}>$/);
   });
 
   test("a SHORT quoted token does not break the run", () => {
@@ -949,6 +977,41 @@ describe("fixes that had no regression coverage", () => {
       const rows = portfolio.map((domain, index) => `{"${key}":${index},"domain":"${domain}"}`).join(",");
       expect(inventoryCounts(`[${rows}]`).domain.length, `key "${key}"`).toBeGreaterThanOrEqual(38);
     }
+  });
+
+  test("a four-component VERSION string is not an address", () => {
+    // Round 3 removed only the bare-token path; the quoted path kept the exact
+    // same false-positive class. Real packages bundling browserslist or
+    // node-releases data (playwright: 44, node-releases: 50) failed their own
+    // mandatory prepack gate with a finding nobody could action.
+    const versions = Array.from({ length: 30 }, (_, i) => `{"v8":"11.0.${244 + i}.1"}`).join(",");
+    expect(inventoryCounts(`[${versions}]`).ip).toEqual([]);
+    // `node` included deliberately: node-releases keys its version table on it.
+    for (const key of ["version", "node", "chrome", "electron", "engine", "v8"]) {
+      const rows = Array.from({ length: 30 }, (_, i) => `{"${key}":"11.0.${244 + i}.1"}`).join(",");
+      expect(inventoryCounts(`[${rows}]`).ip, key).toEqual([]);
+    }
+
+    // But an address under an ADDRESS key, or with no key at all, still counts:
+    // a bare array is the shape a fleet list actually takes.
+    const bare = Array.from({ length: 30 }, (_, i) => `"51.15.${i}.10"`).join(",");
+    expect(inventoryCounts(`const fleet=[${bare}];`).ip.length).toBe(30);
+    const keyed = Array.from({ length: 30 }, (_, i) => `{"ip":"51.15.${i}.10"}`).join(",");
+    expect(inventoryCounts(`[${keyed}]`).ip.length).toBe(30);
+  });
+
+  test("a dotted quad with LEADING ZEROS is not presentation format", () => {
+    // Binary members are decoded as latin1 and scanned, which is correct for
+    // domains — they need a real TLD, so noise cannot reach a finding. It was
+    // never true for IPs: a 135 MB native addon produced 153 "addresses", 147
+    // of them zero-padded, and the exposure scaled with binary size.
+    const padded = Array.from({ length: 30 }, (_, i) => `"01.52.0${i % 10}.53"`).join(",");
+    expect(inventoryCounts(`const x=[${padded}];`).ip).toEqual([]);
+    expect(inventoryCounts(Array.from({ length: 30 }, (_, i) => `011.012.012.1${i}`).join("\n"), { codeLike: false }).ip).toEqual([]);
+
+    // The same addresses without padding are ordinary public addresses.
+    const clean = Array.from({ length: 30 }, (_, i) => `"1.52.${i}.53"`).join(",");
+    expect(inventoryCounts(`const x=[${clean}];`).ip.length).toBe(30);
   });
 
   test("IPv4 is read from VALUES only — not from SVG path data in a bundle", () => {
@@ -972,6 +1035,43 @@ describe("fixes that had no regression coverage", () => {
     // A genuine address inventory is still caught, in a value position.
     const real = Array.from({ length: 30 }, (_, index) => `"51.15.${index}.10"`).join(",");
     expect(inventoryCounts(`const fleet=[${real}];`, { codeLike: true }).ip.length).toBe(30);
+  });
+});
+
+describe("escape decoding", () => {
+  const B = "\\";
+
+  test("13 shapes decode exactly, with no over-decoding", () => {
+    // Every branch of the decoder, including the ones only `\n` used to pin.
+    // Over-decoding is the failure that matters as much as under-decoding: if
+    // `\\n` became a newline, a scanner would read structure that the runtime
+    // never sees.
+    const cases: Array<[string, string, string]> = [
+      ["newline", `a${B}nb`, "a\nb"],
+      ["escaped backslash stays literal", `a${B}${B}nb`, `a${B}nb`],
+      ["four backslashes become two", `a${B}${B}${B}${B}b`, `a${B}${B}b`],
+      ["escaped quote", `a${B}"b`, 'a"b'],
+      ["escaped apostrophe", `a${B}'b`, "a'b"],
+      ["escaped backtick", `a${B}\`b`, "a`b"],
+      ["tab", `a${B}tb`, "a\tb"],
+      ["carriage return", `a${B}rb`, "a\rb"],
+      ["unknown escape passes through", `a${B}qb`, `a${B}qb`],
+      ["trailing lone backslash", `ab${B}`, `ab${B}`],
+      ["\\uXXXX", `a${B}u002eb`, "a.b"],
+      ["\\u{...}", `a${B}u{2e}b`, "a.b"],
+      ["\\xXX", `a${B}x2eb`, "a.b"],
+    ];
+    for (const [label, input, expected] of cases) {
+      expect(decodeEscapes(input), label).toBe(expected);
+    }
+  });
+
+  test("percent and HTML entities decode independently of backslashes", () => {
+    expect(decodeEscapes("a%2eb")).toBe("a.b");
+    expect(decodeEscapes("a&#x2e;b")).toBe("a.b");
+    expect(decodeEscapes("a&#46;b")).toBe("a.b");
+    // An out-of-range code point is left alone rather than throwing.
+    expect(decodeEscapes("a&#1114112;b")).toBe("a&#1114112;b");
   });
 });
 
@@ -1125,6 +1225,42 @@ describe("published_artifact_gate (clause C)", () => {
       expect(check.status, JSON.stringify(body)).toBe("fail");
       expect(check.detail).toContain("no-op");
     }
+
+    // A script that is ONLY a comment does nothing. Without comment stripping
+    // the head token is `#`, which is not a recognised no-op command, so the
+    // script would read as real work.
+    const commentOnly = conformanceRepo(
+      "gate-comment-only",
+      { exports: { ".": "./d.js" }, scripts: { prepack: "bun run scan:artifact", "scan:artifact": "# TODO: wire the scan" } },
+      release,
+    );
+    expect(gate(commentOnly).status).toBe("fail");
+    expect(gate(commentOnly).detail).toContain("no-op");
+
+    // Newline-separated segments: a multi-line script is no-op only if EVERY
+    // line is. This branch (`\n` in the split) had no coverage.
+    const multilineNoop = conformanceRepo(
+      "gate-noop-multiline",
+      { exports: { ".": "./d.js" }, scripts: { prepack: "bun run scan:artifact", "scan:artifact": "true\n: # nothing\nexit 0" } },
+      release,
+    );
+    expect(gate(multilineNoop).status).toBe("fail");
+
+    const multilineReal = conformanceRepo(
+      "gate-real-multiline",
+      { exports: { ".": "./d.js" }, scripts: { prepack: "bun run scan:artifact", "scan:artifact": "echo start\ncontracts artifact-scan p.tgz" } },
+      release,
+    );
+    expect(gate(multilineReal).status).toBe("pass");
+
+    // A `#` INSIDE quotes is not a comment. Stripping it would turn a real
+    // command into an apparent no-op and fail a compliant repo.
+    const quotedHash = conformanceRepo(
+      "gate-quoted-hash",
+      { exports: { ".": "./d.js" }, scripts: { prepack: "bun run scan:artifact", "scan:artifact": "contracts artifact-scan './pkg#1.tgz'" } },
+      release,
+    );
+    expect(gate(quotedHash).status).toBe("pass");
 
     // Real work is still accepted, including work that merely mentions echo.
     for (const body of [

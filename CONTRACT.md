@@ -481,6 +481,18 @@ Domain portfolios, machine inventories, customer lists, internal endpoint
 catalogues. In any form, default or not, in any encoding, in source or in build
 output.
 
+**What this check is, and is not.** Clause B is a **prohibition**; the check is a
+**count**. Those are not the same thing, and the gap is not academic: an
+artifact carrying a *small* number of vendor-owned hostnames — below the
+threshold — passes. Demonstrated by construction: an artifact built from the 13
+files of a real published package that carry owned hostnames (11 distinct,
+including two nginx configs and a `bin/` entry point) scans `pass`, exit 0.
+
+The clause still binds. A repo that ships an owned-asset inventory is in breach
+whether or not this check fires, and "the scanner passed" is not evidence of
+compliance for small-N disclosure. The check exists to make the *bulk* case
+mechanically impossible, which is the case that actually happened.
+
 This is distinct from R1, which bans vendor endpoints as *defaults*. R1 is about
 what unconfigured software will contact. Clause B is about what shipped bytes
 reveal about what the vendor owns — a fact that is disclosed whether or not any
@@ -531,18 +543,6 @@ Hasna packed artifacts and against `zod`, `email-validator`, `commander` and
 `typescript` it reports nothing; against `nodemailer`, `validator` and
 `class-validator` it reports their genuine reference tables — the waiver case.
 A 20,414-member package scans in **5.9 s**.
-
-**What this check is, and is not.** Clause B is a **prohibition**; the check is a
-**count**. Those are not the same thing, and the gap is not academic: an
-artifact carrying a *small* number of vendor-owned hostnames — below the
-threshold — passes. Demonstrated by construction: an artifact built from the 13
-files of a real published package that carry owned hostnames (11 distinct,
-including two nginx configs and a `bin/` entry point) scans `pass`, exit 0.
-
-The clause still binds. A repo that ships an owned-asset inventory is in breach
-whether or not this check fires, and "the scanner passed" is not evidence of
-compliance for small-N disclosure. The check exists to make the *bulk* case
-mechanically impossible, which is the case that actually happened.
 
 **Stated limits.** All measured, none theoretical:
 

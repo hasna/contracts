@@ -213,7 +213,38 @@ const URL_AUTHORITY_END = /[/?#]/;
 const HOST_PORT_SUFFIX = /:\d{1,5}$/;
 const HOSTNAME_LITERAL = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/;
 const EMAIL_LITERAL = /^[a-z0-9._%+-]+@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/;
-const IPV4_LITERAL = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+/**
+ * Dotted-quad in PRESENTATION FORMAT: no leading zeros.
+ *
+ * `01.52.02.53` is not an address anyone writes; it is what random bytes look
+ * like when a 135 MB `.node` binary is decoded as latin1. Accepting leading
+ * zeros turned binary noise into findings — one native addon produced 153 IP
+ * "entries", 147 of them zero-padded — and the exposure scaled with binary
+ * size, so small artifacts looked clean and large ones failed inexplicably.
+ * The comment claiming binary noise is harmless holds for domains, which need
+ * a real TLD; it never held for IPs.
+ */
+const IPV4_LITERAL = /^(?:(?:0|[1-9]\d{0,2})\.){3}(?:0|[1-9]\d{0,2})$/;
+
+/**
+ * Object keys whose value is an ADDRESS rather than a version.
+ *
+ * A dotted quad is numerically indistinguishable from a four-component version
+ * string, so in code the only available signal is the key it sits under.
+ * `{"v8":"11.0.244.1"}` is a version; `{"ip":"51.15.0.10"}` is a machine.
+ */
+// `node` is deliberately ABSENT: `node-releases` keys its version table on it
+// (`{"node":"0.10.0","v8":"3.14.5.9"}`), which is the exact false positive this
+// list exists to prevent. A machine list keyed `node` loses detection; a
+// version table keyed `node` gaining it is worse.
+const ADDRESS_KEY = /^(?:ip|ipv4|addr|address|host|hostname|server|peer|endpoint|gateway|dns|resolver|bind|listen|remote)$/i;
+
+/** The object key a quoted literal is the value of, if any. */
+function enclosingKey(view: string, literalStart: number): string | null {
+  const before = view.slice(Math.max(0, literalStart - 96), literalStart);
+  const match = /(?:"([^"\n]{1,64})"|'([^'\n]{1,64})'|([A-Za-z_$][\w$-]{0,63}))\s*:\s*$/.exec(before);
+  return match ? (match[1] ?? match[2] ?? match[3] ?? null) : null;
+}
 /** A bare IPv4 anywhere in the text; unlike a hostname it cannot be confused with code. */
 const IPV4_PATTERN = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
 
@@ -227,7 +258,18 @@ function addressCandidates(view: string, codeLike: boolean): string[] {
   const found: string[] = [];
   for (const match of view.matchAll(QUOTED_LITERAL_PATTERN)) {
     const literal = (match[1] ?? match[2] ?? match[3] ?? "").trim();
-    if (IPV4_LITERAL.test(literal)) found.push(literal);
+    if (!IPV4_LITERAL.test(literal)) continue;
+    if (codeLike) {
+      // In code, a quad that is the value of a NON-address key is a version
+      // string. `{"v8":"11.0.244.1"}` × 30 counted as 30 addresses, and real
+      // packages bundling browserslist or node-releases data (playwright: 44,
+      // node-releases: 50) failed their own mandatory prepack gate with a
+      // finding nobody could action. A bare array element has no key and still
+      // counts, which is the shape a fleet list actually takes.
+      const key = enclosingKey(view, match.index ?? 0);
+      if (key !== null && !ADDRESS_KEY.test(key)) continue;
+    }
+    found.push(literal);
   }
   if (!codeLike) {
     for (const match of view.matchAll(IPV4_PATTERN)) {
@@ -293,15 +335,21 @@ export interface UnreadableMember {
 }
 
 /**
- * Hard ceiling per asset kind. A caller may tighten a threshold as far as it
- * likes; loosening one past this point is refused, because beyond it the
- * detector cannot fire on any artifact a human would call an inventory.
+ * Hard ceiling per asset kind: TWICE the default, no more.
+ *
+ * A caller may tighten a threshold as far as it likes. Loosening is capped
+ * because clause C inspects the script graph and never the flags, so a repo
+ * can bake a loosened threshold into its scan script and pass conformance
+ * while suppressing findings. At the previous ceiling of 100 that was a 5x
+ * loosening — up to 99 owned domains suppressed by a flag nothing checks. 2x
+ * leaves room for a repo with a genuinely noisy artifact to tune, and leaves
+ * none for switching the detector off.
  */
 export const MAX_INVENTORY_THRESHOLDS: Readonly<Record<AssetInventoryKind, number>> = Object.freeze({
-  domain: 100,
-  host: 100,
-  ip: 100,
-  email: 100,
+  domain: 40,
+  host: 50,
+  ip: 40,
+  email: 30,
 });
 
 function clampThresholds(
@@ -377,8 +425,10 @@ export interface ArtifactScanReport {
  * the KIND and a short salted digest, which is stable within one report (so two
  * findings can be told apart) and useless outside it.
  */
-function redact(entry: string): string {
-  const kind = entry.includes("@") ? "email" : /^[0-9.]+$/.test(entry) ? "ipv4" : "host";
+function redact(entry: string, kind: AssetInventoryKind): string {
+  // Labelled by the FINDING's kind, not by guessing from the value: a `domain`
+  // finding printed `<host:…>`, which is merely confusing rather than unsafe,
+  // but a report nobody trusts to say what it means gets skimmed.
   return `<${kind}:${reportDigest(entry)}>`;
 }
 
@@ -413,60 +463,44 @@ function distinct(values: Iterable<string>): string[] {
  * quotes a source map's `sourcesContent` wraps original source in — which is
  * exactly how a file excluded by `files` still ships its contents.
  */
-function decodeEscapes(value: string): string {
+export function decodeEscapes(value: string): string {
   const codePoint = (encoded: string, radix: number): string | null => {
     const parsed = Number.parseInt(encoded, radix);
     if (!Number.isFinite(parsed) || parsed < 0 || parsed > 0x10ffff) return null;
     return String.fromCodePoint(parsed);
   };
 
-  // ONE left-to-right pass over the backslash escapes, not a chain of
-  // `.replace()` calls. Sequential replaces cannot tell `\\n` (an escaped
-  // backslash followed by the letter n) from `\n` (a newline), and they
-  // silently corrupt one while decoding the other.
+  // ONE alternation, not a chain of independent single-escape replaces.
   //
-  // `\n` in particular is not optional: every bundler emits `sourcesContent`
-  // as ONE JSON string with the original file's newlines escaped, so the glue
-  // between two entries is `,\n  ` — which contains a literal backslash, and
+  // The distinction that matters is consuming each backslash exactly once: a
+  // chain of separate `.replace()` calls cannot tell `\\n` (an escaped
+  // backslash followed by the letter n) from `\n` (a newline), because the
+  // second pass re-reads the backslash the first pass left behind. A single
+  // alternating pattern has no such seam — and is ~5x faster than walking the
+  // string character by character, which matters on a 16 MB bundle.
+  //
+  // `\n` is not optional here: every bundler emits `sourcesContent` as ONE
+  // JSON string with the original file's newlines escaped, so the glue between
+  // two entries is `,\n  ` — which contains a literal backslash, and
   // `LITERAL_RUN_GLUE` excludes backslash, so the run broke at every element.
-  // A realistic `.map` carrying the full portfolio scanned clean because of it.
+  // A realistic `.map` carrying a full portfolio scanned clean because of it.
   const SIMPLE: Record<string, string> = {
     n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", v: "\v", "0": "\0",
     '"': '"', "'": "'", "`": "`", "\\": "\\", "/": "/",
   };
-  let out = "";
-  let index = 0;
-  while (index < value.length) {
-    const character = value[index]!;
-    if (character !== "\\" || index + 1 >= value.length) {
-      out += character;
-      index += 1;
-      continue;
-    }
-    const next = value[index + 1]!;
-    if (next === "u" && value[index + 2] === "{") {
-      const close = value.indexOf("}", index + 3);
-      const hex = close === -1 ? null : value.slice(index + 3, close);
-      const decoded = hex && /^[0-9a-f]{1,6}$/i.test(hex) ? codePoint(hex, 16) : null;
-      if (decoded !== null) { out += decoded; index = close + 1; continue; }
-    }
-    if (next === "u" && /^[0-9a-f]{4}$/i.test(value.slice(index + 2, index + 6))) {
-      const decoded = codePoint(value.slice(index + 2, index + 6), 16);
-      if (decoded !== null) { out += decoded; index += 6; continue; }
-    }
-    if (next === "x" && /^[0-9a-f]{2}$/i.test(value.slice(index + 2, index + 4))) {
-      const decoded = codePoint(value.slice(index + 2, index + 4), 16);
-      if (decoded !== null) { out += decoded; index += 4; continue; }
-    }
-    const simple = SIMPLE[next];
-    if (simple !== undefined) { out += simple; index += 2; continue; }
-    // An escape this pass does not know: keep both characters verbatim.
-    out += character + next;
-    index += 2;
-  }
+  const decoded = value.replace(
+    /\\u\{([0-9a-f]{1,6})\}|\\u([0-9a-f]{4})|\\x([0-9a-f]{2})|\\([\s\S])/gi,
+    (match, braced?: string, fourHex?: string, twoHex?: string, single?: string) => {
+      if (braced !== undefined) return codePoint(braced, 16) ?? match;
+      if (fourHex !== undefined) return codePoint(fourHex, 16) ?? match;
+      if (twoHex !== undefined) return codePoint(twoHex, 16) ?? match;
+      // An escape this pass does not know keeps both characters verbatim.
+      return single !== undefined ? SIMPLE[single] ?? match : match;
+    },
+  );
 
   // Percent- and entity-encoding are independent of backslash escaping.
-  return out
+  return decoded
     .replace(/%([0-9a-f]{2})/gi, (match, hex: string) => codePoint(hex, 16) ?? match)
     .replace(/&#x([0-9a-f]+);?/gi, (match, hex: string) => codePoint(hex, 16) ?? match)
     .replace(/&#([0-9]+);?/g, (match, dec: string) => codePoint(dec, 10) ?? match);
@@ -978,7 +1012,7 @@ export function scanPublishedArtifact(target: string, options: ArtifactScanOptio
         kind,
         count: entries.length,
         threshold,
-        sample: entries.slice(0, 3).map(redact),
+        sample: entries.slice(0, 3).map((entry) => redact(entry, kind)),
       };
       (waived.has(kind) ? waivedFindings : findings).push(finding);
     }
@@ -996,7 +1030,7 @@ export function scanPublishedArtifact(target: string, options: ArtifactScanOptio
       kind,
       count: entries.length,
       threshold,
-      sample: entries.slice(0, 3).map(redact),
+      sample: entries.slice(0, 3).map((entry) => redact(entry, kind)),
     };
     aggregateFindings.push(finding);
     (waived.has(kind) ? waivedFindings : findings).push(finding);
