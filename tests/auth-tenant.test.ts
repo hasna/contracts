@@ -494,6 +494,29 @@ describe("tenant enforcement in verifyApiKeyToken", () => {
     }
   });
 
+  test("a NON-STRING expectedTid denies too — the request path must not 500", () => {
+    // `expectedTid` reaches this function straight from a request path, so it
+    // does not always arrive as a string: Express turns `?tid=a&tid=b` into an
+    // array, a JSON body can carry a number or `null`. Calling `.trim()` on any
+    // of those threw a TypeError out of the request path — the exact 500 the
+    // comment on this branch promises not to produce. A misconfigured
+    // expectation must DENY, and the type has to be checked before the string
+    // method, not after.
+    for (const bogus of [null, 42, ["acme-corp", "rival-corp"], {}] as unknown[]) {
+      const label = JSON.stringify(bogus ?? null);
+      const result = verifyApiKeyToken(tenanted("acme-corp").token, {
+        signingSecret: SIGNING,
+        expectedApp: "todos",
+        expectedTid: bogus as string,
+      });
+      expect(result.ok, label).toBe(false);
+      if (!result.ok) {
+        expect(result.reason, label).toBe("tenant_mismatch");
+        expect(result.message, label).toMatch(/not a valid tenant id/);
+      }
+    }
+  });
+
   test("tenant is checked before scopes — a wrong-tenant token is not merely under-scoped", () => {
     const result = verifyApiKeyToken(tenanted("rival-corp").token, {
       signingSecret: SIGNING,
@@ -602,6 +625,66 @@ describe("tenant enforcement in the middleware", () => {
     );
     expect(decision.ok).toBe(false);
     if (!decision.ok) expect(decision.reason).toBe("tenant_mismatch");
+  });
+
+  test("a per-call expectedTid that is PRESENT but unusable denies — it never widens", async () => {
+    // The hole this closes: `context.expectedTid ?? options.expectedTid`
+    // collapsed a NULLISH per-call value into "no expectation at all". On an
+    // un-pinned service that meant NO tenant reached the verifier, so a route
+    // computing `req.params.tid ?? null` — or reading a JSON body carrying
+    // `orgId: null`, or a query param coerced to null — silently turned the
+    // gate OFF and let another organization's token through the exact
+    // `/v1/orgs/:tid/...` pattern this claim exists to guard. Absence is not a
+    // wildcard, and neither is a value that failed to resolve. `""` already
+    // denied; the nullish spelling must deny the same way, and so must a value
+    // that is not a string at all.
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING });
+    const rival = tenanted("rival-corp").token;
+
+    for (const unusable of [null, "", "   ", "acme corp", 42, ["acme-corp", "rival-corp"], {}] as unknown[]) {
+      const label = JSON.stringify(unusable ?? null);
+      const decision = await verifier.authenticate(
+        { "x-api-key": rival },
+        { expectedTid: unusable as string },
+      );
+      expect(decision.ok, label).toBe(false);
+      if (!decision.ok) {
+        expect(decision.status, label).toBe(403);
+        expect(decision.reason, label).toBe("tenant_mismatch");
+      }
+    }
+
+    // A genuinely ABSENT key still falls back to the middleware-wide setting —
+    // that fallback is what makes a per-call value a NARROWING, and it is the
+    // one case that must keep working unchanged.
+    const absent = await verifier.authenticate({ "x-api-key": rival }, { method: "GET" });
+    expect(absent.ok).toBe(true);
+  });
+
+  test("a polluted prototype cannot invent a per-call expectedTid", async () => {
+    // `context` is a per-request bag the ROUTE builds, so reading
+    // `context.expectedTid` plainly resolves through the prototype chain. Under
+    // the process-wide write primitive this suite already models, a route that
+    // passes no tenant at all would appear to pass the attacker's — and against
+    // a pinned service that disagreement denies EVERY request on the route
+    // before the token is even read. Presence must be decided by an own-property
+    // read, exactly as `ownTenantId` decides it for claim sets and rows.
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, expectedTid: "acme-corp" });
+    const acme = tenanted("acme-corp").token;
+    Object.defineProperty(Object.prototype, "expectedTid", {
+      value: POLLUTED_TID,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+    });
+    try {
+      // The pollution must actually be in place, or the assertion below is vacuous.
+      expect(({} as unknown as { expectedTid?: string }).expectedTid).toBe(POLLUTED_TID);
+      const decision = await verifier.authenticate({ "x-api-key": acme }, { method: "GET" });
+      expect(decision.ok).toBe(true);
+    } finally {
+      delete (Object.prototype as unknown as { expectedTid?: string }).expectedTid;
+    }
   });
 
   test("a malformed middleware-wide expectedTid throws at construction, not per request", () => {

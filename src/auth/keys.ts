@@ -360,12 +360,21 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
   if (options.expectedTid !== undefined && !tenantIdsEqual(tid, options.expectedTid)) {
     // A malformed `expectedTid` lands here too, and deliberately: this runs in
     // the request path, so a misconfigured expectation must deny rather than
-    // throw a 500. The message distinguishes the two so it is still diagnosable.
-    // Construction-time config is validated eagerly by `verifyApiKey()`.
+    // throw a 500. That includes values that are not strings at ALL — Express
+    // turns `?tid=a&tid=b` into an array, and a JSON body can carry a number or
+    // `null` — so the type is checked BEFORE any string method is reached.
+    // Calling `.trim()` first threw a TypeError straight out of the request
+    // path, which is the very 500 this branch exists to avoid. `tenantIdsEqual`
+    // already refuses non-strings, so the deny itself was never in doubt; only
+    // the message needed the guard. The message still distinguishes the two so
+    // it is diagnosable. Construction-time config is validated eagerly by
+    // `verifyApiKey()`.
+    const expectationIsWellFormed =
+      typeof options.expectedTid === "string" && isValidTenantId(options.expectedTid.trim());
     return {
       ok: false,
       reason: "tenant_mismatch",
-      message: isValidTenantId(options.expectedTid.trim())
+      message: expectationIsWellFormed
         ? "Token is for a different tenant than the one this service accepts."
         : "Token tenant cannot be checked: the expected tenant id is not a valid tenant id.",
       kid: claims.kid,

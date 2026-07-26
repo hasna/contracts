@@ -83,6 +83,10 @@ export interface ApiKeyAuthContext {
    * when the token names a different tenant, and with `tenant_required` when it
    * names none. A malformed value denies rather than throwing, because it can
    * come from a request path.
+   *
+   * Only OMITTING the key means "no per-call expectation". Supplying one that
+   * did not resolve — `null`, `""`, an Express multi-value array — is a denial,
+   * never a fallback to the middleware-wide setting and never a wildcard.
    */
   expectedTid?: string;
 }
@@ -182,11 +186,28 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
     // a valid token for this app defeat a service pinned to another tenant just
     // by addressing their own org in the URL. When both are set they must agree,
     // and disagreement is a denial — not a silent preference for either one.
-    const expectedTid = context.expectedTid ?? options.expectedTid;
+    //
+    // PRESENCE, not truthiness, decides whether the caller expressed an
+    // expectation. A `??` here collapsed a NULLISH per-call value into "no
+    // expectation at all", so an un-pinned service whose route computed
+    // `req.params.tid ?? null` (or read a JSON body carrying `orgId: null`) sent
+    // NO tenant to the verifier and let another organization's token straight
+    // through the route it meant to guard. Absence is not a wildcard — and
+    // neither is a value that failed to resolve. Anything the caller actually
+    // supplied is forwarded as-is and denied downstream by `verifyApiKeyToken`,
+    // which refuses every non-grammatical expectation including `null`; only a
+    // genuinely absent key falls back to the middleware-wide pin.
+    //
+    // Read as an OWN property for the same reason `ownTenantId` exists: a plain
+    // read on a caller-built options bag resolves through the prototype chain,
+    // so one `Object.prototype.expectedTid` write would pin every un-pinned
+    // route to a tenant nothing validated.
+    const perCallTid = Object.hasOwn(context, "expectedTid") ? context.expectedTid : undefined;
+    const expectedTid = perCallTid !== undefined ? perCallTid : options.expectedTid;
     if (
-      context.expectedTid !== undefined &&
+      perCallTid !== undefined &&
       options.expectedTid !== undefined &&
-      !tenantIdsEqual(context.expectedTid, options.expectedTid)
+      !tenantIdsEqual(perCallTid, options.expectedTid)
     ) {
       await emit({ outcome: "deny", app: options.app, kid: null, tid: null, reason: "tenant_mismatch", scopesRequired: requiredScopes, method, path, status: 403, at });
       return {
