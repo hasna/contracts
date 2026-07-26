@@ -95,6 +95,51 @@ Granted wildcards such as `<app>:*`, `*:read`, and `*` are allowed only for
 explicit admin/service bootstrap cases and must be visible in audit output as
 high-risk grants.
 
+## Tenant Identifier
+
+`AuthContext.tenantId` above is a required boundary claim, but until now no
+Hasna token had a place to carry it. The API-key claim set
+(`ApiKeyClaims` in `@hasna/contracts/auth`) now carries an **optional `tid`**,
+and this section is the normative definition every Hasna auth seam binds to.
+
+**Wire type.** A tenant id is **always a JSON string**. Never a number, never an
+object, never `null`. A store with a PostgreSQL `uuid` column serializes its
+canonical string form; a store with a `text` column passes its value through.
+This is the fix for the observed drift where the same logical tenant was a
+`uuid` in one repo's schema and `text` in another's, so neither could resolve
+the other's identifier.
+
+**Grammar.** `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, maximum 64 characters
+(`TENANT_ID_PATTERN`, `MAX_TENANT_ID_LENGTH`). Deliberately permissive about
+shape — a UUID, a ULID, a slug (`acme-corp`) and a prefixed id
+(`org_01HQ…`) are all valid, because all four are already in use — and strict
+about character set: whitespace, control characters, `/`, `:` (reserved as the
+scope separator), `@`, quotes and non-ASCII are excluded, so a tenant id is
+always safe in a log line, a header value, and a URL path segment.
+
+**Comparison.** Tenant ids are **opaque and case-sensitive**, with exactly one
+exception: **UUID-shaped ids are compared in canonical lowercase**
+(`canonicalizeTenantId`, `tenantIdsEqual`). PostgreSQL's `uuid` type round-trips
+every value to lowercase, so without this rule a `uuid`-backed store and a
+`text`-backed store would disagree about whether `A1B2…` and `a1b2…` name the
+same tenant. Nothing other than a UUID is case-folded. Issuers MUST emit the
+canonical form; `mintApiKey` does this for the caller.
+
+**Absence is not a wildcard.** A token with no `tid` is *untenanted* — it names
+no organization. A service whose rows carry an organization reference MUST
+reject it rather than treat it as "all tenants". Set `requireTenant: true` on
+`verifyApiKey` / `verifyApiKeyToken` to get that rejection from the kit;
+`expectedTid` implies it. Both tenant denials return **403**, not 401: the
+credential is authentic and unexpired, it is simply not permitted for this
+organization — the same shape as `insufficient_scope`.
+
+**Tamper evidence.** `tid` lives inside the signed claim body, so altering it
+invalidates the signature. It is not a header and MUST NOT be read from one.
+
+**Compatibility.** The claim is additive. A token minted before `tid` existed
+parses, verifies, and authenticates unchanged, and minting without a tenant
+produces a byte-identical claim body — so stored `tokenHash` values still match.
+
 ## Role Model
 
 Apps may add domain roles, but the shared minimum role set is:

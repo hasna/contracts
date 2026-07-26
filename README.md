@@ -276,9 +276,9 @@ evidence.
 
 Stateless, verifiable API keys for the `<app>-serve` HTTP services. A key is an
 HMAC-signed compact token with the human prefix `hasna_<app>_`; the signed claims
-carry the app, scopes, and TTL, so verification needs **no** database round-trip.
-Only the sha256 hash is stored at rest (the secret is shown once at issue time),
-and revocation is layered on top via the key store.
+carry the app, an optional tenant, scopes, and TTL, so verification needs **no**
+database round-trip. Only the sha256 hash is stored at rest (the secret is shown
+once at issue time), and revocation is layered on top via the key store.
 
 **Exact import + usage every `<app>-serve` service calls** (Express shown; Hono
 is identical via `honoApiKey`):
@@ -299,15 +299,45 @@ app.use(
   signingSecret: signingCredential,
     isRevoked: keys.isRevoked,          // per-request revocation check against RDS
     requiredScopes: ["todos:read"],     // optional per-mount scope gate
+    requireTenant: true,                // deny untenanted keys (org-scoped services)
     audit: (e) => log.info("api_auth", e), // per-request AUDIT hook (allow + deny)
   }),
 );
-// On success: req.apiKey = { kid, app, scopes, agent, claims }
+// On success: req.apiKey = { kid, app, scopes, agent, tid, claims }
 ```
 
 Framework-agnostic core (for custom routers): `verifyApiKey({ app, signingSecret })`
 returns `{ authenticate(headers, ctx) }`. Tokens are read from the `x-api-key`
 header or `Authorization: Bearer <key>`.
+
+### The tenant claim (`tid`)
+
+`ApiKeyClaims` carries an **optional `tid`** — the organization the key acts
+for. It is additive: a token minted before `tid` existed still verifies, and
+minting without a tenant produces a byte-identical claim body.
+
+```ts
+import { normalizeTenantId, tenantIdsEqual } from "@hasna/contracts/auth";
+
+// Issue: contracts issue-key --app todos --tid acme-corp --scopes 'todos:read'
+verifyApiKeyToken(token, { signingSecret, expectedApp: "todos", requireTenant: true });
+// Per-route, for /v1/orgs/:tid/... :
+await verifier.authenticate(req.headers, { expectedTid: req.params.tid });
+```
+
+- **Wire type is always a string** — a `uuid` column and a `text` column both
+  serialize to the same value, which is what closes the cross-repo drift.
+- **Grammar** `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` — UUIDs, ULIDs, slugs, and
+  prefixed ids all fit; anything unsafe in a log line, header, or URL segment
+  does not.
+- **UUIDs compare case-insensitively; nothing else does**, because PostgreSQL's
+  `uuid` type lowercases on round-trip.
+- **Absence is not a wildcard.** No `tid` means untenanted. `requireTenant` (or
+  `expectedTid`, which implies it) denies with **403** — the credential is
+  authentic, it is just not permitted for this organization.
+
+Normative definition: [`docs/AUTH_RBAC_VERIFIER_CONTRACT.md` → Tenant
+Identifier](docs/AUTH_RBAC_VERIFIER_CONTRACT.md#tenant-identifier).
 
 **Serve env vars:**
 

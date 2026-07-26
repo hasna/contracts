@@ -406,6 +406,7 @@ export function createContractsProgram() {
     .description("Mint an API key (prefix hasna_<app>_): stores the hashed record and prints the secret ONCE")
     .requiredOption("--app <app>", "App slug the key authenticates (e.g. todos)")
     .option("--agent <agent>", "Issued-to agent/subject (informational)")
+    .option("--tid <tenant>", "Tenant/organization the key acts for (UUID, ULID, slug, or prefixed id). Omit for an untenanted key")
     .option("--scopes <csv>", "Comma-separated scopes, e.g. 'todos:read,todos:write' or 'todos:*'")
     .option("--ttl-days <days>", "Days until expiry (default 90)")
     .option("--no-expiry", "Mint a non-expiring key")

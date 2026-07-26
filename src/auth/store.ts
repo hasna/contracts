@@ -29,6 +29,8 @@ export interface ApiKeyRecord {
   kid: string;
   app: string;
   agent: string | null;
+  /** Tenant the key acts for; `null` for untenanted (pre-`tid`) keys. */
+  tid: string | null;
   scopes: string[];
   tokenHash: string;
   issuedAt: string;
@@ -52,6 +54,7 @@ function createTableSql(table: string): string {
     kid TEXT PRIMARY KEY,
     app TEXT NOT NULL,
     agent TEXT,
+    tid TEXT,
     scopes JSONB NOT NULL,
     token_hash TEXT NOT NULL UNIQUE,
     issued_at TIMESTAMPTZ NOT NULL,
@@ -64,7 +67,15 @@ function createTableSql(table: string): string {
   )`;
 }
 
-/** Ordered migrations for the api-keys table (id namespaced to avoid clashes). */
+/**
+ * Ordered migrations for the api-keys table (id namespaced to avoid clashes).
+ *
+ * 0003 adds the tenant column. It is a separate, additive migration rather than
+ * an edit to 0001 because deployed ledgers have already recorded 0001 as
+ * applied and would never re-run it. The column is `TEXT NULL` — matching the
+ * contract's wire type, and nullable because keys issued before the tenant
+ * claim existed are untenanted, not tenant-zero.
+ */
 export function apiKeyMigrations(table: string = DEFAULT_API_KEYS_TABLE): AuthMigration[] {
   return [
     { id: `hasna_auth_0001_${table}`, sql: createTableSql(table) },
@@ -72,6 +83,11 @@ export function apiKeyMigrations(table: string = DEFAULT_API_KEYS_TABLE): AuthMi
       id: `hasna_auth_0002_${table}_indexes`,
       sql: `CREATE INDEX IF NOT EXISTS ${table}_app_idx ON ${table} (app);
             CREATE INDEX IF NOT EXISTS ${table}_token_hash_idx ON ${table} (token_hash);`,
+    },
+    {
+      id: `hasna_auth_0003_${table}_tenant`,
+      sql: `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS tid TEXT;
+            CREATE INDEX IF NOT EXISTS ${table}_tid_idx ON ${table} (tid);`,
     },
   ];
 }
@@ -100,6 +116,7 @@ function rowToRecord(row: Row): ApiKeyRecord {
     kid: String(row.kid),
     app: String(row.app),
     agent: row.agent === null || row.agent === undefined ? null : String(row.agent),
+    tid: row.tid === null || row.tid === undefined ? null : String(row.tid),
     scopes: parseScopes(row.scopes),
     tokenHash: String(row.token_hash),
     issuedAt: toIso(row.issued_at) ?? new Date(0).toISOString(),
@@ -115,6 +132,8 @@ export interface InsertKeyInput {
   kid: string;
   app: string;
   agent?: string | null;
+  /** Tenant the key acts for. Omit or `null` for an untenanted key. */
+  tid?: string | null;
   scopes: string[];
   tokenHash: string;
   issuedAt: Date;
@@ -153,12 +172,13 @@ export class ApiKeyStore {
   async insert(input: InsertKeyInput): Promise<void> {
     await this.client.execute(
       `INSERT INTO ${this.table}
-         (kid, app, agent, scopes, token_hash, issued_at, expires_at, created_by)
-       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8)`,
+         (kid, app, agent, tid, scopes, token_hash, issued_at, expires_at, created_by)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)`,
       [
         input.kid,
         input.app,
         input.agent ?? null,
+        input.tid ?? null,
         JSON.stringify(input.scopes),
         input.tokenHash,
         input.issuedAt.toISOString(),
@@ -175,6 +195,7 @@ export class ApiKeyStore {
       kid: minted.kid,
       app: claims.app,
       agent: claims.agent ?? null,
+      tid: claims.tid ?? null,
       scopes: claims.scopes,
       tokenHash: minted.tokenHash,
       issuedAt: new Date(claims.iat * 1000),
@@ -245,19 +266,28 @@ export class ApiKeyStore {
     ]);
   }
 
-  /** List keys, optionally filtered by app / excluding revoked. */
-  async list(options: { app?: string; includeRevoked?: boolean } = {}): Promise<ApiKeyRecord[]> {
+  /**
+   * List keys, optionally filtered by app and/or tenant, excluding revoked by
+   * default. `tid` filters to exactly that tenant; it never falls back to
+   * "all tenants" when the filter does not match, so an operator listing one
+   * organization's keys cannot accidentally enumerate another's.
+   */
+  async list(options: { app?: string; tid?: string; includeRevoked?: boolean } = {}): Promise<ApiKeyRecord[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (options.app) {
       params.push(options.app);
       clauses.push(`app = $${params.length}`);
     }
+    if (options.tid) {
+      params.push(options.tid);
+      clauses.push(`tid = $${params.length}`);
+    }
     if (!options.includeRevoked) {
       clauses.push("revoked_at IS NULL");
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-    const rows = await this.client.many<Row>(`SELECT * FROM ${this.table} ${where} ORDER BY issued_at DESC`);
+    const rows = await this.client.many<Row>(`SELECT * FROM ${this.table} ${where} ORDER BY issued_at DESC`, params);
     return rows.map(rowToRecord);
   }
 
