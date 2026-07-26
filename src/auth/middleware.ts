@@ -11,7 +11,7 @@ import {
   type ApiKeyClaims,
   type ApiKeyVerifyFailureReason,
 } from "./keys.js";
-import { isValidTenantId } from "./tenant.js";
+import { isValidTenantId, tenantIdsEqual } from "./tenant.js";
 
 /** Header sources the middleware can read tokens from. */
 export type HeaderSource =
@@ -176,8 +176,26 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
     const requiredScopes = [...(options.requiredScopes ?? []), ...(context.requiredScopes ?? [])];
     const at = new Date(clock()).toISOString();
 
-    // A per-call tenant narrows the middleware-wide one; it never widens it.
+    // A per-call tenant NARROWS the middleware-wide one; it must never replace
+    // it. `context.expectedTid` typically comes from a request path
+    // (`/v1/orgs/:tid/...`), so letting it win outright would let any holder of
+    // a valid token for this app defeat a service pinned to another tenant just
+    // by addressing their own org in the URL. When both are set they must agree,
+    // and disagreement is a denial — not a silent preference for either one.
     const expectedTid = context.expectedTid ?? options.expectedTid;
+    if (
+      context.expectedTid !== undefined &&
+      options.expectedTid !== undefined &&
+      !tenantIdsEqual(context.expectedTid, options.expectedTid)
+    ) {
+      await emit({ outcome: "deny", app: options.app, kid: null, tid: null, reason: "tenant_mismatch", scopesRequired: requiredScopes, method, path, status: 403, at });
+      return {
+        ok: false,
+        status: 403,
+        reason: "tenant_mismatch",
+        message: "This route addresses a tenant other than the one this service is pinned to.",
+      };
+    }
 
     const token = extractToken(headers, headerName, scheme);
     if (!token) {
@@ -212,7 +230,9 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
         verified.reason === "tenant_required"
           ? 403
           : 401;
-      await emit({ outcome: "deny", app: options.app, kid: null, tid: null, reason: verified.reason, scopesRequired: requiredScopes, method, path, status, at });
+      // `kid`/`tid` are present only once the signature has verified, which is
+      // exactly when a denial is worth attributing to a specific key.
+      await emit({ outcome: "deny", app: options.app, kid: verified.kid ?? null, tid: verified.tid ?? null, reason: verified.reason, scopesRequired: requiredScopes, method, path, status, at });
       return { ok: false, status, reason: verified.reason, message: verified.message };
     }
 

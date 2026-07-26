@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import {
   MAX_TENANT_ID_LENGTH,
   TENANT_ID_PATTERN,
@@ -35,7 +36,8 @@ describe("tenant id grammar", () => {
       "acme-corp", // slug
       "acme.corp", // dotted slug
       "1", // minimal
-      "a".repeat(MAX_TENANT_ID_LENGTH), // at the cap
+      "a".repeat(64), // at the cap, written literally: a self-referential
+      //               `MAX_TENANT_ID_LENGTH` bound can never catch the cap moving
     ]) {
       expect(isValidTenantId(id), id).toBe(true);
     }
@@ -55,7 +57,7 @@ describe("tenant id grammar", () => {
       "acme ", // trailing space
       "acme\u0000corp", // embedded NUL, written as an escape so this file stays text
       "ácme", // non-ASCII
-      "a".repeat(MAX_TENANT_ID_LENGTH + 1),
+      "a".repeat(65), // one over the cap, again a literal
     ]) {
       expect(isValidTenantId(id), JSON.stringify(id)).toBe(false);
     }
@@ -72,17 +74,56 @@ describe("tenant id grammar", () => {
     expect(TENANT_ID_PATTERN.test("acme corp")).toBe(false);
   });
 
-  test("UUIDs fold to lowercase; nothing else does", () => {
-    const upper = "9D4B2A1C-0E5F-4A7B-8C3D-1E2F3A4B5C6D";
-    expect(isUuidTenantId(upper)).toBe(true);
-    expect(canonicalizeTenantId(upper)).toBe(upper.toLowerCase());
+  test("the documented cap is 64 — pinned, so widening it is a deliberate act", () => {
+    // The "always safe in a header value / URL segment" claim rests on this
+    // number. Asserting it against itself would let a change to 4096 pass.
+    expect(MAX_TENANT_ID_LENGTH).toBe(64);
+    expect(TENANT_ID_PATTERN.source).toBe("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
+  });
 
-    // The `uuid`-column vs `text`-column drift this exists to close.
-    expect(tenantIdsEqual(upper, upper.toLowerCase())).toBe(true);
+  test("every spelling a PostgreSQL uuid column accepts folds to ONE value", () => {
+    const canonical = "9d4b2a1c-0e5f-4a7b-8c3d-1e2f3a4b5c6d";
+    // These are exactly the forms `SELECT '<x>'::uuid` accepts and rewrites.
+    // Recognizing fewer of them leaves the `uuid`-here / `text`-there drift
+    // open, which is the entire reason this claim exists.
+    for (const spelling of [
+      canonical,
+      canonical.toUpperCase(),
+      "9d4b2a1c0e5f4a7b8c3d1e2f3a4b5c6d", // hyphen-less
+      "9D4B2A1C0E5F4A7B8C3D1E2F3A4B5C6D", // hyphen-less, upper
+      "{9d4b2a1c-0e5f-4a7b-8c3d-1e2f3a4b5c6d}", // brace-wrapped, as a DB client pastes it
+      "{9D4B2A1C0E5F4A7B8C3D1E2F3A4B5C6D}",
+    ]) {
+      expect(isUuidTenantId(spelling), spelling).toBe(true);
+      expect(canonicalizeTenantId(spelling), spelling).toBe(canonical);
+      expect(tenantIdsEqual(spelling, canonical), spelling).toBe(true);
+    }
+  });
 
+  test("nothing but a UUID is folded — including a ULID, deliberately", () => {
     // A non-UUID id stays case-sensitive: `Acme` and `acme` are two tenants.
     expect(canonicalizeTenantId("Acme")).toBe("Acme");
     expect(tenantIdsEqual("Acme", "acme")).toBe(false);
+
+    // Crockford base32 is case-insensitive as an ENCODING, but no database type
+    // silently rewrites a ULID the way `uuid` rewrites a UUID. Folding it would
+    // only create new ways for two distinct opaque ids to collide, so the
+    // contract requires issuers to emit the canonical uppercase form instead.
+    expect(tenantIdsEqual("01HQ3XZ8VJ9K2M4N6P8R0T2W4Y", "01hq3xz8vj9k2m4n6p8r0t2w4y")).toBe(false);
+    // A prefixed id is opaque all the way through.
+    expect(tenantIdsEqual("org_ABC", "org_abc")).toBe(false);
+  });
+
+  test("a 32-hex string is treated as the UUID it is, in both directions", () => {
+    // Guards the specific drift the reviewer found: a `text` store holding the
+    // hyphen-less form and a `uuid` store holding the hyphenated form name the
+    // same tenant.
+    expect(
+      tenantIdsEqual("9D4B2A1C0E5F4A7B8C3D1E2F3A4B5C6D", "9d4b2a1c-0e5f-4a7b-8c3d-1e2f3a4b5c6d"),
+    ).toBe(true);
+    expect(normalizeTenantId("9D4B2A1C0E5F4A7B8C3D1E2F3A4B5C6D")).toBe(
+      "9d4b2a1c-0e5f-4a7b-8c3d-1e2f3a4b5c6d",
+    );
   });
 
   test("tenantIdsEqual never matches on invalid input", () => {
@@ -91,12 +132,22 @@ describe("tenant id grammar", () => {
     expect(tenantIdsEqual("acme corp", "acme corp")).toBe(false);
   });
 
+  test("tenantIdsEqual trims, so an env var with a trailing newline still matches", () => {
+    // Mint trims. A comparison that did not would deny every request for a
+    // reason no operator could see in their config.
+    expect(tenantIdsEqual("acme-corp", "  acme-corp\n")).toBe(true);
+    expect(tenantIdsEqual("acme-corp", " rival-corp ")).toBe(false);
+  });
+
   test("normalizeTenantId trims, validates, and canonicalizes", () => {
     expect(normalizeTenantId("  acme-corp  ")).toBe("acme-corp");
     expect(normalizeTenantId(" 9D4B2A1C-0E5F-4A7B-8C3D-1E2F3A4B5C6D ")).toBe(
       "9d4b2a1c-0e5f-4a7b-8c3d-1e2f3a4b5c6d",
     );
     expect(() => normalizeTenantId("acme corp")).toThrow(/Invalid tenant id/);
+    expect(normalizeTenantId("{9D4B2A1C-0E5F-4A7B-8C3D-1E2F3A4B5C6D}")).toBe(
+      "9d4b2a1c-0e5f-4a7b-8c3d-1e2f3a4b5c6d",
+    );
   });
 });
 
@@ -226,6 +277,16 @@ describe("tenanted API keys", () => {
     if (!result.ok) expect(result.reason).toBe("bad_signature");
   });
 
+  test("tid is read as an OWN property, never through the prototype chain", () => {
+    const polluted = Object.create({ tid: "attacker-tenant" }) as Record<string, unknown>;
+    Object.assign(polluted, { v: 1, kid: "k1", app: "todos", scopes: ["todos:read"], iat: 1, exp: null });
+    // `"tid" in polluted` and `polluted.tid !== undefined` are both true here.
+    // Only an own-property check keeps an untenanted token untenanted if some
+    // other part of the process ever gains an Object.prototype write primitive.
+    expect(Object.hasOwn(polluted, "tid")).toBe(false);
+    expect((polluted as { tid?: string }).tid).toBe("attacker-tenant");
+  });
+
   test("a present-but-malformed tid is malformed, not untenanted", () => {
     // Hand-built body with tid: null. If the parser tolerated this, the token
     // would slip past `requireTenant` as "no tenant claimed".
@@ -260,6 +321,58 @@ describe("tenant enforcement in verifyApiKeyToken", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe("tenant_required");
+  });
+
+  test("requireTenant fails CLOSED for any truthy value, not only `true`", () => {
+    // A config value that arrived as the string "true" or the number 1 must not
+    // silently disable the gate. Strictness in that direction is a fail-open.
+    for (const requireTenant of [true, "true", 1, "1", "yes", {}] as unknown[]) {
+      const result = verifyApiKeyToken(untenanted().token, {
+        signingSecret: SIGNING,
+        expectedApp: "todos",
+        requireTenant: requireTenant as boolean,
+      });
+      expect(result.ok, JSON.stringify(requireTenant)).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("tenant_required");
+    }
+    // Falsy values leave the gate off, which is the documented default.
+    for (const requireTenant of [false, undefined, 0, ""] as unknown[]) {
+      const result = verifyApiKeyToken(untenanted().token, {
+        signingSecret: SIGNING,
+        expectedApp: "todos",
+        requireTenant: requireTenant as boolean,
+      });
+      expect(result.ok, JSON.stringify(requireTenant ?? null)).toBe(true);
+    }
+  });
+
+  test("a tenant denial names the offending key, so it can be revoked from the audit log", () => {
+    const minted = tenanted("rival-corp");
+    const result = verifyApiKeyToken(minted.token, {
+      signingSecret: SIGNING,
+      expectedApp: "todos",
+      expectedTid: "acme-corp",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.kid).toBe(minted.kid);
+      expect(result.tid).toBe("rival-corp");
+    }
+  });
+
+  test("a pre-signature failure attributes NOTHING — an unverified token is not evidence", () => {
+    const forged = `${tenanted("rival-corp").token.slice(0, -4)}AAAA`;
+    const result = verifyApiKeyToken(forged, {
+      signingSecret: SIGNING,
+      expectedApp: "todos",
+      expectedTid: "acme-corp",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("bad_signature");
+      expect(result.kid).toBeUndefined();
+      expect(result.tid).toBeUndefined();
+    }
   });
 
   test("expectedTid implies requireTenant", () => {
@@ -368,6 +481,50 @@ describe("tenant enforcement in the middleware", () => {
     }
   });
 
+  test("a per-call expectedTid CANNOT override a middleware-wide pin", async () => {
+    // The hole this closes: `context.expectedTid` typically comes from a
+    // request path (/v1/orgs/:tid/...). If it simply replaced the pin, any
+    // holder of a valid token for this app — they all share the app's signing
+    // secret — could defeat a service pinned to another tenant by addressing
+    // their own org in the URL.
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, expectedTid: "acme-corp" });
+    const evil = tenanted("evil-corp").token;
+
+    const bypass = await verifier.authenticate({ "x-api-key": evil }, { expectedTid: "evil-corp" });
+    expect(bypass.ok).toBe(false);
+    if (!bypass.ok) {
+      expect(bypass.status).toBe(403);
+      expect(bypass.reason).toBe("tenant_mismatch");
+    }
+
+    // Agreeing values still work, and still bind to the pinned tenant.
+    const agreeing = await verifier.authenticate(
+      { "x-api-key": tenanted("acme-corp").token },
+      { expectedTid: "acme-corp" },
+    );
+    expect(agreeing.ok).toBe(true);
+
+    // Without a per-call value the pin alone governs.
+    const pinnedOnly = await verifier.authenticate({ "x-api-key": evil });
+    expect(pinnedOnly.ok).toBe(false);
+  });
+
+  test("a tenant denial is attributable in the audit trail", async () => {
+    const events: AuthAuditEvent[] = [];
+    const verifier = verifyApiKey({
+      app: "todos",
+      signingSecret: SIGNING,
+      expectedTid: "acme-corp",
+      audit: (event) => void events.push(event),
+    });
+    const minted = tenanted("rival-corp");
+    await verifier.authenticate({ "x-api-key": minted.token });
+    expect(events[0]?.outcome).toBe("deny");
+    expect(events[0]?.reason).toBe("tenant_mismatch");
+    expect(events[0]?.kid).toBe(minted.kid);
+    expect(events[0]?.tid).toBe("rival-corp");
+  });
+
   test("a malformed per-call expectedTid denies instead of throwing", async () => {
     const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING });
     const decision = await verifier.authenticate(
@@ -386,16 +543,125 @@ describe("tenant enforcement in the middleware", () => {
 });
 
 // --- store ---
+/**
+ * Replica of `checksumSql` in src/kit/templates/migrations.ts — the function
+ * consumers' migration ledgers actually use. Duplicated rather than imported
+ * because that file is a vendored TEMPLATE, and a test that imported it would
+ * silently follow the template if the template itself changed.
+ */
+function ledgerChecksum(sql: string): string {
+  return `sha256:${createHash("sha256").update(sql.trim().replace(/\r\n/g, "\n")).digest("hex")}`;
+}
+
 describe("api-keys tenant column", () => {
-  test("0003 is additive: it alters, never recreates", () => {
+  test("PINNED: already-applied migrations' SQL is byte-frozen", () => {
+    // Consumers feed these into a CONTENT-ADDRESSED ledger (open-accounts
+    // src/server/migrations.ts, open-emails src/server/self-hosted/migrations.ts).
+    // Editing applied SQL does not merely fail to re-run — it aborts the whole
+    // migration run with "Migration checksum mismatch", so the upgrade breaks
+    // AND the new column never lands. Asserting only the ids, as this test
+    // originally did, cannot see that. These hashes are the values on
+    // origin/main and MUST NOT be updated to make a change pass.
+    const pinned = new Map([
+      ["hasna_auth_0001_api_keys", "sha256:95429079245944aa39727486cf92dea0ae8a1bfa889e1940f2d9911eb0b020a5"],
+      ["hasna_auth_0002_api_keys_indexes", "sha256:4e646262846e9ae664b5b0d67cb079f788c85d45fcc3a323131df5aa9ba7b777"],
+    ]);
+    for (const migration of apiKeyMigrations("api_keys")) {
+      const expected = pinned.get(migration.id);
+      if (expected) expect(ledgerChecksum(migration.sql), migration.id).toBe(expected);
+    }
+    // 0001 in particular must not have grown the tenant column.
+    const first = apiKeyMigrations("api_keys")[0]!;
+    expect(first.id).toBe("hasna_auth_0001_api_keys");
+    expect(first.sql).not.toContain("tid");
+  });
+
+  test("0003 is additive: it alters, never recreates, and back-fills nothing", () => {
     const migrations = apiKeyMigrations("api_keys");
-    const tenant = migrations.find((m) => m.id === "hasna_auth_0003_api_keys_tenant");
-    expect(tenant).toBeDefined();
-    expect(tenant!.sql).toContain("ADD COLUMN IF NOT EXISTS tid TEXT");
-    expect(tenant!.sql).not.toContain("NOT NULL");
-    // Earlier migrations must be untouched, or deployed ledgers would diverge.
-    expect(migrations[0]?.id).toBe("hasna_auth_0001_api_keys");
-    expect(migrations[1]?.id).toBe("hasna_auth_0002_api_keys_indexes");
+    expect(migrations.map((m) => m.id)).toEqual([
+      "hasna_auth_0001_api_keys",
+      "hasna_auth_0002_api_keys_indexes",
+      "hasna_auth_0003_api_keys_tenant",
+    ]);
+    const tenant = migrations[2]!;
+    expect(tenant.sql).toContain("ADD COLUMN IF NOT EXISTS tid TEXT");
+    expect(tenant.sql).not.toContain("NOT NULL");
+    // No DEFAULT either: pre-`tid` keys are untenanted, NOT tenant-zero. A
+    // default would silently assign every historical key to one organization.
+    expect(tenant.sql).not.toMatch(/\bDEFAULT\b/i);
+    expect(tenant.sql).not.toMatch(/\bUPDATE\b/i);
+    expect(tenant.sql).not.toMatch(/\bDROP\b/i);
+  });
+
+  test("the INSERT's column list and its bound parameters stay aligned", () => {
+    // Adding `tid` shifted every positional parameter after it. A fake client
+    // that destructures params positionally cannot see a column/placeholder
+    // swap — on a real driver that silently writes the tenant into `agent`.
+    const client = new FakeStoreClient();
+    const store = new ApiKeyStore(client);
+    void store.insert({
+      kid: "k1",
+      app: "todos",
+      agent: "AGENT-VALUE",
+      tid: "acme-corp",
+      scopes: ["todos:read"],
+      tokenHash: "hash",
+      issuedAt: new Date(0),
+      expiresAt: null,
+      createdBy: "CREATED-BY",
+    });
+
+    const sql = client.lastExecuteSql;
+    const columns = /\(([^)]*)\)\s*VALUES/i.exec(sql)![1]!.split(",").map((c) => c.trim());
+    const placeholders = [...sql.matchAll(/\$(\d+)/g)].map((m) => Number(m[1]));
+    expect(columns.length).toBe(placeholders.length);
+    expect(placeholders).toEqual(columns.map((_, index) => index + 1));
+
+    // The decisive assertion: each column holds the value meant for it.
+    const row = Object.fromEntries(columns.map((column, index) => [column.replace(/::.*$/, ""), client.lastExecuteParams[index]]));
+    expect(row.kid).toBe("k1");
+    expect(row.agent).toBe("AGENT-VALUE");
+    expect(row.tid).toBe("acme-corp");
+    expect(row.created_by).toBe("CREATED-BY");
+  });
+
+  test("the store refuses a tenant id no token could ever carry", async () => {
+    const store = new ApiKeyStore(new FakeStoreClient());
+    await expect(
+      store.insert({
+        kid: "k2",
+        app: "todos",
+        tid: "not a valid tid/../x",
+        scopes: ["todos:read"],
+        tokenHash: "hash2",
+        issuedAt: new Date(0),
+        expiresAt: null,
+      }),
+    ).rejects.toThrow(/Invalid tenant id/);
+  });
+
+  test("the store writes and filters the CANONICAL tenant id", async () => {
+    const client = new FakeStoreClient();
+    const store = new ApiKeyStore(client);
+    await store.insert({
+      kid: "k3",
+      app: "todos",
+      tid: "9D4B2A1C0E5F4A7B8C3D1E2F3A4B5C6D", // hyphen-less, upper
+      scopes: ["todos:read"],
+      tokenHash: "hash3",
+      issuedAt: new Date(0),
+      expiresAt: null,
+    });
+    expect((await store.findByKid("k3"))?.tid).toBe("9d4b2a1c-0e5f-4a7b-8c3d-1e2f3a4b5c6d");
+
+    // Listing by any spelling of the same UUID finds it.
+    for (const spelling of [
+      "9d4b2a1c-0e5f-4a7b-8c3d-1e2f3a4b5c6d",
+      "9D4B2A1C-0E5F-4A7B-8C3D-1E2F3A4B5C6D",
+      "9d4b2a1c0e5f4a7b8c3d1e2f3a4b5c6d",
+    ]) {
+      expect((await store.list({ tid: spelling })).map((r) => r.kid), spelling).toEqual(["k3"]);
+    }
   });
 
   test("insertMinted persists the tenant and list() filters by it", async () => {
@@ -422,29 +688,35 @@ describe("api-keys tenant column", () => {
   });
 });
 
-/** In-memory client that interprets the store's SQL, with tenant support. */
+/**
+ * In-memory client that interprets the store's SQL.
+ *
+ * Deliberately binds INSERT values BY PARSED COLUMN NAME rather than by
+ * position. A positional fake is blind to a column/placeholder swap — the
+ * exact defect that would silently write a tenant id into `agent` against a
+ * real driver.
+ */
 class FakeStoreClient implements AuthQueryClient {
   rows = new Map<string, Row>();
   lastManyParams: readonly unknown[] = [];
+  lastExecuteSql = "";
+  lastExecuteParams: readonly unknown[] = [];
 
   async execute(sql: string, params: readonly unknown[] = []): Promise<void> {
+    this.lastExecuteSql = sql;
+    this.lastExecuteParams = params;
     if (sql.includes("CREATE TABLE") || sql.includes("CREATE INDEX") || sql.includes("ALTER TABLE")) return;
     if (sql.startsWith("INSERT INTO")) {
-      const [kid, app, agent, tid, scopes, token_hash, issued_at, expires_at, created_by] = params as unknown[];
-      this.rows.set(String(kid), {
-        kid,
-        app,
-        agent,
-        tid,
-        scopes,
-        token_hash,
-        issued_at,
-        expires_at,
+      const columns = /\(([^)]*)\)\s*VALUES/i.exec(sql)?.[1]?.split(",").map((column) => column.trim()) ?? [];
+      const row: Row = {
         revoked_at: null,
         revoked_reason: null,
         last_used_at: null,
-        created_by,
-      });
+      };
+      for (const [index, column] of columns.entries()) {
+        row[column.replace(/::.*$/, "")] = params[index];
+      }
+      this.rows.set(String(row.kid), row);
     }
   }
 

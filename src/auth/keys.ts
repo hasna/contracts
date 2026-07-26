@@ -225,7 +225,7 @@ export function parseApiKey(token: string): ParsedApiKey | null {
   // A present-but-malformed `tid` is a malformed token, not an untenanted one.
   // Treating it as absent would let a body with `tid: null` or `tid: 0` slip
   // past a `requireTenant` gate as "no tenant claimed".
-  if (claims.tid !== undefined && !isValidTenantId(claims.tid)) {
+  if (Object.hasOwn(claims as object, "tid") && !isValidTenantId(claims.tid)) {
     return null;
   }
   return { app, body, sig, claims };
@@ -252,7 +252,20 @@ export type ApiKeyVerifyResult =
       /** Canonical tenant id, or `null` for an untenanted key. */
       tid: string | null;
     }
-  | { ok: false; reason: ApiKeyVerifyFailureReason; message: string };
+  | {
+      ok: false;
+      reason: ApiKeyVerifyFailureReason;
+      message: string;
+      /**
+       * Key id and tenant, populated once the SIGNATURE has verified — so a
+       * tenant denial, the most security-relevant deny there is, can name the
+       * offending key in the audit trail instead of logging `null`. Absent for
+       * failures that occur before authenticity is established, because nothing
+       * in an unverified token may be believed.
+       */
+      kid?: string;
+      tid?: string | null;
+    };
 
 export interface VerifyApiKeyTokenOptions {
   signingSecret: string | Buffer;
@@ -324,12 +337,17 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
   // token for the wrong organization must not be reported as merely
   // under-scoped.
   const tid = claims.tid === undefined ? null : canonicalizeTenantId(claims.tid);
-  const tenantRequired = options.requireTenant === true || options.expectedTid !== undefined;
+  // Any truthy value enables the gate. `=== true` would fail OPEN for a config
+  // value that arrived as the string "true" or the number 1 — the wrong
+  // direction for a security control to be strict in.
+  const tenantRequired = Boolean(options.requireTenant) || options.expectedTid !== undefined;
   if (tenantRequired && tid === null) {
     return {
       ok: false,
       reason: "tenant_required",
       message: "Token carries no tenant id ('tid') and this service requires one.",
+      kid: claims.kid,
+      tid: null,
     };
   }
   if (options.expectedTid !== undefined && !tenantIdsEqual(tid, options.expectedTid)) {
@@ -340,9 +358,11 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
     return {
       ok: false,
       reason: "tenant_mismatch",
-      message: isValidTenantId(options.expectedTid)
+      message: isValidTenantId(options.expectedTid.trim())
         ? "Token is for a different tenant than the one this service accepts."
         : "Token tenant cannot be checked: the expected tenant id is not a valid tenant id.",
+      kid: claims.kid,
+      tid,
     };
   }
 

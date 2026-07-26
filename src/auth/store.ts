@@ -9,6 +9,7 @@
 // is no cache and no local mirror; a revocation check reads the row each time.
 
 import type { ApiKeyClaims, MintedApiKey } from "./keys.js";
+import { canonicalizeTenantId, normalizeTenantId } from "./tenant.js";
 
 /** Minimal row shape. Compatible with `pg` QueryResultRow. */
 export type Row = Record<string, unknown>;
@@ -54,7 +55,6 @@ function createTableSql(table: string): string {
     kid TEXT PRIMARY KEY,
     app TEXT NOT NULL,
     agent TEXT,
-    tid TEXT,
     scopes JSONB NOT NULL,
     token_hash TEXT NOT NULL UNIQUE,
     issued_at TIMESTAMPTZ NOT NULL,
@@ -70,11 +70,18 @@ function createTableSql(table: string): string {
 /**
  * Ordered migrations for the api-keys table (id namespaced to avoid clashes).
  *
- * 0003 adds the tenant column. It is a separate, additive migration rather than
- * an edit to 0001 because deployed ledgers have already recorded 0001 as
- * applied and would never re-run it. The column is `TEXT NULL` — matching the
- * contract's wire type, and nullable because keys issued before the tenant
- * claim existed are untenanted, not tenant-zero.
+ * 0003 adds the tenant column, as a SEPARATE migration. 0001's SQL MUST NOT be
+ * edited to include it, and not merely because a deployed ledger would not
+ * re-run 0001: consumers feed these straight into a CONTENT-ADDRESSED ledger
+ * (`checksumSql` in src/kit/templates/migrations.ts) that aborts the whole
+ * migration run on `Migration checksum mismatch`. Editing 0001 therefore breaks
+ * the upgrade AND prevents 0003 from ever running, so the column would never
+ * land. `tests/auth-tenant.test.ts` pins 0001's and 0002's checksums to make
+ * that mistake impossible to commit.
+ *
+ * The column is `TEXT NULL` with no DEFAULT — matching the contract's wire
+ * type, and nullable because keys issued before the tenant claim existed are
+ * untenanted, not tenant-zero.
  */
 export function apiKeyMigrations(table: string = DEFAULT_API_KEYS_TABLE): AuthMigration[] {
   return [
@@ -132,7 +139,12 @@ export interface InsertKeyInput {
   kid: string;
   app: string;
   agent?: string | null;
-  /** Tenant the key acts for. Omit or `null` for an untenanted key. */
+  /**
+   * Tenant the key acts for. Omit or `null` for an untenanted key. Validated
+   * and canonicalized on the way in: a store that accepted ids no token could
+   * carry, or that stored two spellings of one UUID, would reopen the drift
+   * this claim exists to close.
+   */
   tid?: string | null;
   scopes: string[];
   tokenHash: string;
@@ -178,7 +190,7 @@ export class ApiKeyStore {
         input.kid,
         input.app,
         input.agent ?? null,
-        input.tid ?? null,
+        input.tid === undefined || input.tid === null ? null : normalizeTenantId(input.tid),
         JSON.stringify(input.scopes),
         input.tokenHash,
         input.issuedAt.toISOString(),
@@ -280,7 +292,9 @@ export class ApiKeyStore {
       clauses.push(`app = $${params.length}`);
     }
     if (options.tid) {
-      params.push(options.tid);
+      // Canonicalized, so listing by the UUID an operator pasted from a `uuid`
+      // column matches a row written from a `text` column, and vice versa.
+      params.push(canonicalizeTenantId(options.tid.trim()));
       clauses.push(`tid = $${params.length}`);
     }
     if (!options.includeRevoked) {

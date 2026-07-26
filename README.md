@@ -330,11 +330,15 @@ await verifier.authenticate(req.headers, { expectedTid: req.params.tid });
 - **Grammar** `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` — UUIDs, ULIDs, slugs, and
   prefixed ids all fit; anything unsafe in a log line, header, or URL segment
   does not.
-- **UUIDs compare case-insensitively; nothing else does**, because PostgreSQL's
-  `uuid` type lowercases on round-trip.
+- **Every spelling a `uuid` column accepts folds to one value** — hyphenated,
+  hyphen-less, brace-wrapped, any case — because that column parses and rewrites
+  its input while a `text` column does not. **Nothing else folds**, ULIDs
+  included: issuers emit the canonical form.
 - **Absence is not a wildcard.** No `tid` means untenanted. `requireTenant` (or
   `expectedTid`, which implies it) denies with **403** — the credential is
   authentic, it is just not permitted for this organization.
+- **A per-call `expectedTid` narrows a service-wide pin, never replaces it.**
+  Both set and disagreeing is a denial.
 
 Normative definition: [`docs/AUTH_RBAC_VERIFIER_CONTRACT.md` → Tenant
 Identifier](docs/AUTH_RBAC_VERIFIER_CONTRACT.md#tenant-identifier).
