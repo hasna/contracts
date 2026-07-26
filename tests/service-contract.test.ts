@@ -15,6 +15,7 @@ import {
   ContractSchemaRegistry,
   SERVICE_SURFACE_KINDS,
   STORAGE_ENGINES,
+  WAIVABLE_STORAGE_ENGINES,
   HOSTING_MODES
 } from "../src";
 
@@ -460,6 +461,50 @@ describe("service contract manifest validation", () => {
     expect(validateServiceContractManifest(selfHosted).success).toBe(true);
   });
 
+  test("names the refusal reason when an ineligible manifest tried to waive", () => {
+    const serveCapable = {
+      ...baseCliWithStore,
+      bins: ["todos", "todos-serve"],
+      storage: { mode: "local", engines: ["sqlite"], sqlitePath: "~/.hasna/todos/todos.db" },
+      metadata: {
+        conformance: {
+          waivedStorageEngines: [{ engine: "postgres", reason: "Repo ships a server but wants sqlite only." }]
+        }
+      }
+    };
+    const parsed = validateServiceContractManifest(serveCapable);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      // This issue aborts the parse, so conformance never runs; the reason the
+      // waiver was ignored has to be stated here or nowhere.
+      const issue = parsed.error.issues.find((entry) => entry.path.join(".") === "storage.engines");
+      expect(issue?.message).toContain("declared waiver ignored");
+      expect(issue?.message).toContain("service-capable cli-with-store repo shipping todos-serve");
+    }
+
+    // Without a declared waiver the message stays exactly as it was.
+    const noWaiver = {
+      ...baseCliWithStore,
+      storage: { mode: "local", engines: ["sqlite"], sqlitePath: "~/.hasna/todos/todos.db" }
+    };
+    const plain = validateServiceContractManifest(noWaiver);
+    expect(plain.success).toBe(false);
+    if (!plain.success) {
+      const issue = plain.error.issues.find((entry) => entry.path.join(".") === "storage.engines");
+      expect(issue?.message).not.toContain("declared waiver ignored");
+    }
+  });
+
+  test("caps the waiver array at one entry per waivable engine in the shipped JSON Schema", () => {
+    const waivers = (
+      SERVICE_CONTRACT_JSON_SCHEMA.properties.metadata.properties.conformance.properties as {
+        waivedStorageEngines: { maxItems: number; items: { properties: { engine: { enum: readonly string[] } } } };
+      }
+    ).waivedStorageEngines;
+    expect(waivers.items.properties.engine.enum).toEqual([...WAIVABLE_STORAGE_ENGINES]);
+    expect(waivers.maxItems).toBe(WAIVABLE_STORAGE_ENGINES.length);
+  });
+
   test("rejects control characters and oversized prose in storage waivers", () => {
     const withWaiver = (waiver: Record<string, unknown>) => ({
       ...baseCliWithStore,
@@ -513,8 +558,10 @@ describe("service contract manifest validation", () => {
     const parsed = validateServiceContractManifest(waivedSqlite);
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
-      const issue = parsed.error.issues.find((entry) => entry.path.join(".") === "storage.engines");
-      expect(issue?.message).toContain("missing: sqlite");
+      // sqlite is not a member of the waivable engine enum, so the waiver is
+      // rejected at the field rather than silently ignored.
+      const paths = parsed.error.issues.map((issue) => issue.path.join("."));
+      expect(paths).toContain("metadata.conformance.waivedStorageEngines.0.engine");
     }
   });
 

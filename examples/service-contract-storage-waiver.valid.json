@@ -1,0 +1,64 @@
+{
+  "schema": "hasna.service_contract.v1",
+  "name": "factory",
+  "class": "cli-with-store",
+  "contractVersion": "v1",
+  "kitVersion": "0.8.0",
+  "description": "SQLite-only local CLI declaring an explicit, time-boxed PostgreSQL waiver.",
+  "bins": [
+    "factory",
+    "factory-mcp"
+  ],
+  "hosting": [
+    "user-hosted"
+  ],
+  "deploymentModes": [
+    "local",
+    "self_hosted"
+  ],
+  "serviceSurfaces": [
+    {
+      "name": "cli",
+      "kind": "cli",
+      "status": "supported",
+      "bin": "factory",
+      "authMode": "local-only",
+      "deploymentModes": [
+        "local",
+        "self_hosted"
+      ]
+    },
+    {
+      "name": "mcp",
+      "kind": "mcp",
+      "status": "supported",
+      "mcpBin": "factory-mcp",
+      "authMode": "local-only",
+      "deploymentModes": [
+        "local",
+        "self_hosted"
+      ]
+    }
+  ],
+  "storage": {
+    "mode": "local",
+    "engines": [
+      "sqlite"
+    ],
+    "envPrefix": "HASNA_FACTORY_",
+    "aliasEnvPrefix": "FACTORY_",
+    "sqlitePath": "~/.hasna/factory/factory.db"
+  },
+  "metadata": {
+    "conformance": {
+      "waivedStorageEngines": [
+        {
+          "engine": "postgres",
+          "reason": "Single-operator local CLI; PostgreSQL adoption is tracked through the vendored storage kit.",
+          "reviewedBy": "platform-storage",
+          "expiresAt": "2027-01-01T00:00:00.000Z"
+        }
+      ]
+    }
+  }
+}

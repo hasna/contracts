@@ -5146,7 +5146,7 @@ const WaiverTextSchema = (maxLength: number) =>
  */
 export const StorageEngineWaiverSchema = z
   .object({
-    engine: StorageEngineSchema,
+    engine: z.enum(WAIVABLE_STORAGE_ENGINES),
     reason: WaiverTextSchema(STORAGE_WAIVER_REASON_MAX_LENGTH),
     /** Person, agent, or role accountable for the exception. */
     reviewedBy: WaiverTextSchema(STORAGE_WAIVER_REVIEWER_MAX_LENGTH).optional(),
@@ -5561,7 +5561,7 @@ export const ServiceContractManifestSchema = z
           // and `storageWaiverIneligibilityReason` keeps the set of repos that
           // may waive identical to the conformance gate's.
           const declaredEngines = new Set<StorageEngine>(value.storage.engines);
-          const waivable = new Set<StorageEngine>(WAIVABLE_STORAGE_ENGINES);
+          const declaredWaivers = value.metadata?.conformance?.waivedStorageEngines ?? [];
           const ineligible = storageWaiverIneligibilityReason({
             class: value.class,
             name: value.name,
@@ -5571,19 +5571,19 @@ export const ServiceContractManifestSchema = z
             storageMode: value.storage.mode
           });
           const waivedEngines = new Set<StorageEngine>(
-            ineligible
-              ? []
-              : (value.metadata?.conformance?.waivedStorageEngines ?? [])
-                  .map((waiver) => waiver.engine)
-                  .filter((engine) => waivable.has(engine))
+            ineligible ? [] : declaredWaivers.map((waiver) => waiver.engine)
           );
           const missingEngines = STORAGE_ENGINES.filter(
             (engine) => !declaredEngines.has(engine) && !waivedEngines.has(engine)
           );
           if (missingEngines.length > 0) {
+            // A repo that tried the escape hatch and was refused must learn
+            // why here: this issue aborts the parse, so the conformance gate
+            // never runs and cannot explain the refusal itself.
+            const refusal = ineligible && declaredWaivers.length > 0 ? `; declared waiver ignored: ${ineligible}` : "";
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
-              message: `cli-with-store storage.engines must declare both sqlite and postgres unless the engine carries a metadata.conformance.waivedStorageEngines waiver; missing: ${missingEngines.join(", ")}`,
+              message: `cli-with-store storage.engines must declare both sqlite and postgres unless the engine carries a metadata.conformance.waivedStorageEngines waiver; missing: ${missingEngines.join(", ")}${refusal}`,
               path: ["storage", "engines"]
             });
           }

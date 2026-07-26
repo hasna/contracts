@@ -394,8 +394,12 @@ describe("repo conformance kit", () => {
       expect(report.checks.find((check) => check.id === "manifest_valid")?.status).toBe("pass");
       const storage = report.checks.find((check) => check.id === "storage_capabilities");
       expect(storage?.status).toBe("fail");
-      expect(storage?.detail).toContain("storage waiver for postgres expired at 2020-01-01T00:00:00.000Z");
-      expect(storage?.detail).toContain("missing storage engines: postgres");
+      // One remedy, stated once: renew or declare. The expired waiver still
+      // answers for postgres, so the report does not also demand the engine,
+      // its env prefix, and its live-PG gate.
+      expect(storage?.detail).toBe(
+        "storage waiver for postgres expired at 2020-01-01T00:00:00.000Z; declare the engine or renew the waiver"
+      );
       expect(report.ok).toBe(false);
     });
   });
@@ -429,16 +433,19 @@ describe("repo conformance kit", () => {
       sqlitePath: "~/.hasna/demo/demo.db",
       pgTestGate: { envVar: "DEMO_TEST_DATABASE_URL", command: "bun test tests/postgres.test.ts" }
     });
+    // sqlite is not in the waivable enum at all, so this never reaches the gate.
     manifest.metadata = {
       conformance: {
-        waivedStorageEngines: [{ engine: "sqlite", reason: "Fixture tries to drop the local store." }]
+        waivedStorageEngines: [
+          { engine: "sqlite", reason: "Fixture tries to drop the local store." } as unknown as never
+        ]
       }
     };
     withRepoFixture(manifest, cliOnlyPackage, (root) => {
       const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
-      const storage = report.checks.find((check) => check.id === "storage_capabilities");
-      expect(storage?.status).toBe("fail");
-      expect(storage?.detail).toContain("storage engines that cannot be waived: sqlite");
+      const valid = report.checks.find((check) => check.id === "manifest_valid");
+      expect(valid?.status).toBe("fail");
+      expect(valid?.detail).toContain("metadata.conformance.waivedStorageEngines.0.engine");
       expect(report.ok).toBe(false);
     });
   });
@@ -643,7 +650,7 @@ describe("repo conformance kit", () => {
     });
   });
 
-  test("redacts credential-shaped waiver prose instead of echoing it, in both manifest tiers", () => {
+  test("fails a waiver whose prose cannot be recorded, in both manifest tiers", () => {
     const internalHost = ["ops@demo", ["hasna", "xyz"].join(".")].join(".");
     const manifest = cliWithStoreManifest({
       mode: "local",
@@ -665,11 +672,16 @@ describe("repo conformance kit", () => {
       for (const manifestTier of ["public", "private"] as const) {
         const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true, manifestTier });
         const storage = report.checks.find((check) => check.id === "storage_capabilities");
-        expect(storage?.status).toBe("pass");
-        expect(storage?.detail).toContain("[redacted: private infrastructure reference]");
+        // A waiver that cannot be printed cannot be audited, so it fails rather
+        // than passing with its justification erased.
+        expect(storage?.status).toBe("fail");
+        expect(storage?.detail).toContain("storage waiver for postgres cannot be recorded: reason, reviewedBy");
         expect(storage?.detail).not.toContain("hasna/oss/demo/database-url");
         expect(storage?.detail).not.toContain("123456789012");
         expect(storage?.detail).not.toContain(internalHost);
+        // The single remedy is stated once; no "build PostgreSQL" noise.
+        expect(storage?.detail).not.toContain("missing storage engines");
+        expect(report.ok).toBe(false);
       }
       // The public tier still reports the underlying manifest finding.
       const publicReport = runRepoConformance(root, { env: {}, skipNoCloudScan: true });

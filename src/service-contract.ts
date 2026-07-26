@@ -286,6 +286,10 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
             waivedStorageEngines: {
               type: "array",
               uniqueItems: true,
+              // uniqueItems compares whole objects, so it cannot catch two
+              // waivers for the same engine. With a single waivable engine the
+              // item cap enforces "at most one waiver per engine" exactly.
+              maxItems: WAIVABLE_STORAGE_ENGINES.length,
               items: {
                 type: "object",
                 additionalProperties: false,

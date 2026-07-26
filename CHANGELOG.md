@@ -40,11 +40,22 @@ All notable changes to `@hasna/contracts` are documented here.
   declared `postgres` engine is redundant and does not remove either
   obligation.
 - Expiry is evaluated by conformance, not by the schema, so a lapsed waiver
-  keeps the manifest parseable and reports one clear storage failure instead of
-  invalidating every other check.
-- The shipped JSON Schema (`hasna.contract.schema.json`) and the exported
-  `StorageEngineWaiverSchema` / `WAIVABLE_STORAGE_ENGINES` types cover the new
-  field.
+  keeps the manifest parseable and reports one clear storage failure — renew or
+  declare — instead of invalidating every other check or also demanding the
+  engine, its env prefix, and its live-PG gate.
+- A waiver whose `reason` or `reviewedBy` carries a private infrastructure
+  reference fails the gate rather than being echoed or silently redacted: an
+  exception nobody can read is not auditable.
+- An ineligible waiver on a manifest that is otherwise missing the engine is
+  refused by the schema, and the `manifest_valid` message now names the refusal
+  reason — the parse aborts before the gate runs, so it is the only place that
+  can explain why the escape hatch did not apply.
+- The shipped JSON Schema (`hasna.contract.schema.json`) matches the Zod schema
+  field for field: `engine` is narrowed to the waivable set, `maxItems` enforces
+  one waiver per engine, and the control-character and length rules are
+  mirrored. New exports: `StorageEngineWaiverSchema`,
+  `storageWaiverIneligibilityReason()`, the `WAIVABLE_STORAGE_ENGINES` tuple,
+  and the two length constants.
 
 - `runRepoConformance` accepts an optional `now` clock so time-boxed checks such
   as waiver expiry are deterministically testable.
@@ -55,12 +66,22 @@ All notable changes to `@hasna/contracts` are documented here.
   and gated exactly as in `0.7.1`; every existing check id, status, and pass
   detail is unchanged, verified by a byte-for-byte report comparison against
   `0.7.1` over a no-waiver manifest corpus.
-- Two caveats for anyone matching on strings or reusing the key name. The
-  `manifest_valid` *failure* detail for a sqlite-only `cli-with-store` now names
-  the waiver mechanism, so a CI job asserting the old exact message needs
-  updating. And `metadata.conformance` has always carried `catchall`, so a repo
-  that already used a `waivedStorageEngines` key with different semantics now
-  has it interpreted — an ineligible or non-waivable entry fails closed.
+- Three caveats. The `manifest_valid` *failure* detail for a sqlite-only
+  `cli-with-store` now names the waiver mechanism, so a CI job asserting the old
+  exact message needs updating. `metadata.conformance` has always carried
+  `catchall`, so a repo that already used a `waivedStorageEngines` key with
+  different semantics now has it interpreted, failing closed when it is
+  ineligible. And, as with `waivedSurfaces`, the field carries `.default([])`,
+  so `ServiceContractMetadata`'s *output* type gains a required
+  `waivedStorageEngines` property for TypeScript callers constructing it.
+- Most existing `cli-with-store` repos stay ineligible for now because they ship
+  `<name>-serve`. Widening the waiver later is backwards-compatible; narrowing
+  it after repos have banked a green build is not, so v1 covers only the shape
+  nobody disputes — CLI-only, `local` storage mode, SQLite.
+- Dependents upgrading from `0.7.0` rather than `0.7.1` also pick up the
+  execution-free `secure-local-store` boundary from `0.7.1`, which removed the
+  execution-ful exports. This release is the `0.8.0` reconcile that
+  `docs/architecture/factory-v1-contract-spec.md` called for.
 
 ## [0.7.1] - 2026-07-24
 
