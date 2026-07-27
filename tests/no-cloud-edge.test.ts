@@ -1737,3 +1737,88 @@ describe("source-text: a tuple type is inert, but not when a member is read out 
     expect(inlineDataRegions('type T = readonly ["a", "b"][0];', ["a"])).toEqual([]);
   });
 });
+
+describe("no-cloud gate: attribution survives a minifier, and does not take the credential detector with it", () => {
+  // Measured emission of `bun build --minify` on a consumer that imports this
+  // package: whitespace gone, the variable renamed to `HA`, the string literals
+  // untouched. Attribution matches on CONTENT, so the rename is irrelevant — and
+  // a path or identifier rule would have had nothing left to key on.
+  const RETIRED_NAME = ["@hasna/", "cloud"].join("");
+  const OTHER_NAME = ["open-", "cloud"].join("");
+  const RDS_KEY = ["HASNA_RDS", "_PASSWORD"].join("");
+  const minified =
+    `var SA={},HA=["${RETIRED_NAME}","${OTHER_NAME}"],qU=[{pattern:"${RDS_KEY}",kind:"config",message:"Legacy shared RDS credential config is forbidden"}];` +
+    "export{HA,qU,SA};";
+
+  test("a minified bundle of this package passes", () => {
+    withRepo({ name: "iapp-consumer-min", files: { "dist/index.js": minified } }, (report) => {
+      expect(patterns(report)).toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+  });
+
+  test("the same minified bundle plus a planted credential fails on the credential", () => {
+    withRepo(
+      { name: "iapp-consumer-min", files: { "dist/index.js": `${minified}var leaked=process.env.${RDS_KEY};export{leaked};` } },
+      (report) => {
+        expect(patterns(report)).toEqual([`dist/index.js:${RDS_KEY}`]);
+        expect(report.verdict).toBe("failed");
+      },
+    );
+  });
+});
+
+describe("source-text: a collection must be STORED, not just written down somewhere", () => {
+  // FOUND BY A GAP IN THE MUTATION AUDIT, not by reading the code. Narrowing the
+  // audit to the test files that contain no self-conformance scan reported M79 —
+  // "a collection handed to a call is an argument, not a stored constant" —
+  // SURVIVED. It had been reading as `caught` because weakening it also makes the
+  // repo fail its own gate, and that broad failure was the first one reported for
+  // every mutation in the block.
+  //
+  // The shape it protects, and the reason it is not covered by the
+  // consumed-in-place rule: `for (const m of [...])` puts the collection in no
+  // binding at all, so there is no name for a load call to mention, and the
+  // character after `]` is `)`, which consumes nothing. Only the position BEFORE
+  // the `[` says this is not a stored constant.
+  const RETIRED_MODULE = ["@hasna/", "cloud"].join("");
+  const OTHER_MODULE = ["open-", "cloud"].join("");
+
+  test("a collection in a non-storing position is not a declaration", () => {
+    for (const source of [
+      `for (const m of ["${RETIRED_MODULE}", "${OTHER_MODULE}"]) __require(m);`,
+      `return ["${RETIRED_MODULE}", "${OTHER_MODULE}"];`,
+      `yield ["${RETIRED_MODULE}", "${OTHER_MODULE}"];`,
+      `typeof ["${RETIRED_MODULE}", "${OTHER_MODULE}"];`,
+    ]) {
+      expect(inlineDataRegions(source, [RETIRED_MODULE]), source).toEqual([]);
+    }
+  });
+
+  test("the for-of shape is still a finding end to end", () => {
+    withRepo(
+      {
+        name: "iapp-consumer",
+        files: {
+          "dist/index.js": `for (const m of ["${RETIRED_MODULE}", "${OTHER_MODULE}"]) __require(m);\nexport const ok = true;\n`,
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+        expect(patterns(report).sort()).toEqual(
+          [`dist/index.js:${RETIRED_MODULE}`, `dist/index.js:${OTHER_MODULE}`].sort(),
+        );
+      },
+    );
+    // The pair: the same two names, stored, with nothing loading through them.
+    withRepo(
+      {
+        name: "iapp-consumer",
+        files: { "dist/index.js": `var DENY = ["${RETIRED_MODULE}", "${OTHER_MODULE}"];\nexport { DENY };\n` },
+      },
+      (report) => {
+        expect(report.verdict).toBe("passed");
+      },
+    );
+  });
+});

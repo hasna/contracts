@@ -630,8 +630,56 @@ const SUITE_TIMEOUT_MS = 180_000;
  */
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 
+/**
+ * `--suite <file>…` — narrow which test files decide "caught".
+ *
+ * WHY THIS EXISTS, and it is not for speed. Run whole, this suite contains
+ * `open-contracts passes conformance against itself`, which scans this repo with
+ * its own scanner. Weakening almost anything in `src/no-cloud.ts` makes that one
+ * test fail, so it is the FIRST failure reported for every no-cloud mutation and
+ * it hides whether the rule has a test of its own. Eighteen rules reported
+ * `caught` behind one broad test.
+ *
+ * Narrowing to the files that contain no self-scan answers the sharper question:
+ * is this rule pinned by a test somebody wrote FOR IT. Asked that way, M79 —
+ * "a collection handed to a call is an argument, not a stored constant" — came
+ * back SURVIVED, and it had been reading as caught all along. Its test exists
+ * now; the flag is what found the gap, so it stays.
+ *
+ *   bun scripts/mutation-audit.ts attrib --suite tests/no-cloud-edge.test.ts tests/cli.test.ts
+ *
+ * The narrowed run is WEAKER evidence than the whole suite and is not a
+ * substitute for it: a rule can legitimately be pinned by a test in another file.
+ * Read the two together.
+ */
+/**
+ * One pass over argv, because two independent passes disagreed.
+ *
+ * `--suite` takes bare words as VALUES, and the id filter is also a bare word,
+ * so neither can be found by scanning for "the first thing without dashes" —
+ * `--print-json attrib` selected all 78 mutations, silently, while reporting a
+ * filter was applied. Parse once, and let `--suite` claim its own values.
+ */
+const cli = (() => {
+  const flags = new Set<string>();
+  const suite: string[] = [];
+  let only: string | undefined;
+  let collectingSuite = false;
+  for (const argument of process.argv.slice(2)) {
+    if (argument.startsWith("--")) {
+      flags.add(argument);
+      collectingSuite = argument === "--suite";
+      continue;
+    }
+    if (collectingSuite) suite.push(argument);
+    else if (only === undefined) only = argument;
+  }
+  return { flags, suite, only };
+})();
+const suiteFilter = cli.suite;
+
 function runSuite(): { pass: number; fail: number; failed: string[] } {
-  const result = Bun.spawnSync(["bun", "test", "--timeout", String(SUITE_TIMEOUT_MS)], {
+  const result = Bun.spawnSync(["bun", "test", ...suiteFilter, "--timeout", String(SUITE_TIMEOUT_MS)], {
     cwd: repoRoot,
     stdout: "pipe",
     stderr: "pipe",
@@ -722,11 +770,25 @@ recoverAbandonedMutation();
 
 // Flags are not filters. `bun scripts/mutation-audit.ts --anchors` used to be
 // read as "select mutations whose id contains `--anchors`", i.e. none of them.
-const only = process.argv.slice(2).find((argument) => !argument.startsWith("--"));
+const only = cli.only;
 const selected = only ? MUTATIONS.filter((mutation) => mutation.id.includes(only)) : MUTATIONS;
 if (selected.length === 0) {
   console.error(`No mutation matches '${only}'. Known ids:\n  ${MUTATIONS.map((m) => m.id).join("\n  ")}`);
   process.exit(2);
+}
+
+/**
+ * `--print-json` — the selected mutations, as data.
+ *
+ * The list is the evidence, so anything that wants to check a property of it
+ * should read it from here rather than re-parsing this file. Re-parsing was
+ * tried and is a trap: `from` and `to` are TypeScript string literals, some of
+ * them concatenated across lines and full of escaped regex, so a text scraper
+ * gets them subtly wrong and reports on mutations that do not exist.
+ */
+if (cli.flags.has("--print-json")) {
+  console.log(JSON.stringify(selected, null, 2));
+  process.exit(0);
 }
 
 /**
@@ -737,7 +799,7 @@ if (selected.length === 0) {
  * `src/` silently staled four entries in this list, and nobody found out until
  * an audit that costs an hour reported them. This is the cheap way to ask.
  */
-if (process.argv.includes("--anchors")) {
+if (cli.flags.has("--anchors")) {
   let stale = 0;
   const cache = new Map<string, string>();
   for (const mutation of MUTATIONS) {
