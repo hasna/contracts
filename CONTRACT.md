@@ -446,14 +446,179 @@ Checks:
    fails this check.
 9. `public_manifest_safety` — public manifests contain no secret or credential
    refs, credential-shaped values, internal hosts, ARNs, or account IDs.
+   A credential-shaped KEY whose value is plainly an environment-variable NAME
+   is NOT a finding: section 3 requires manifests to reference
+   `HASNA_<NAME>_DATABASE_URL` rather than inline a DSN, and flagging the
+   compliant behaviour is how a mandatory check gets switched off.
 10. `hosting_story` — public OSS cores include the user-hosted product story;
    `saas` repos include the `hasna-saas` story.
 11. `mode_enum_compliance` — any `HASNA_<NAME>_STORAGE_MODE` env normalizes to `local|cloud`.
 12. `health_shape` — when a serve bin exists, a sampled `/health` payload matches `{ status, version, mode }`.
 13. `no_cloud_guard` — no forbidden shared cloud runtime edges (reuses `scanNoCloudTarget`).
+14. `published_artifact_gate` — a repo that publishes declares
+   `metadata.release.artifactScan.script` and its `prepack` script transitively
+   reaches it. See clause C.
 
 The kit is dev-dependency friendly: `@hasna/contracts` can be a `devDependency`
 and the checks run under `bun test` with no runtime footprint in the app.
+
+---
+
+## 10a. Published-artifact clauses
+
+Both clauses below were adopted after a live disclosure, not in anticipation of
+one. `@hasna/tenants@0.1.0` was published to the public registry carrying a
+complete vendor asset inventory compiled into its build output. The repository
+was private and `files: ["dist"]` meant only build output shipped — so the
+source file holding the inventory never left the machine while the inventory
+itself did. Every source-level review passed. `verify:release` ran typecheck,
+tests, and build, and inspected nothing that actually shipped.
+
+### Clause B — No vendor asset inventories in shipped artifacts
+
+**A shipped artifact MUST NOT disclose an inventory of the vendor's assets.**
+Domain portfolios, machine inventories, customer lists, internal endpoint
+catalogues. In any form, default or not, in any encoding, in source or in build
+output.
+
+**What this check is, and is not.** Clause B is a **prohibition**; the check is a
+**count**. Those are not the same thing, and the gap is not academic: an
+artifact carrying a *small* number of vendor-owned hostnames — below the
+threshold — passes. Demonstrated by construction: an artifact built from the 13
+files of a real published package that carry owned hostnames (11 distinct,
+including two nginx configs and a `bin/` entry point) scans `pass`, exit 0.
+
+The clause still binds. A repo that ships an owned-asset inventory is in breach
+whether or not this check fires, and "the scanner passed" is not evidence of
+compliance for small-N disclosure. The check exists to make the *bulk* case
+mechanically impossible, which is the case that actually happened.
+
+This is distinct from R1, which bans vendor endpoints as *defaults*. R1 is about
+what unconfigured software will contact. Clause B is about what shipped bytes
+reveal about what the vendor owns — a fact that is disclosed whether or not any
+code ever reads it.
+
+Enforced by `scanPublishedArtifact` (`contracts artifact-scan <tarball>`),
+which fails when one shipped file carries a bulk inventory of registrable
+domains, machine hostnames, public IP addresses, or email addresses.
+
+Three properties of that check are deliberate:
+
+- **It is structural, and it must be.** The obvious guard — a denylist of what
+  we own — is the one guard that cannot ship, because the denylist IS the
+  disclosure. The scanner therefore does not know which assets are ours. It
+  detects the shape, which survives renaming, reformatting, minification, and
+  bundling.
+- **It cannot pass by having nothing to check.** A target that yields zero
+  readable members raises an error rather than reporting a clean verdict, and
+  the same rule applies one member at a time: a member the scan could not
+  decode is reported and **fails** the scan. There is no size at which a shipped
+  file stops being scanned — the biggest member in a tarball is exactly where a
+  compiled-in inventory ends up, and a clean verdict over a file nobody read
+  would be worse than no scan at all.
+- **Its report does not republish what it found.** Findings are counted and
+  redacted; scan output is itself an artifact that gets pasted into tasks,
+  channels, and CI logs.
+
+**Waivers.** A repo that legitimately ships public reference data — a
+public-suffix list, an ICANN TLD table — declares
+`metadata.conformance.waivedAssetInventories` with `reason` naming the data,
+`reviewedBy`, and `expiresAt`. **An inventory of assets the vendor owns is never
+eligible**, at any threshold, in any encoding. A waiver suppresses the failure
+and keeps the finding on the record; it never erases it.
+
+The gate READS that declaration: `contracts artifact-scan <tarball>` loads
+`./hasna.contract.json` (or `--manifest <file>`) and applies the waivers still
+in force. `expiresAt` is enforced there, so the time-boxing is a property rather
+than a promise — an expired waiver stops applying on its own, and a waiver
+missing `reason` or `reviewedBy` never applied in the first place. A documented
+escape hatch that the enforcement does not read is not an escape hatch; it
+leaves a compliant repo no recourse but to unwire the gate.
+
+**Measured, not asserted.** Against the real disclosed artifact
+(`@hasna/tenants@0.1.0`, 178 names compiled into `dist/`) the scanner detects
+**94.4%**, in the quoted-array form it actually shipped and in markdown,
+numbered-list, YAML and bare-line renderings of the same data. Against eleven
+Hasna packed artifacts and against `zod`, `email-validator`, `commander` and
+`typescript` it reports nothing; against `nodemailer`, `validator` and
+`class-validator` it reports their genuine reference tables — the waiver case.
+A 20,414-member package scans in **5.9 s**.
+
+**Stated limits.** All measured, none theoretical:
+
+- Detection rests on IANA's TLD list minus a small set that collides with
+  Hasna's own `<noun>.<verb>` operation grammar (`tasks.next`,
+  `credential.read`, `service.health`) and with common filenames. Each exclusion
+  is backed by an observed false positive and each is a **deliberate blind
+  spot**: an inventory built only from those TLDs is not detected by count.
+- **In code members, a run of one brand across many TLDs written one per line
+  and unquoted is not counted** — that shape is indistinguishable from property
+  access on one receiver (`exports.vi`, `exports.ua`, … are all ccTLDs). Quoted
+  and array forms in code ARE counted, as are all unquoted forms in prose and
+  tabular members.
+- Runtime string concatenation, IDN/punycode spellings, and reversed or
+  otherwise transformed encodings beyond one level of base64/hex are not
+  detected by a static scan.
+- The gate binds `prepack`, which `npm publish --ignore-scripts` skips. Nothing
+  in a package can defend against the publisher choosing not to run its own
+  hooks; that is a release-process control, not a code one.
+- **IPv4 is read only from values** — whole quoted literals, or bare tokens in
+  non-code members — in **presentation format**, and never under a version key
+  (`v8`, `node`, `chrome`, `engineVersion`, …). Reading raw text matched SVG
+  path coordinates in minified bundles; accepting zero-padded quads turned
+  latin1-decoded binaries into findings; and four-component version strings are
+  numerically indistinguishable from addresses, so `playwright` and
+  `node-releases` both failed on bundled version tables. A machine list keyed
+  with a version word is the residual, and it is narrow: address spellings
+  (`ipAddress`, `public_ip`, `PublicIpAddress`, `ansible_host`, …) all count.
+- **Binary members still yield roughly one spurious address per 22 MB** once
+  decoded as latin1. That is far below the per-file threshold, but the
+  artifact-wide union reaches it at around 450 MB of shipped binary — inside
+  the scan window. An artifact that large should declare an `ip` waiver rather
+  than have the gate loosened.
+
+Clause B is a prohibition, not a count: it binds whether or not the guard can
+see the violation.
+
+### Clause C — Published-artifact scanning is a hard release gate
+
+**Every repo that publishes MUST scan its PACKED artifact, and the scan MUST be
+bound to `prepack`.**
+
+`prepack`, not `verify:release`, and the distinction is the entire point: a hook
+a publisher can step around by running `npm publish` directly is not a hook.
+`prepack` is the one lifecycle script that both `npm pack` and `npm publish`
+always run.
+
+The scan MUST run against the **packed tarball**, never `src/`. `files`
+negations mean repo and package diverge, and the divergence is exactly where a
+disclosure hides.
+
+Declare the script in the manifest and wire it into `prepack`:
+
+```json
+{ "metadata": { "release": { "artifactScan": { "script": "scan:artifact" } } } }
+```
+
+```json
+{ "scripts": {
+    "prepack": "bun run verify:release",
+    "verify:release": "bun test && bun run scan:artifact",
+    "scan:artifact": "bun scripts/scan-artifact.ts"
+} }
+```
+
+`published_artifact_gate` then resolves the real script graph — it does not grep
+`prepack` for a blessed command name, which would pass for any repo that wrote
+the magic string in a comment. Invoke the kit through its **package bin**
+(`contracts artifact-scan`, or `bunx @hasna/contracts@<version> artifact-scan`),
+not by executing a file inside `dist/` directly. **Pin the version**: an
+unpinned `bunx`/`npx` resolves to whatever is newest at publish time, so the
+gate's own behaviour is not reproducible and a resolution failure becomes a
+silent non-run. The check fails on an unpinned invocation.
+
+**Predicate.** The repo publishes — that is, `package.json` is not
+`private: true`. A private package skips the check; there is no artifact to gate.
 
 ---
 

@@ -11,6 +11,20 @@ import {
 
 const repoRoot = join(import.meta.dir, "..");
 
+/**
+ * Clause C: a package that publishes must bind a packed-artifact scan to
+ * `prepack`, and declare which script does it. Both halves are part of what a
+ * conformant published package now looks like, so the shared fixtures carry
+ * them.
+ */
+const completeReleaseMetadata = { release: { artifactScan: { script: "scan:artifact" } } };
+
+const completeReleaseScripts = {
+  prepack: "bun run verify:release",
+  "verify:release": "bun test && bun run scan:artifact",
+  "scan:artifact": "bun scripts/scan-artifact.ts"
+};
+
 function completeServiceManifest(pgCommand = "bun test tests/postgres-storage.test.ts"): ServiceContractManifestInput {
   return {
     schema: SCHEMA_IDS.serviceContract,
@@ -72,7 +86,8 @@ function completeServiceManifest(pgCommand = "bun test tests/postgres-storage.te
         authMode: "local-only",
         deploymentModes: ["local", "self_hosted"]
       }
-    ]
+    ],
+    metadata: { ...completeReleaseMetadata }
   };
 }
 
@@ -96,13 +111,15 @@ function cliWithStoreManifest(storage: Record<string, unknown>): ServiceContract
         authMode: "local-only",
         deploymentModes: ["local"]
       }
-    ]
+    ],
+    metadata: { ...completeReleaseMetadata }
   };
 }
 
 const cliOnlyPackage = {
   name: "@hasna/demo",
   version: "1.0.0",
+  scripts: completeReleaseScripts,
   bin: { demo: "dist/cli.js" },
   exports: { ".": "./dist/index.js" }
 };
@@ -110,6 +127,7 @@ const cliOnlyPackage = {
 const completePackage = {
   name: "@hasna/demo",
   version: "1.0.0",
+  scripts: completeReleaseScripts,
   bin: {
     demo: "dist/cli.js",
     "demo-mcp": "dist/mcp.js",
@@ -271,11 +289,13 @@ describe("repo conformance kit", () => {
           authMode: "local-only",
           deploymentModes: ["local"]
         }
-      ]
+      ],
+      metadata: { ...completeReleaseMetadata }
     };
     const pkg = {
       name: "@hasna/demo",
       version: "1.0.0",
+      scripts: completeReleaseScripts,
       bin: { demo: "dist/cli.js" },
       exports: { ".": "./dist/index.js" }
     };
@@ -306,6 +326,7 @@ describe("repo conformance kit", () => {
       sqlitePath: "~/.hasna/demo/demo.db"
     });
     manifest.metadata = {
+      ...completeReleaseMetadata,
       conformance: {
         waivedStorageEngines: [
           {
@@ -334,6 +355,7 @@ describe("repo conformance kit", () => {
       sqlitePath: "~/.hasna/demo/demo.db"
     });
     manifest.metadata = {
+      ...completeReleaseMetadata,
       conformance: {
         waivedStorageEngines: [{ engine: "postgres", reason: "SQLite-only local CLI." }]
       }
@@ -383,6 +405,7 @@ describe("repo conformance kit", () => {
       sqlitePath: "~/.hasna/demo/demo.db"
     });
     manifest.metadata = {
+      ...completeReleaseMetadata,
       conformance: {
         waivedStorageEngines: [
           { engine: "postgres", reason: "Waiver lapsed.", expiresAt: "2020-01-01T00:00:00.000Z" }
@@ -412,6 +435,7 @@ describe("repo conformance kit", () => {
       sqlitePath: "~/.hasna/demo/demo.db"
     });
     manifest.metadata = {
+      ...completeReleaseMetadata,
       conformance: {
         waivedStorageEngines: [{ engine: "postgres", reason: "Redundant waiver next to a declared engine." }]
       }
@@ -435,6 +459,7 @@ describe("repo conformance kit", () => {
     });
     // sqlite is not in the waivable enum at all, so this never reaches the gate.
     manifest.metadata = {
+      ...completeReleaseMetadata,
       conformance: {
         waivedStorageEngines: [
           { engine: "sqlite", reason: "Fixture tries to drop the local store." } as unknown as never
@@ -492,6 +517,7 @@ describe("repo conformance kit", () => {
       pgTestGate: { envVar: "DEMO_TEST_DATABASE_URL", command: "bun test tests/postgres.test.ts" }
     });
     manifest.metadata = {
+      ...completeReleaseMetadata,
       conformance: {
         waivedStorageEngines: [{ engine: "postgres", reason: "Cloud-mode repo tries to drop PostgreSQL." }]
       }
@@ -567,6 +593,7 @@ describe("repo conformance kit", () => {
         deploymentModes: ["cloud"]
       })),
       metadata: {
+        ...completeReleaseMetadata,
         conformance: {
           waivedStorageEngines: [{ engine: "postgres", reason: "SaaS tries to drop PostgreSQL." }]
         }
@@ -605,6 +632,7 @@ describe("repo conformance kit", () => {
       sqlitePath: "~/.hasna/demo/demo.db"
     });
     manifest.metadata = {
+      ...completeReleaseMetadata,
       conformance: {
         waivedStorageEngines: [{ engine: "postgres", reason: "SQLite-only local CLI." }]
       }
@@ -627,6 +655,7 @@ describe("repo conformance kit", () => {
       sqlitePath: "~/.hasna/demo/demo.db"
     });
     manifest.metadata = {
+      ...completeReleaseMetadata,
       conformance: {
         waivedStorageEngines: [{ engine: "postgres", reason: "Time-boxed waiver.", expiresAt }]
       }
@@ -658,6 +687,7 @@ describe("repo conformance kit", () => {
       sqlitePath: "~/.hasna/demo/demo.db"
     });
     manifest.metadata = {
+      ...completeReleaseMetadata,
       conformance: {
         waivedStorageEngines: [
           {
@@ -701,6 +731,7 @@ describe("repo conformance kit", () => {
     });
     manifest.bins = ["demo", "demo-serve"];
     manifest.metadata = {
+      ...completeReleaseMetadata,
       conformance: {
         waivedStorageEngines: [{ engine: "postgres", reason: "Repo ships a server but wants sqlite only." }]
       }
@@ -719,6 +750,7 @@ describe("repo conformance kit", () => {
   test("rejects storage waivers from classes that may not waive an engine", () => {
     const manifest = completeServiceManifest();
     manifest.metadata = {
+      ...completeReleaseMetadata,
       conformance: {
         waivedStorageEngines: [{ engine: "postgres", reason: "Services still owe both engines." }]
       }
@@ -760,6 +792,7 @@ describe("repo conformance kit", () => {
         }
       ],
       metadata: {
+        ...completeReleaseMetadata,
         conformance: {
           waivedSurfaces: [
             { kind: "api", reason: "Library fixture." },
@@ -815,6 +848,7 @@ describe("repo conformance kit", () => {
     const manifest = completeServiceManifest();
     manifest.serviceSurfaces = (manifest.serviceSurfaces ?? []).filter((surface) => surface.kind === "api");
     manifest.metadata = {
+      ...completeReleaseMetadata,
       conformance: {
         waivedSurfaces: [
           { kind: "sdk", reason: "Fixture tries to bypass the SDK requirement." },
@@ -839,6 +873,7 @@ describe("repo conformance kit", () => {
     const manifest = completeServiceManifest();
     manifest.serviceSurfaces = (manifest.serviceSurfaces ?? []).filter((surface) => surface.kind === "api");
     manifest.metadata = {
+      ...completeReleaseMetadata,
       conformance: {
         waiverProfile: "non-node-monorepo",
         waivedSurfaces: [
@@ -883,6 +918,7 @@ describe("repo conformance kit", () => {
         }
       ],
       metadata: {
+        ...completeReleaseMetadata,
         conformance: {
           waivedSurfaces: [
             { kind: "api", reason: "Library fixture." },
@@ -894,6 +930,7 @@ describe("repo conformance kit", () => {
     const pkg = {
       name: "@hasna/demo",
       version: "1.0.0",
+      scripts: completeReleaseScripts,
       bin: "dist/cli.js",
       exports: {
         types: "./dist/index.d.ts",
@@ -923,10 +960,81 @@ describe("repo conformance kit", () => {
     });
   });
 
+  test("section 3 and section 6 agree: contract-mandated env NAMES are not credential values", () => {
+    // These were flagged as leaked credentials by the previous detector,
+    // case-insensitively, on live manifests (open-loops, open-sessions,
+    // iapp-sessions, iapp-domains): `HASNA_LOOPS_DATABASE_URL` matched because
+    // `DATABASE_URL` is exactly 12 characters. Section 3 REQUIRES those names.
+    // A mandatory gate that fires on compliant repos gets switched off, and
+    // then it protects nothing.
+    const manifest = {
+      ...completeServiceManifest(),
+      metadata: {
+        ...completeReleaseMetadata,
+        // Keys that NAME a variable. The carve-out is anchored to these, not
+        // to any credential-shaped key whose value happens to be upper-snake.
+        env: {
+          modeEnvVar: "HASNA_DEMO_STORAGE_MODE",
+          databaseUrlEnvVar: "HASNA_DEMO_DATABASE_URL",
+          apiBaseUrlEnvVar: "HASNA_DEMO_API_BASE_URL",
+          identityJwksUriEnvVar: "HASNA_DEMO_IDENTITY_JWKS_URI",
+          signingKeyEnvName: "HASNA_DEMO_API_SIGNING_KEY"
+        }
+      }
+    };
+    withRepoFixture(manifest, completePackage, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      const safety = report.checks.find((check) => check.id === "public_manifest_safety");
+      expect(safety?.status).toBe("pass");
+    });
+  });
+
+  test("the env-name carve-out does not hide an upper-snake SECRET", () => {
+    // `apiKey` names a credential, not a variable. Before the carve-out was
+    // anchored to variable-naming keys, any upper-snake value under any
+    // credential-shaped key passed silently.
+    const manifest = {
+      ...completeServiceManifest(),
+      metadata: { ...completeReleaseMetadata, apiKey: "PRODUCTION_KEY_MATERIAL_A1B2C3" }
+    };
+    withRepoFixture(manifest, completePackage, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      const safety = report.checks.find((check) => check.id === "public_manifest_safety");
+      expect(safety?.status).toBe("fail");
+      expect(safety?.detail).toContain("metadata.apiKey");
+    });
+  });
+
+  test("a genuinely leaked API key is still caught", () => {
+    // The corrected detector is the real token grammar from src/auth/keys.ts:
+    // lowercase namespace and app slug, and a signature segment. Strictly
+    // better at finding tokens than the pattern it replaced.
+    const leaked = [["hasna", "demo", "cGxhY2Vob2xkZXJib2R5dmFsdWU"].join("_"), "c2lnbmF0dXJlLXBsYWNlaG9sZGVy"].join(".");
+    const manifest = {
+      ...completeServiceManifest(),
+      metadata: { ...completeReleaseMetadata, note: `bootstrap with ${leaked}` }
+    };
+    withRepoFixture(manifest, completePackage, (root) => {
+      const report = runRepoConformance(root, { env: {}, skipNoCloudScan: true });
+      const safety = report.checks.find((check) => check.id === "public_manifest_safety");
+      expect(safety?.status).toBe("fail");
+      expect(safety?.detail).toContain("metadata.note (credential-value)");
+      expect(safety?.detail).not.toContain(leaked);
+    });
+  });
+
   test("redacts public-manifest safety findings and supports explicit private-tier inspection", () => {
     const internalDomain = ["hasna", "xyz"].join(".");
     const credentialReference = ["vault", "//team/demo/provider"].join(":");
-    const credentialValue = ["hasna", "demo", "placeholdercredentialvalue"].join("_");
+    // A REAL-shaped Hasna API key: `hasna_<app>_<body>.<signature>`. The old
+    // detector matched `hasna_demo_<anything 12+ chars>` case-insensitively,
+    // which is why it also flagged `HASNA_DEMO_DATABASE_URL` — the env name
+    // CONTRACT.md section 3 requires. The fixture now carries the shape a
+    // leaked key actually has, so the test proves the guard catches one.
+    const credentialValue = [
+      ["hasna", "demo", "cGxhY2Vob2xkZXJib2R5dmFsdWU"].join("_"),
+      "c2lnbmF0dXJlLXBsYWNlaG9sZGVy"
+    ].join(".");
     const manifest = {
       ...completeServiceManifest(),
       storage: {
@@ -934,6 +1042,7 @@ describe("repo conformance kit", () => {
         databaseUrlSecretRef: "hasna/oss/demo/database-url"
       },
       metadata: {
+        ...completeReleaseMetadata,
         endpoint: `https://internal.${internalDomain}`,
         account: "123456789012",
         role: "arn:aws:iam::123456789012:role/example",
@@ -1031,6 +1140,7 @@ describe("repo conformance kit", () => {
       {
         ...completeServiceManifest(),
         metadata: {
+          ...completeReleaseMetadata,
           "documentation.tokenization.value": "public-example",
           exampleSegments: "eyJzaG9ydCJ9.not-a-token"
         }

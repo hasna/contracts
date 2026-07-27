@@ -12,6 +12,7 @@
 //   7. If a `<name>-serve` bin exists, the health payload (when sampled) has the
 //      { status, version, mode } shape.
 //   8. No forbidden shared cloud runtimes (reuses the no-cloud guard).
+//   9. Published packages bind a packed-artifact scan to `prepack` (clause C).
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -28,6 +29,7 @@ import {
 } from "./schemas";
 import { loadServiceContractManifest, type LoadServiceContractResult } from "./service-contract";
 import { normalizeStorageMode, storageEnvKeys, type Env } from "./mode";
+import { API_KEY_TOKEN_PATTERN } from "./auth/keys";
 import { scanNoCloudTarget } from "./no-cloud";
 
 export type ConformanceStatus = "pass" | "fail" | "skip";
@@ -192,6 +194,30 @@ function credentialKeyFinding(key: string): PublicManifestFinding["category"] | 
   return null;
 }
 
+/**
+ * A leaked Hasna API key, derived from the token grammar in `src/auth/keys.ts`
+ * rather than approximated.
+ *
+ * The previous pattern was `/\bhasna_[a-z0-9_]+_[A-Za-z0-9._-]{12,}\b/i` —
+ * CASE-INSENSITIVE, and with no requirement for the signature segment. CONTRACT
+ * section 3 mandates env keys of the form `HASNA_<NAME>_DATABASE_URL`, so
+ * section 6 was flagging as a leaked credential the exact variable name section
+ * 3 requires the manifest to use. Live on `open-loops`, `open-sessions`,
+ * `iapp-sessions` and `iapp-domains`: `HASNA_LOOPS_DATABASE_URL` matched
+ * because `DATABASE_URL` is exactly 12 characters.
+ *
+ * A mandatory gate that fires on compliant repos gets switched off, and then it
+ * protects nothing — the same end state as a check that cannot fail. So this
+ * pattern is now the real grammar: the namespace and app slug are LOWERCASE by
+ * construction (`apiKeyPrefix()` builds them from `APP_SLUG_PATTERN`), and a
+ * token always carries `.<signature>`. An upper-snake env name was never a
+ * token, and this is strictly better at finding tokens that are.
+ */
+const HASNA_API_KEY_TOKEN_PATTERN = new RegExp(
+  // Derived from the grammar itself, so the two cannot drift apart again.
+  API_KEY_TOKEN_PATTERN.source.replace(/^\^/, "\\b").replace(/\$$/, "\\b")
+);
+
 function credentialValueFinding(value: string): PublicManifestFinding["category"] | null {
   const trimmed = value.trim();
   if (
@@ -209,7 +235,7 @@ function credentialValueFinding(value: string): PublicManifestFinding["category"
     /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/.test(trimmed) ||
     /\bBearer\s+[A-Za-z0-9._~+/-]{8,}\b/i.test(trimmed) ||
     /^[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^@\s]+@/i.test(trimmed) ||
-    /\bhasna_[a-z0-9_]+_[A-Za-z0-9._-]{12,}\b/i.test(trimmed) ||
+    HASNA_API_KEY_TOKEN_PATTERN.test(trimmed) ||
     /\b(?:password|passphrase|api[_-]?key|access[_-]?key|token|secret)\s*[:=]\s*\S{8,}/i.test(trimmed) ||
     /(?:^|[^A-Za-z0-9_-])[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?:$|[^A-Za-z0-9_-])/.test(
       trimmed
@@ -218,6 +244,35 @@ function credentialValueFinding(value: string): PublicManifestFinding["category"
     return "credential-value";
   }
   return null;
+}
+
+/**
+ * An upper-snake token with no scheme, no separator, and no punctuation beyond
+ * `_` — the shape of an environment variable NAME.
+ */
+function isEnvVarName(value: unknown): boolean {
+  return typeof value === "string" && /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/.test(value.trim());
+}
+
+/**
+ * Keys whose value is understood to be the NAME of a variable rather than its
+ * contents — `envVar`, `environmentVariable`, `...EnvName`, `envPrefix`.
+ *
+ * Section 3 requires manifests to reference `HASNA_<NAME>_DATABASE_URL` instead
+ * of inlining a DSN, so those must not be findings. But the exemption has to be
+ * anchored to keys that declare a variable name; applying it to any
+ * credential-shaped key merely because the VALUE looked upper-snake let a real
+ * secret through whenever it happened to be upper-snake.
+ */
+function namesAnEnvironmentVariable(path: string, value: unknown): boolean {
+  if (!isEnvVarName(value)) return false;
+  const leaf = path.slice(path.lastIndexOf(".") + 1).replace(/\[\d+\]$/, "");
+  const normalized = leaf.replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return (
+    /^env(?:var|variable|name|key|prefix)?$/.test(normalized) ||
+    /(?:env|environment)(?:var|variable|name|key|prefix)$/.test(normalized) ||
+    /^(?:environmentvariable|envvarname|envvariable)$/.test(normalized)
+  );
 }
 
 function publicManifestFindings(value: unknown, path = "<root>"): PublicManifestFinding[] {
@@ -234,7 +289,16 @@ function publicManifestFindings(value: unknown, path = "<root>"): PublicManifest
       // Classify the full logical path, not only the immediate leaf. That makes
       // nested `{ api: { key: ... } }` equivalent to flattened `api.key`,
       // including dotted, slash, underscore, and hyphen separators.
-      const keyFinding = credentialKeyFinding(childPath);
+      // A credential-shaped KEY whose value is plainly an ENV VAR NAME is the
+      // contract working as specified, not a leak: section 3 requires manifests
+      // to reference `HASNA_<NAME>_DATABASE_URL` rather than inline a DSN. The
+      // key heuristic alone flagged exactly that, so section 3 required what
+      // section 6 rejected. Naming the variable is the compliant behaviour;
+      // only a value that looks like a credential is a finding.
+      // The carve-out is scoped to keys that NAME a variable, not to every
+      // credential-shaped key. Unscoped, `"apiKey": "PRODUCTION_KEY_MATERIAL"`
+      // — an upper-snake value that IS the secret — passed silently.
+      const keyFinding = namesAnEnvironmentVariable(childPath, child) ? null : credentialKeyFinding(childPath);
       if (keyFinding) findings.push({ path: childPath, category: keyFinding });
       findings.push(...publicManifestFindings(child, childPath));
     }
@@ -350,6 +414,200 @@ function analyzeStorageWaivers(manifest: ServiceContractManifest, nowMs: number)
     summaries.push(`${waiver.engine} explicitly waived: ${waiver.reason}${annotated}`);
   }
   return { waivedEngines, answeredEngines, summaries, failures };
+}
+
+/**
+ * Every package script reachable from an entry, following the ways one script
+ * actually invokes another.
+ *
+ * More than `bun run x`: npm runs `pre<name>` and `post<name>` around every
+ * script, and `npm-run-all` / `run-s` / `run-p` take bare script names as
+ * arguments. A resolver that knew only `bun run` reported "prepack does not
+ * reach the scan" for conventional layouts that plainly do reach it — and a
+ * gate that fails compliant repos gets switched off.
+ */
+function resolveScriptGraph(scripts: Record<string, string>, entry: string): Set<string> {
+  const reached = new Set<string>();
+  const queue = [entry];
+  const enqueue = (name: string): void => {
+    if (name in scripts) queue.push(name);
+  };
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    if (reached.has(name)) continue;
+    reached.add(name);
+    // npm's implicit lifecycle wrappers run without appearing in any body.
+    enqueue(`pre${name}`);
+    enqueue(`post${name}`);
+    const body = scripts[name];
+    if (!body) continue;
+    for (const match of body.matchAll(/\b(?:bun|bunx|npm|pnpm|yarn)\s+(?:(?:--\S+|-\w)\s+)*(?:run\s+)?([a-zA-Z0-9_][\w:.-]*)/g)) {
+      enqueue(match[1]!);
+    }
+    // `run-s a b c`, `npm-run-all --serial a b`, `concurrently "x" "y"`.
+    for (const runner of body.matchAll(/\b(?:npm-run-all|run-s|run-p|concurrently)\b([^&|;]*)/g)) {
+      for (const token of (runner[1] ?? "").split(/\s+/)) {
+        const candidate = token.replace(/^["']|["']$/g, "");
+        if (candidate && !candidate.startsWith("-")) enqueue(candidate);
+      }
+    }
+  }
+  return reached;
+}
+
+/**
+ * Does this script body actually DO something?
+ *
+ * `"scan:artifact": "true"` satisfied every structural condition the gate
+ * checked while scanning nothing at all — the single most important thing a
+ * release gate must not accept, since the entire clause exists because a
+ * bypassable hook is not a hook. This does not attempt to prove the script
+ * scans correctly; it rejects the bodies that provably cannot.
+ */
+/**
+ * Commands that do nothing, however they are spelled.
+ *
+ * `true`, `/bin/true`, `/usr/bin/true`, `command true`, `builtin true`, `:`,
+ * `exit 0`, a bare `echo`. The earlier pattern matched only the bare forms, so
+ * appending ` # scan` — or writing `/bin/true` — restored a switched-off gate
+ * while still reading as deliberate.
+ */
+const NO_OP_COMMAND = /^(?:(?:\/usr)?\/bin\/)?(?::|true)$/;
+
+/** Strip an unquoted trailing `# comment` from one command segment. */
+function withoutComment(segment: string): string {
+  let inSingle = false;
+  let inDouble = false;
+  for (let index = 0; index < segment.length; index += 1) {
+    const character = segment[index]!;
+    if (character === "'" && !inDouble) inSingle = !inSingle;
+    else if (character === '"' && !inSingle) inDouble = !inDouble;
+    else if (character === "#" && !inSingle && !inDouble) return segment.slice(0, index);
+  }
+  return segment;
+}
+
+function segmentIsNoOp(segment: string): boolean {
+  const text = withoutComment(segment).trim();
+  if (text === "") return true;
+  // `command`/`builtin`/`exec` are prefixes, not work.
+  const tokens = text.split(/\s+/).filter((token) => !/^(?:command|builtin|exec|nohup)$/.test(token));
+  const [head, ...rest] = tokens;
+  if (head === undefined) return true;
+  if (NO_OP_COMMAND.test(head)) return true;
+  if (head === "exit" && (rest.length === 0 || rest[0] === "0")) return true;
+  if (/^(?:(?:\/usr)?\/bin\/)?echo$/.test(head)) return true;
+  return false;
+}
+
+function scriptIsNoOp(body: string): boolean {
+  return body.split(/&&|\|\||;|\n/).every(segmentIsNoOp);
+}
+
+/**
+ * Clause C: for every repo that publishes, scanning the PACKED artifact is a
+ * hard release gate bound to `prepack`.
+ *
+ * `prepack`, not `verify:release`, and the distinction is the whole point: a
+ * hook a publisher can step around by running `npm publish` directly is not a
+ * hook. `prepack` is the one lifecycle script both `npm pack` and `npm publish`
+ * always run.
+ *
+ * The gate is contract-driven — the manifest names its own scan script, and
+ * this resolves the real script graph — rather than grepping `prepack` for a
+ * blessed command name, which would pass for any repo that wrote the magic
+ * string in a comment.
+ */
+/**
+ * `bunx`/`npx` invocations whose package spec carries no `@version`.
+ *
+ * Walks the tokens after the runner, skipping its flags, and inspects the FIRST
+ * package spec only — so a version-looking substring elsewhere on the line
+ * cannot mask an unpinned invocation.
+ */
+function unpinnedPackageRunnerInvocations(body: string): string[] {
+  const unpinned: string[] = [];
+  for (const segment of body.split(/&&|\|\||;/)) {
+    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    for (const [index, token] of tokens.entries()) {
+      if (token !== "bunx" && token !== "npx") continue;
+      const spec = tokens.slice(index + 1).find((candidate) => !candidate.startsWith("-"));
+      if (spec === undefined) continue;
+      // `@scope/name@1.2.3` — the version `@` is the one after any scope.
+      const versionAt = spec.indexOf("@", spec.startsWith("@") ? 1 : 0);
+      if (versionAt === -1) unpinned.push(`${token} ${spec}`);
+      break;
+    }
+  }
+  return unpinned;
+}
+
+function publishedArtifactGateCheck(repoRoot: string, manifest: ServiceContractManifest): ConformanceCheck {
+  const packagePath = join(repoRoot, "package.json");
+  if (!existsSync(packagePath)) {
+    return { id: "published_artifact_gate", status: "skip", detail: "no package.json found" };
+  }
+  let pkg: { private?: unknown; scripts?: unknown };
+  try {
+    pkg = JSON.parse(readFileSync(packagePath, "utf8")) as { private?: unknown; scripts?: unknown };
+  } catch {
+    return { id: "published_artifact_gate", status: "fail", detail: "package.json is not valid JSON" };
+  }
+  if (pkg.private === true) {
+    // Predicate false: nothing is published, so there is nothing to gate.
+    return { id: "published_artifact_gate", status: "skip", detail: "package is private; it publishes no artifact" };
+  }
+
+  const scripts: Record<string, string> = {};
+  if (pkg.scripts && typeof pkg.scripts === "object") {
+    for (const [name, body] of Object.entries(pkg.scripts as Record<string, unknown>)) {
+      if (typeof body === "string") scripts[name] = body;
+    }
+  }
+
+  const declared = manifest.metadata?.release?.artifactScan?.script;
+  if (!declared) {
+    return {
+      id: "published_artifact_gate",
+      status: "fail",
+      detail:
+        "metadata.release.artifactScan.script is required for a published package: name the script that scans the PACKED artifact, then wire it into prepack",
+    };
+  }
+  const failures: string[] = [];
+  if (!(declared in scripts)) {
+    failures.push(`metadata.release.artifactScan.script names '${declared}', which is not a package script`);
+  } else if (scriptIsNoOp(scripts[declared]!)) {
+    failures.push(
+      `'${declared}' is a no-op ('${scripts[declared]}'); a gate that runs nothing is the bypass this clause exists to close`
+    );
+  }
+  if (!("prepack" in scripts)) {
+    failures.push("no prepack script: a release gate bound only to a custom script can be bypassed by publishing directly");
+  } else if (declared in scripts && !resolveScriptGraph(scripts, "prepack").has(declared)) {
+    failures.push(`prepack does not reach '${declared}'; the scan runs only when someone remembers to call it`);
+  }
+
+  // An unpinned `bunx`/`npx` in a gate resolves to whatever is newest at
+  // publish time, so the gate's own behaviour is not reproducible — and a
+  // resolution failure silently becomes a non-run.
+  //
+  // Parsed rather than pattern-matched: the previous regex used a LINE-WIDE
+  // negative lookahead for `@<digit>`, so an unrelated `@1` anywhere on the
+  // line (a tarball named `pkg@1.tgz`) suppressed the finding entirely.
+  for (const invocation of unpinnedPackageRunnerInvocations(scripts[declared] ?? "")) {
+    failures.push(
+      `'${declared}' invokes ${invocation} without a version pin; pin the kit version so the gate is reproducible`
+    );
+  }
+
+  return failures.length === 0
+    ? {
+        id: "published_artifact_gate",
+        status: "pass",
+        detail: `prepack reaches the declared packed-artifact scan '${declared}'`,
+      }
+    : { id: "published_artifact_gate", status: "fail", detail: failures.join("; ") };
 }
 
 export function runRepoConformance(repoRoot: string, options: RepoConformanceOptions = {}): RepoConformanceReport {
@@ -651,6 +909,9 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
       });
     }
   }
+
+  // Check 9: published-artifact scanning is bound to prepack (clause C).
+  checks.push(publishedArtifactGateCheck(repoRoot, manifest));
 
   // Check 8: no forbidden shared cloud runtimes (reuse the no-cloud guard).
   if (options.skipNoCloudScan) {

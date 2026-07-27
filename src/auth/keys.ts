@@ -29,8 +29,16 @@ export const API_KEY_NAMESPACE = "hasna";
 /** App slug grammar shared by the token prefix and claims. */
 export const APP_SLUG_PATTERN = /^[a-z][a-z0-9-]*$/;
 
-/** Full-token structural matcher: hasna_<app>_<body>.<sig>. */
-const TOKEN_PATTERN = /^hasna_([a-z][a-z0-9-]*)_([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/;
+/**
+ * Full-token structural matcher: `hasna_<app>_<body>.<sig>`.
+ *
+ * Exported because the public-manifest guard in `src/conformance.ts` needs to
+ * recognise a leaked key, and a second hand-written approximation of this
+ * grammar is how that guard came to flag `HASNA_LOOPS_DATABASE_URL` — the env
+ * name CONTRACT.md section 3 requires — as a credential.
+ */
+export const API_KEY_TOKEN_PATTERN = /^hasna_([a-z][a-z0-9-]*)_([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/;
+const TOKEN_PATTERN = API_KEY_TOKEN_PATTERN;
 
 /** Default TTL applied when a caller does not specify one: 90 days. */
 export const DEFAULT_API_KEY_TTL_SECONDS = 90 * 24 * 60 * 60;

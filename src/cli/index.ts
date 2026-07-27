@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Command, CommanderError } from "commander";
 import {
@@ -14,6 +14,7 @@ import { getEmbeddedSchemaId, validateContract } from "../validators";
 import { secureLocalStorePolicy } from "../secure-local-store";
 import { runVendorKit } from "./kit-runner";
 import { runIssueKey } from "./issue-key";
+import { formatArtifactScanReport, resolveAssetInventoryWaivers, scanPublishedArtifact } from "../artifact-scan";
 
 function collectJsonFiles(root: string): string[] {
   const stat = statSync(root);
@@ -66,7 +67,7 @@ function preflightJsonUsageErrors(argv: string[]) {
     return false;
   }
 
-  if (!["schemas", "validate", "conformance", "no-cloud-scan", "repo-conformance", "vendor-kit", "issue-key", "secure-local-store"].includes(command)) {
+  if (!["schemas", "validate", "conformance", "no-cloud-scan", "repo-conformance", "vendor-kit", "issue-key", "artifact-scan", "secure-local-store"].includes(command)) {
     return reportParserJsonError("commander.unknownCommand", `unknown command '${command}'`);
   }
 
@@ -83,6 +84,15 @@ function preflightJsonUsageErrors(argv: string[]) {
     "no-cloud-scan": new Set(["--json", "-j", "--manifest"]),
     "repo-conformance": new Set(["--json", "-j"]),
     "vendor-kit": new Set(["--json", "-j", "--check", "--kit-version", "--no-contract"]),
+    "artifact-scan": new Set([
+      "--json",
+      "-j",
+      "--manifest",
+      "--domain-threshold",
+      "--host-threshold",
+      "--ip-threshold",
+      "--email-threshold"
+    ]),
     "secure-local-store": new Set(["--json", "-j", "--store"])
   };
   const allowedOptions = allowedOptionsByCommand[command] ?? new Set<string>();
@@ -398,6 +408,71 @@ export function createContractsProgram() {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         reportCliError(options, `vendor-kit failed for ${target}: ${message}`, { path: target, code: "vendor_kit_error" });
+      }
+    });
+
+  program
+    .command("artifact-scan")
+    .description("Scan a PACKED artifact (.tgz) for bulk asset inventories — run this from prepack, never against src/")
+    .argument("<target>", "Path to a packed .tgz/.tar.gz, or a directory for local iteration")
+    .option("--domain-threshold <n>", "Distinct registrable domains in one file that constitute an inventory")
+    .option("--host-threshold <n>", "Distinct hostnames in one file that constitute an inventory")
+    .option("--ip-threshold <n>", "Distinct public IPv4 addresses in one file that constitute an inventory")
+    .option("--email-threshold <n>", "Distinct email addresses in one file that constitute an inventory")
+    .option(
+      "--manifest <file>",
+      "Contract manifest declaring metadata.conformance.waivedAssetInventories (default ./hasna.contract.json)"
+    )
+    .option("-j, --json", "Output JSON")
+    .action((target: string, options: Record<string, unknown>) => {
+      const thresholds: Record<string, number> = {};
+      for (const [flag, kind] of [
+        ["domainThreshold", "domain"],
+        ["hostThreshold", "host"],
+        ["ipThreshold", "ip"],
+        ["emailThreshold", "email"]
+      ] as const) {
+        const raw = options[flag];
+        if (raw === undefined) continue;
+        const parsed = Number(raw);
+        if (!Number.isInteger(parsed) || parsed < 1) {
+          reportCliError(options, `--${kind}-threshold must be a positive integer`, { code: "bad_threshold" });
+          return;
+        }
+        thresholds[kind] = parsed;
+      }
+      // A waiver is declared in the manifest, so the gate reads the manifest.
+      // Defaulting to the repo's own manifest keeps the prepack invocation
+      // (`contracts artifact-scan <tarball>`, run from the repo root) honest
+      // without every repo having to remember a flag.
+      const manifestSupplied = Object.prototype.hasOwnProperty.call(options, "manifest");
+      if (manifestSupplied && !options.manifest) {
+        reportCliError(options, "option '--manifest <file>' argument missing", {
+          code: "manifest_missing_argument"
+        });
+        return;
+      }
+      const manifestPath = manifestSupplied ? String(options.manifest) : join(process.cwd(), "hasna.contract.json");
+      if (manifestSupplied && !existsSync(manifestPath)) {
+        reportCliError(options, `Could not read or parse ${manifestPath}: no such file`, {
+          file: manifestPath,
+          code: "manifest_read_or_parse_error"
+        });
+        return;
+      }
+      try {
+        const waivers = resolveAssetInventoryWaivers(manifestPath);
+        const report = scanPublishedArtifact(target, { thresholds, waivedKinds: waivers.kinds });
+        if (options.json) {
+          console.log(JSON.stringify({ ...report, waiverNotes: waivers.notes }, null, 2));
+        } else {
+          for (const note of waivers.notes) console.log(`waiver: ${note}`);
+          console.log(formatArtifactScanReport(report));
+        }
+        if (!report.ok) process.exitCode = 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        reportCliError(options, `artifact-scan failed for ${target}: ${message}`, { path: target, code: "artifact_scan_error" });
       }
     });
 
