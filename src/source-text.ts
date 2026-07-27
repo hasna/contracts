@@ -268,15 +268,31 @@ function escapeRegex(value: string): string {
 }
 
 /**
+ * A quoted specifier that resolves to `moduleName`.
+ *
+ * The name is matched as a PATH SEGMENT anywhere in the specifier, not as a
+ * prefix. Anchoring it at the opening quote read a re-scoped publish
+ * (`@hasna/open-cloud`) and a vendored copy (`../vendor/cloud-mcp/index.js`)
+ * as unrelated packages, and both are real imports of the retired runtime.
+ *
+ * Segment boundaries are what keep the match from sliding back into substrings:
+ * `open-cloudy` and `@acme/my-open-cloud` are different packages and stay out.
+ */
+function moduleSpecifier(moduleName: string): string {
+  return String.raw`["'](?:[^"']*/)?${escapeRegex(moduleName)}(?:/[^"']*)?["']`;
+}
+
+/**
  * Does this text import the module — in any of the four forms that create an
  * edge — including deep imports like `@hasna/cloud/dist/adapter.js`?
  *
- * `from "x"` covers both `import ... from` and `export ... from`.
+ * `from "x"` covers both `import ... from` and `export ... from`. The
+ * whitespace after a bare `import` is optional because `import"x/register";`
+ * is the same side-effect import with the space deleted.
  */
 export function importsModule(maskedText: string, moduleName: string): boolean {
-  const specifier = String.raw`["']${escapeRegex(moduleName)}(?:/[^"']*)?["']`;
   const pattern = new RegExp(
-    String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)` + specifier,
+    String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s*)` + moduleSpecifier(moduleName),
   );
   return pattern.test(maskedText);
 }
@@ -291,7 +307,7 @@ export function importsModule(maskedText: string, moduleName: string): boolean {
  */
 export function importedBindings(maskedText: string, moduleName: string): Set<string> {
   const bindings = new Set<string>();
-  const specifier = String.raw`["']${escapeRegex(moduleName)}(?:/[^"']*)?["']`;
+  const specifier = moduleSpecifier(moduleName);
 
   // import <clause> from "mod"  /  export <clause> from "mod"
   const statement = new RegExp(String.raw`\b(?:import|export)\s+([^;]*?)\bfrom\s*${specifier}`, "g");

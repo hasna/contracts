@@ -67,6 +67,27 @@ const RUNTIME_PATTERNS = [
 const MODULE_PATTERNS = RUNTIME_PATTERNS.filter((entry) => entry.kind === "module");
 
 /**
+ * Package names a lockfile edge is forbidden to reach.
+ *
+ * `FORBIDDEN_SHARED_CLOUD_RUNTIMES` is the schema-level list and it is not the
+ * whole answer: `cloud-mcp` is a declared forbidden runtime surface that was
+ * never added to that constant, so keying the lockfile walk on the constant
+ * alone stopped reporting `cloud-mcp` edges at all. Every module-kind pattern
+ * is a package name, so every one of them is an edge worth walking to.
+ */
+const FORBIDDEN_LOCKFILE_PACKAGES: readonly string[] = [
+  ...new Set<string>([...FORBIDDEN_SHARED_CLOUD_RUNTIMES, ...MODULE_PATTERNS.map((entry) => entry.pattern)])
+];
+
+/**
+ * Patterns no dependency edge can carry, because they are env keys and dotdirs
+ * rather than package names. The graph walk cannot answer them, so `bun.lock`
+ * is still read as text for these — going quiet on them once the walk succeeds
+ * would trade one blind spot for another.
+ */
+const LOCKFILE_TEXT_PATTERNS = RUNTIME_PATTERNS.filter((entry) => entry.kind === "config");
+
+/**
  * The guard test every remediated repo is required to ship.
  *
  * It exists to assert the retired runtime is absent, which it can only do by
@@ -75,9 +96,15 @@ const MODULE_PATTERNS = RUNTIME_PATTERNS.filter((entry) => entry.kind === "modul
  * its own guard test three times over. Allowlisting it here, once, is what
  * stops twelve repos from each inventing a local exemption.
  *
- * The exemption covers MENTIONS only. A real `import ... from "@hasna/cloud"`
- * in this file is still a finding, and the file cannot create an install edge
- * without `package.json` or `bun.lock` showing it — both checked separately.
+ * The exemption is narrow on purpose, because the file is claimed by PATH and
+ * any repo can create it. It covers MENTIONS OF A MODULE NAME only:
+ *
+ *   - a real import is still a finding, whatever shape the specifier takes;
+ *   - runtime CONFIG — `HASNA_CLOUD_*`, `.hasna/cloud`, `HASNA_RDS_PASSWORD` —
+ *     is still a finding, because a guard test asserts absence by naming a
+ *     package, never by setting the shared runtime's environment;
+ *   - the file cannot create an install edge without `package.json` or
+ *     `bun.lock` showing it, and both are checked separately.
  */
 const NO_CLOUD_GUARD_TEST = /(?:^|\/)no-cloud-boundary\.test\.(?:[cm]?[jt]sx?|[cm]ts)$/;
 
@@ -269,7 +296,7 @@ function textFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageN
       if (bound) reason = "imported binding";
     } else if (kind === "module" && importsModule(masked, pattern)) {
       reason = "module import";
-    } else if (!guardTest && masked.includes(pattern)) {
+    } else if (!(guardTest && kind === "module") && masked.includes(pattern)) {
       reason = "source reference";
     }
     if (!reason) continue;
@@ -304,19 +331,40 @@ function edgeFinding(edge: DependencyEdge, path: string, kind: NoCloudCheckKind,
 
 const BUN_LOCKFILE = "bun.lock";
 
+/** Env keys and dotdirs spelled out in a lockfile, which no dependency edge can express. */
+function lockfileTextFindings(file: ScanFile, severity: NoCloudFindingSeverity): NoCloudFinding[] {
+  const findings: NoCloudFinding[] = [];
+  for (const { pattern, message } of LOCKFILE_TEXT_PATTERNS) {
+    if (!file.text.includes(pattern)) continue;
+    findings.push({
+      id: `finding_${stableId(`${file.path}:${pattern}`)}`,
+      kind: file.kind,
+      severity,
+      path: file.path,
+      pattern,
+      message: `${message} (source reference)`,
+      evidenceRefs: []
+    });
+  }
+  return findings;
+}
+
 /**
  * Lockfile findings.
  *
  * `bun.lock` is walked as a graph — see `src/dependency-edge.ts` for why a
- * substring is not the same question as an edge. Any other lockfile keeps the
- * old text scan, because we have no parser for it and going quiet on an
- * unparsed lockfile is the failure mode this whole change exists to remove.
+ * substring is not the same question as an edge. The walk answers PACKAGE
+ * NAMES, so the config patterns are still read as text and unioned in;
+ * replacing the whole scan with the walk dropped them silently. Any other
+ * lockfile keeps the old text scan, because we have no parser for it and going
+ * quiet on an unparsed lockfile is the failure mode this change exists to
+ * remove.
  */
 function lockfileFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageName?: string): NoCloudFinding[] {
   if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity, packageName);
-  const edges = lockfileEdges(file.text, FORBIDDEN_SHARED_CLOUD_RUNTIMES, packageName);
+  const edges = lockfileEdges(file.text, FORBIDDEN_LOCKFILE_PACKAGES);
   if (edges === null) return textFindings(file, severity, packageName);
-  return edges.map((edge) => edgeFinding(edge, file.path, "lockfile", packageName));
+  return [...edges.map((edge) => edgeFinding(edge, file.path, "lockfile", packageName)), ...lockfileTextFindings(file, severity)];
 }
 
 function scanFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageName?: string): NoCloudFinding[] {

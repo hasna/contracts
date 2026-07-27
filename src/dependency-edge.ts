@@ -118,6 +118,8 @@ export function manifestEdges(manifest: unknown, forbidden: readonly string[]): 
 interface LockNode {
   /** Package name as the lockfile records it in the resolution id. */
   name: string;
+  /** The package this entry really installs, when the key is an alias — see `resolutionTarget`. */
+  alias: string | null;
   production: string[];
   development: string[];
   /** Resolved from a local path rather than a registry — see `isLinkedResolution`. */
@@ -160,6 +162,36 @@ export function nameFromResolutionId(id: string): string | null {
   return id.slice(0, separator);
 }
 
+/**
+ * The package a resolution id really installs, when its key is an alias for
+ * something else.
+ *
+ * `file:`, `link:` and `workspace:` name a DIRECTORY and `npm:` names a
+ * registry package, so any of them can pull the retired runtime into the tree
+ * under a name that is on no list: `bun install` records a dependency on
+ * `../open-cloud` declared as `@hasna/legacy` as
+ * `@hasna/legacy@file:../open-cloud`, and the key alone says nothing at all.
+ *
+ * Returns null for the ordinary case where the id resolves to its own name.
+ */
+export function resolutionTarget(id: string): string | null {
+  const name = nameFromResolutionId(id);
+  if (name === null) return null;
+  const specifier = id.slice(name.length + 1);
+  const aliased = /^npm:(.+)$/.exec(specifier);
+  if (aliased) {
+    const target = nameFromResolutionId(aliased[1]!) ?? aliased[1]!;
+    return target === name ? null : target;
+  }
+  const linked = /^(?:file|link|workspace):(.+)$/.exec(specifier);
+  if (!linked) return null;
+  // The directory the specifier points at, which is the name the package is
+  // published under far more often than not.
+  const segments = linked[1]!.split("/").filter((segment) => segment !== "" && segment !== "." && segment !== "..");
+  const target = segments[segments.length - 1];
+  return target === undefined || target === name ? null : target;
+}
+
 function nodesByName(lock: Record<string, unknown>): Map<string, LockNode[]> {
   const byName = new Map<string, LockNode[]>();
   const packages = lock.packages;
@@ -172,6 +204,7 @@ function nodesByName(lock: Record<string, unknown>): Map<string, LockNode[]> {
     const meta = entry.find((element): element is Record<string, unknown> => isRecord(element));
     const node: LockNode = {
       name,
+      alias: id === null ? null : resolutionTarget(id),
       production: meta ? PRODUCTION_SECTIONS.flatMap((section) => namesInSection(meta, section)) : [],
       development: meta ? [...DEVELOPMENT_SECTIONS].flatMap((section) => namesInSection(meta, section)) : [],
       linked: id !== null && isLinkedResolution(id),
@@ -183,26 +216,62 @@ function nodesByName(lock: Record<string, unknown>): Map<string, LockNode[]> {
   return byName;
 }
 
-/** The scanned package's own entry in the lockfile's workspace table. */
-function rootWorkspace(lock: Record<string, unknown>, packageName?: string): Record<string, unknown> | null {
+/** A workspace entry the install starts from, with the label a trail should use for it. */
+interface InstallRoot {
+  /** Null for the install root itself, which needs no prefix in a trail. */
+  label: string | null;
+  record: Record<string, unknown>;
+}
+
+/**
+ * Every workspace entry `bun install` seeds the tree from.
+ *
+ * ALL of them, not `workspaces[""]`. Reading only the root entry is what made
+ * this check useless on a real monorepo, and the shape is not a guess: a bun
+ * 1.3.14 `bun install` in a `workspaces` repo writes the root as
+ * `{ "name": "mono-root" }` with NO dependency sections and hangs every
+ * declared dependency off the member workspaces. Seeding from the root entry
+ * alone produced zero seeds, so the walk never ran and returned an EMPTY edge
+ * list — a clean verdict, not the null that would have fallen back to the text
+ * scan — for a tree that installs the retired runtime.
+ *
+ * Every workspace in the table is installed by the same command, so every one
+ * of them is a real seed rather than an over-approximation.
+ */
+function installRoots(lock: Record<string, unknown>): InstallRoot[] {
   const workspaces = lock.workspaces;
-  if (!isRecord(workspaces)) return null;
-  const root = workspaces[""];
-  if (isRecord(root)) return root;
-  if (packageName) {
-    for (const value of Object.values(workspaces)) {
-      if (isRecord(value) && value.name === packageName) return value;
-    }
+  if (!isRecord(workspaces)) return [];
+  const roots: InstallRoot[] = [];
+  for (const [key, record] of Object.entries(workspaces)) {
+    if (!isRecord(record)) continue;
+    roots.push({ label: key === "" ? null : typeof record.name === "string" ? record.name : key, record });
+  }
+  return roots;
+}
+
+/**
+ * Which forbidden package this reachable name IS, if any.
+ *
+ * The lockfile key is normally the package name and an exact match on it is
+ * the whole answer. It does not have to be: an aliased resolution installs the
+ * retired runtime under a name of the declarer's choosing, so the resolution
+ * target counts too. A SUBSTRING still does not — `@hasna/cloudflare` is not
+ * `@hasna/cloud`, and confusing the two is what this module exists to stop.
+ */
+function forbiddenIdentity(name: string, nodes: readonly LockNode[], forbidden: readonly string[]): string | null {
+  if (forbidden.includes(name)) return name;
+  for (const node of nodes) {
+    if (node.alias !== null && forbidden.includes(node.alias)) return node.alias;
   }
   return null;
 }
 
 /**
- * Every forbidden package reachable from the root of `bun.lock`.
+ * Every forbidden package reachable from the workspaces of `bun.lock`.
  *
  * Install semantics as bun actually implements them:
  *
- *   - the root's production AND development sections are installed;
+ *   - every workspace's production AND development sections are installed;
  *   - a registry package's production edges are followed, its dev edges are
  *     not — nobody installs a dependency's devDependencies;
  *   - a LINKED package's dev edges ARE followed, because bun installs them.
@@ -219,11 +288,11 @@ function rootWorkspace(lock: Record<string, unknown>, packageName?: string): Rec
  * Returns null when the lockfile cannot be understood, so the caller can fall
  * back to the text scan rather than silently reporting a clean tree.
  */
-export function lockfileEdges(lockText: string, forbidden: readonly string[], packageName?: string): DependencyEdge[] | null {
+export function lockfileEdges(lockText: string, forbidden: readonly string[]): DependencyEdge[] | null {
   const lock = parseLooseJson(lockText);
   if (!isRecord(lock)) return null;
-  const root = rootWorkspace(lock, packageName);
-  if (!root) return null;
+  const roots = installRoots(lock);
+  if (roots.length === 0) return null;
   const nodes = nodesByName(lock);
 
   interface Visit {
@@ -234,11 +303,16 @@ export function lockfileEdges(lockText: string, forbidden: readonly string[], pa
   }
 
   const seeds: Visit[] = [];
-  for (const section of [...PRODUCTION_SECTIONS, ...PIN_SECTIONS, ...NAME_LIST_SECTIONS]) {
-    for (const name of namesInSection(root, section)) seeds.push({ name, trail: [name], section, scope: "production" });
-  }
-  for (const section of DEVELOPMENT_SECTIONS) {
-    for (const name of namesInSection(root, section)) seeds.push({ name, trail: [name], section, scope: "development" });
+  for (const { label, record } of roots) {
+    // A member workspace is named at the head of the trail, so a finding says
+    // which package in the repo pulled the runtime in.
+    const head = label === null ? [] : [label];
+    for (const section of [...PRODUCTION_SECTIONS, ...PIN_SECTIONS, ...NAME_LIST_SECTIONS]) {
+      for (const name of namesInSection(record, section)) seeds.push({ name, trail: [...head, name], section, scope: "production" });
+    }
+    for (const section of DEVELOPMENT_SECTIONS) {
+      for (const name of namesInSection(record, section)) seeds.push({ name, trail: [...head, name], section, scope: "development" });
+    }
   }
 
   // Production first, so a package reachable both ways is reported at the
@@ -249,11 +323,13 @@ export function lockfileEdges(lockText: string, forbidden: readonly string[], pa
 
   while (queue.length > 0) {
     const current = queue.shift()!;
-    if (forbidden.includes(current.name)) {
-      const existing = best.get(current.name);
+    const reachable = nodes.get(current.name) ?? [];
+    const identity = forbiddenIdentity(current.name, reachable, forbidden);
+    if (identity !== null) {
+      const existing = best.get(identity);
       if (!existing || (existing.scope === "development" && current.scope === "production")) {
-        best.set(current.name, {
-          packageName: current.name,
+        best.set(identity, {
+          packageName: identity,
           scope: current.scope,
           path: current.trail,
           source: "bun.lock",
@@ -261,7 +337,7 @@ export function lockfileEdges(lockText: string, forbidden: readonly string[], pa
         });
       }
     }
-    for (const node of nodes.get(current.name) ?? []) {
+    for (const node of reachable) {
       const next: Array<{ name: string; scope: EdgeScope }> = node.production.map((name) => ({ name, scope: current.scope }));
       // A linked package's devDependencies land in the tree; a registry
       // package's do not.

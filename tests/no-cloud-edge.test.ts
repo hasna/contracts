@@ -17,7 +17,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanNoCloudTarget } from "../src/no-cloud";
-import { isLinkedResolution, lockfileEdges, manifestEdges, nameFromResolutionId, parseLooseJson } from "../src/dependency-edge";
+import { isLinkedResolution, lockfileEdges, manifestEdges, nameFromResolutionId, parseLooseJson, resolutionTarget } from "../src/dependency-edge";
 import { importedBindings, importsModule, maskComments, maskCommentsForPath } from "../src/source-text";
 
 /** The retired runtime, spelled in pieces so this file does not trip its own gate. */
@@ -166,6 +166,46 @@ describe("no-cloud gate: the mandated guard test", () => {
       expect(report.verdict).toBe("failed");
     });
   });
+
+  test("the allowlist covers module names only — runtime config in the guard test still fails", () => {
+    // A guard test asserts the runtime is absent by NAMING the package. It has
+    // no reason to point the shared runtime's environment at anything, and the
+    // file is claimed by path alone, so exempting config would hand every repo
+    // a one-file bypass for `HASNA_CLOUD_*`, `.hasna/cloud` and the shared RDS
+    // credential.
+    withRepo(
+      {
+        files: {
+          "src/no-cloud-boundary.test.ts":
+            'process.env.HASNA_CLOUD_URL = "https://shared.invalid";\n' +
+            'const dir = ".hasna/cloud";\n' +
+            "const secret = process.env.HASNA_RDS_PASSWORD;\n" +
+            "export { dir, secret };\n",
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+        expect(patterns(report)).toContain("src/no-cloud-boundary.test.ts:HASNA_CLOUD_");
+        expect(patterns(report)).toContain("src/no-cloud-boundary.test.ts:.hasna/cloud");
+        expect(patterns(report)).toContain("src/no-cloud-boundary.test.ts:HASNA_RDS_PASSWORD");
+      },
+    );
+  });
+
+  test("a real import in the guard test fails whatever shape the specifier takes", () => {
+    // Each of these is an edge the exemption used to swallow: the specifier
+    // does not START with the pattern, or the `import` keyword is not followed
+    // by a space.
+    for (const statement of [
+      'import { registerCloudTools } from "@hasna/open-cloud";',
+      'import { x } from "../vendor/cloud-mcp/index.js";',
+      `import"${RETIRED}/register";`,
+    ]) {
+      withRepo({ files: { "src/no-cloud-boundary.test.ts": `${statement}\n${guardTest}` } }, (report) => {
+        expect(report.verdict).toBe("failed");
+      });
+    }
+  });
 });
 
 describe("no-cloud gate: symbols are scoped to their import", () => {
@@ -271,7 +311,7 @@ describe("no-cloud gate: dependency edges from bun.lock", () => {
         [`@hasna/wrapper/${RETIRED}`]: [`${RETIRED}@0.1.41`, {}],
       },
     });
-    expect(lockfileEdges(text, [RETIRED, "open-cloud"], "@hasna/subject")).toEqual([]);
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])).toEqual([]);
   });
 
   test("a LINKED package's devDependencies ARE installed, so they are edges", () => {
@@ -284,7 +324,7 @@ describe("no-cloud gate: dependency edges from bun.lock", () => {
         [`@hasna/agent-registry/${RETIRED}`]: [`${RETIRED}@file:../open-cloud`, {}],
       },
     });
-    const edges = lockfileEdges(text, [RETIRED, "open-cloud"], "@hasna/logs");
+    const edges = lockfileEdges(text, [RETIRED, "open-cloud"]);
     expect(edges?.map((edge) => edge.packageName)).toEqual([RETIRED]);
     expect(edges?.[0]?.scope).toBe("development");
     expect(edges?.[0]?.path).toEqual(["@hasna/agent-registry", RETIRED]);
@@ -310,7 +350,7 @@ describe("no-cloud gate: dependency edges from bun.lock", () => {
         [RETIRED]: [`${RETIRED}@0.1.41`, {}],
       },
     });
-    const edges = lockfileEdges(text, [RETIRED, "open-cloud"], "@hasna/subject");
+    const edges = lockfileEdges(text, [RETIRED, "open-cloud"]);
     expect(edges?.map((edge) => edge.packageName)).toEqual([RETIRED]);
     expect(edges?.[0]?.scope).toBe("development");
   });
@@ -323,9 +363,147 @@ describe("no-cloud gate: dependency edges from bun.lock", () => {
         [RETIRED]: [`${RETIRED}@0.1.41`, {}],
       },
     });
-    const edges = lockfileEdges(text, [RETIRED, "open-cloud"], "@hasna/subject");
+    const edges = lockfileEdges(text, [RETIRED, "open-cloud"]);
     expect(edges?.map((edge) => edge.scope)).toEqual(["production"]);
     expect(edges?.[0]?.path).toEqual(["@hasna/wrapper", RETIRED]);
+  });
+
+  // Verbatim output of `bun install` (bun 1.3.14) in a `workspaces` repo whose
+  // root declares nothing, `packages/app` depends on a linked `wrapper`, and
+  // `wrapper` depends on the retired runtime. Copied from a generated file, not
+  // written by hand: the root entry carrying a NAME AND NOTHING ELSE is the
+  // whole point, and a hand-written fixture would have invented dependencies
+  // there and hidden the defect.
+  const monorepoLock = `{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "mono-root",
+    },
+    "packages/app": {
+      "name": "app",
+      "version": "1.0.0",
+      "dependencies": {
+        "wrapper": "file:../../wrapper",
+      },
+    },
+  },
+  "packages": {
+    "app": ["app@workspace:packages/app"],
+
+    "app/wrapper": ["wrapper@file:wrapper", { "dependencies": { "${RETIRED}": "file:../retired" } }],
+
+    "app/wrapper/${RETIRED}": ["${RETIRED}@file:retired", {}],
+  }
+}`;
+
+  test("a MONOREPO lockfile seeds from every workspace, not just the root entry", () => {
+    // bun writes the root workspace with no dependency sections at all, so
+    // seeding from `workspaces[""]` produced zero seeds, never entered the
+    // walk, and returned [] — a clean verdict, not the null that falls back to
+    // the text scan — for a tree that installs the retired runtime.
+    const edges = lockfileEdges(monorepoLock, [RETIRED, "open-cloud"]);
+    expect(edges?.map((edge) => edge.packageName)).toEqual([RETIRED]);
+    expect(edges?.[0]?.scope).toBe("production");
+    expect(edges?.[0]?.path).toEqual(["app", "wrapper", RETIRED]);
+  });
+
+  test("a monorepo transitive edge fails the whole scan end to end", () => {
+    withRepo(
+      {
+        files: {
+          "package.json": JSON.stringify({ name: "mono-root", version: "1.0.0", private: true, workspaces: ["packages/*"] }),
+          "bun.lock": monorepoLock,
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+        expect(patterns(report)).toContain(`bun.lock:${RETIRED}`);
+      },
+    );
+  });
+
+  test("a forbidden runtime surface off the schema list is still an edge", () => {
+    // `cloud-mcp` is a declared forbidden runtime surface that was never added
+    // to FORBIDDEN_SHARED_CLOUD_RUNTIMES. Keying the walk on that constant
+    // alone meant the lockfile stopped answering for it entirely.
+    withRepo(
+      {
+        files: {
+          "bun.lock": lock({
+            workspaces: { "": { name: "@hasna/subject", dependencies: { wrapper: "^1" } } },
+            packages: {
+              wrapper: ["wrapper@1.0.0", { dependencies: { "cloud-mcp": "^2" } }],
+              "cloud-mcp": ["cloud-mcp@2.0.0", {}],
+            },
+          }),
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+        expect(patterns(report)).toContain("bun.lock:cloud-mcp");
+      },
+    );
+  });
+
+  test("the retired runtime linked under another name is still the retired runtime", () => {
+    // Verbatim `bun install` output for a dependency declared as
+    // `"@hasna/legacy": "file:../open-cloud"`. The key is on no list; the
+    // resolution target is.
+    const text = `{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "@hasna/subject",
+      "dependencies": {
+        "@hasna/legacy": "file:../open-cloud",
+      },
+    },
+  },
+  "packages": {
+    "@hasna/legacy": ["@hasna/legacy@file:../open-cloud", {}],
+  }
+}`;
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])?.map((edge) => edge.packageName)).toEqual(["open-cloud"]);
+    withRepo({ files: { "bun.lock": text } }, (report) => {
+      expect(report.verdict).toBe("failed");
+      expect(patterns(report)).toContain("bun.lock:open-cloud");
+    });
+  });
+
+  test("a name that merely contains a forbidden one is a different package", () => {
+    // The substring bug this module exists to remove, in the one place the
+    // alias lookup could reintroduce it.
+    const text = lock({
+      workspaces: { "": { name: "@hasna/subject", dependencies: { "@hasna/cloudflare-adapter": "^1", shim: "file:../open-cloud-shim" } } },
+      packages: {
+        "@hasna/cloudflare-adapter": ["@hasna/cloudflare-adapter@1.0.0", {}],
+        shim: ["shim@file:../open-cloud-shim", {}],
+      },
+    });
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])).toEqual([]);
+  });
+
+  test("runtime config in bun.lock is still read as text, because no edge can carry it", () => {
+    // The walk answers package names. `.hasna/cloud` is a directory, so
+    // replacing the text scan with the walk went quiet on it.
+    const text = lock({
+      workspaces: { "": { name: "@hasna/subject", dependencies: { "local-config": "file:../.hasna/cloud" } } },
+      packages: { "local-config": ["local-config@file:../.hasna/cloud", {}] },
+    });
+    withRepo({ files: { "bun.lock": text } }, (report) => {
+      expect(patterns(report)).toContain("bun.lock:.hasna/cloud");
+    });
+  });
+
+  test("resolutionTarget reads the link target and is silent when there is none", () => {
+    expect(resolutionTarget("@hasna/legacy@file:../open-cloud")).toBe("open-cloud");
+    expect(resolutionTarget("legacy@npm:open-cloud@1.0.0")).toBe("open-cloud");
+    expect(resolutionTarget(`${RETIRED}@file:retired`)).toBe("retired");
+    expect(resolutionTarget("commander@13.1.0")).toBeNull();
+    expect(resolutionTarget("wrapper@file:wrapper")).toBeNull();
   });
 
   test("the root's own devDependency IS installed, and is high not critical", () => {
@@ -333,11 +511,11 @@ describe("no-cloud gate: dependency edges from bun.lock", () => {
       workspaces: { "": { name: "@hasna/subject", devDependencies: { [RETIRED]: "^0.1.41" } } },
       packages: { [RETIRED]: [`${RETIRED}@0.1.41`, {}] },
     });
-    expect(lockfileEdges(text, [RETIRED, "open-cloud"], "@hasna/subject")?.map((edge) => edge.scope)).toEqual(["development"]);
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])?.map((edge) => edge.scope)).toEqual(["development"]);
   });
 
   test("an unreadable lockfile falls back to the text scan rather than reporting clean", () => {
-    expect(lockfileEdges("{ not json", [RETIRED], "@hasna/subject")).toBeNull();
+    expect(lockfileEdges("{ not json", [RETIRED])).toBeNull();
     withRepo({ files: { "bun.lock": `{ not json ${RETIRED}` } }, (report) => {
       expect(report.verdict).toBe("failed");
     });
@@ -428,6 +606,24 @@ describe("source-text masking primitives", () => {
       expect(importsModule(form, RETIRED)).toBe(true);
     }
     expect(importsModule(`const name = "${RETIRED}";`, RETIRED)).toBe(false);
+  });
+
+  test("importsModule reads the whole specifier, not just its first segment", () => {
+    // A re-scoped publish and a vendored copy are the same edge; anchoring the
+    // name at the opening quote saw neither.
+    expect(importsModule('import { a } from "@hasna/open-cloud";', "open-cloud")).toBe(true);
+    expect(importsModule('import { a } from "../vendor/cloud-mcp/index.js";', "cloud-mcp")).toBe(true);
+    expect(importsModule(`import"${RETIRED}/register";`, RETIRED)).toBe(true);
+    // A path SEGMENT, not a substring: these are different packages.
+    expect(importsModule('import { a } from "open-cloudy";', "open-cloud")).toBe(false);
+    expect(importsModule('import { a } from "@acme/my-open-cloud";', "open-cloud")).toBe(false);
+  });
+
+  test("importedBindings follows the same specifier rule as importsModule", () => {
+    expect(importedBindings('import { registerCloudTools } from "@hasna/open-cloud";', "open-cloud")).toEqual(
+      new Set(["registerCloudTools"]),
+    );
+    expect(importedBindings('import { registerCloudTools } from "./cloud-tools.js";', "open-cloud")).toEqual(new Set());
   });
 
   test("importedBindings resolves default, named, renamed and namespace clauses", () => {
