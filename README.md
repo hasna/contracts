@@ -29,6 +29,17 @@ The goal is to make integration work deterministic:
 bun add @hasna/contracts
 ```
 
+## State and paths
+
+This package currently owns no persistent user state and does not create a
+global directory during installation or validation. `~/.hasna/contracts` is
+reserved as the only package-global root if state is added later. Legacy global
+dotdirs are not read.
+
+Project metadata and vendored-kit manifests remain project-local. See
+[State layout](docs/STATE_LAYOUT.md) for the audited path inventory and
+ownership boundaries.
+
 ## Todos contract
 
 `@hasna/contracts/todos` is the pure customer contract for Todos. Import it
