@@ -370,6 +370,32 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
  * whitespace, and anything a duplicate key shadowed — is left exactly as it was
  * and is read by every detector.
  *
+ * THE ALTERNATIVE THAT WAS CONSIDERED AND REJECTED, because it is the obvious
+ * other way to honour the same principle: require the ENCLOSING SPAN to
+ * round-trip — re-serialise the parsed record and refuse to attribute unless the
+ * result reproduces the bytes about to be blanked. It is sound in principle, and
+ * it was rejected for two reasons.
+ *
+ * First, it needs a serialiser that reproduces incidental formatting exactly:
+ * which of the three quote styles the emitter chose, whether keys are quoted,
+ * interior whitespace, a trailing comma, the newlines a non-minified build puts
+ * between rows. Every one of those is a bundler's choice, not ours. A serialiser
+ * that guesses wrong refuses to attribute — the safe direction, but it means the
+ * false-positive fix silently stops working the next time a bundler changes its
+ * output, and the failure is invisible until someone re-measures.
+ *
+ * Second, round-tripping a whole record is a NEW comparison built on the same
+ * parsed structure, so its correctness depends on that structure being faithful —
+ * which is exactly the assumption the duplicate-key evasion broke. It answers
+ * "does the parse describe these bytes" when the question is "were these bytes
+ * compared".
+ *
+ * At the LEAF, though, round-tripping is trivial and total: a string literal's
+ * only serialisation is quote + value + quote, with no formatting choices at all.
+ * So the round-trip idea is kept — it is the `raw !== quote + expected + quote`
+ * line in `quotedConstantSpan` — applied at the one level where it is exact
+ * rather than at the level where it would be a heuristic.
+ *
  * THE GUARANTEE, and this clause has been wrong three times so it is written as
  * a property that can be checked rather than as a conclusion: for every span
  * this function blanks, `text.slice(start, end)` is one quote character, one
