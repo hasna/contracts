@@ -109,20 +109,23 @@ const LOCKFILE_TEXT_PATTERNS = RUNTIME_PATTERNS.filter((entry) => entry.kind ===
 const NO_CLOUD_GUARD_TEST = /(?:^|\/)no-cloud-boundary\.test\.(?:[cm]?[jt]sx?|[cm]ts)$/;
 
 /**
- * `import(` or `require(` applied to something that is not a plain quoted
- * string.
+ * `import(` or `require(` whose argument is not ONE complete, simple string
+ * literal.
  *
- * Matching an identifier start rather than "not a quote" keeps this off the
- * regex SOURCE a guard test builds to detect imports — `require\s*\(\s*` has
- * a backslash there, not an identifier.
+ * Stated as a negative on purpose. The first version enumerated the shapes it
+ * considered computed — an identifier start — and a review walked past it with
+ * a template literal. Listing what is dangerous is how you miss the next
+ * spelling; listing the one safe shape is not.
  *
- * A backtick belongs in that set too. A template specifier is either computed
- * (`${runtime}`) or a plain load spelled with the third quote; either way it is
- * a load, and a guard test that asserts absence has no reason to write one.
- * Reading the identifier alone let the interpolated form pass through the
- * exemption untouched, which is the gate going blind rather than merely noisy.
+ * So anything that is not `("literal")` or `('literal')` withdraws the
+ * guard-test exemption: a backtick specifier, a computed template, an
+ * identifier, and `"a" + "b"` alike.
+ *
+ * A genuine guard test builds regex SOURCE like `require\s*\(\s*`, where the
+ * character after `(` is a backslash inside a string literal — the lookahead
+ * sees a complete literal, and the exemption stands.
  */
-const DYNAMIC_MODULE_LOAD = /\b(?:import|require)\s*\(\s*[A-Za-z_$`]/;
+const DYNAMIC_MODULE_LOAD = /\b(?:import|require)\s*\(\s*(?!(["'])[^"'\n]*\1\s*\))/;
 
 function isNoCloudGuardTest(path: string): boolean {
   return NO_CLOUD_GUARD_TEST.test(path.replaceAll("\\", "/"));

@@ -4,17 +4,18 @@
 // retired shared cloud runtime". It was checking that claim by looking for the
 // package name as a substring of `bun.lock`. That is not the same question.
 //
-// `hasna/logs` is the case that decides how this module has to work, and it
-// has now been read wrong twice. Its `bun.lock` names the retired runtime
-// twice, so the substring check fails it, and the repo's own guard test
-// dismisses those hits as "a dev-only lockfile that is never shipped". Both
-// the check and the dismissal are guesses about what gets installed.
+// `hasna/logs` is the case that decides how this module works, and it was read
+// wrong twice before the discriminator turned up. Its `bun.lock` names the
+// retired runtime twice, so the substring check failed it; a first fix declared
+// the edge real; a second declared it unprovable and failed it anyway.
 //
-// It was measured instead, and the first measurement was generalised past
-// what it covered. See `isLinkedResolution` for all four shapes. The one that
-// settles `logs`: bun 1.3.14 does not materialise a TRANSITIVE linked
-// resolution at all. A clean-room install of logs' own lockfile puts no
-// `@hasna/cloud` on disk, so `logs` is a FALSE POSITIVE.
+// It is provable. `isHoistedInstall` reads the workspace table: a
+// single-workspace lockfile is a hoisted install, where a TRANSITIVE
+// `file:`/`link:` resolution lands nowhere, and a multi-workspace lockfile is
+// an isolated one, where it lands under `node_modules/.bun/`. Both measured.
+// `logs` is the first shape, so its lockfile entry resolves to nothing on disk
+// and `logs` PASSES — while a monorepo with the same chain still fails, which
+// is what stops the fix from being a false negative dressed up as a clearance.
 //
 // So walk the graph with the install semantics that were observed, not the
 // ones npm documents. That catches the edges a substring only ever found by
@@ -138,24 +139,11 @@ interface LockNode {
  *      commander LANDS, hoisted to the root. A linked package is built from
  *      source, so its dev edges are installed.
  *
- * WHAT IS NOT DECIDABLE HERE. Whether a package reached through a linked
- * package is materialised depends on the install TOPOLOGY, which a lockfile
- * does not determine. Measured, same bun version, contradicting each other:
- *
- *   - flat layout, root -> `file:../pkg-a` -> `file:../pkg-b`: pkg-b lands
- *     nowhere. `hasna/logs` is this shape and a clean-room install of its
- *     lockfile puts no `@hasna/cloud` on disk.
- *   - workspace layout, member -> `file:` wrapper -> `file:` retired: the
- *     transitive package IS installed, under `node_modules/.bun/`.
- *
- * An earlier version of this module picked the first reading and skipped
- * transitive linked resolutions, which turned a monorepo's real edge into a
- * signed clean verdict. Absence cannot be proven from the lockfile, so it is
- * not claimed: a transitive linked resolution counts as an edge. That fails
- * `hasna/logs` on an edge its own install does not materialise — a false
- * positive we keep deliberately, because the alternative is a false negative
- * on every monorepo, and a gate that goes quiet is worse than one that shouts.
-  */
+ * WHAT THIS FLAG GATES, so the comment does not outrun the code: `node.linked`
+ * decides whether to follow a node's DEVELOPMENT edges, and — via
+ * `isHoistedInstall` — whether a transitive linked resolution is reachable at
+ * all. The topology half is measured in `isHoistedInstall`.
+ */
 export function isLinkedResolution(id: string): boolean {
   const name = nameFromResolutionId(id);
   if (name === null) return false;
@@ -243,7 +231,7 @@ function nodesByName(lock: Record<string, unknown>): Map<string, LockNode[]> {
     const node: LockNode = {
       name,
       alias: id === null ? null : resolutionTarget(id),
-      production: meta ? PRODUCTION_SECTIONS.flatMap((section) => namesInSection(meta, section)) : [],
+      production: meta ? [...PRODUCTION_SECTIONS, ...PIN_SECTIONS, ...NAME_LIST_SECTIONS].flatMap((section) => namesInSection(meta, section)) : [],
       development: meta ? [...DEVELOPMENT_SECTIONS].flatMap((section) => namesInSection(meta, section)) : [],
       linked: id !== null && isLinkedResolution(id),
     };
@@ -288,7 +276,55 @@ function installRoots(lock: Record<string, unknown>): InstallRoot[] {
     if (!isRecord(record)) continue;
     roots.push({ label: key === "" ? null : typeof record.name === "string" ? record.name : key, record });
   }
+  // The lockfile's OWN top-level sections are install-bearing, and they belong
+  // to no workspace record. A `bun install` with an overrides block writes
+  // `"overrides": { "open-cloud": "1.0.0" }` at the top level of `bun.lock` —
+  // confirmed against a real install, not assumed. Reading only `workspaces`
+  // left every one of these invisible, and because the walk still returned a
+  // list rather than null, the miss was signed off as a clean verdict instead
+  // of falling back to the text scan.
+  //
+  // `manifestEdges` has always applied these same constants to `package.json`.
+  // Until now only half of them were applied here, and that asymmetry was the
+  // whole bug.
+  const topLevel: Record<string, unknown> = {};
+  for (const section of [...PIN_SECTIONS, ...NAME_LIST_SECTIONS]) {
+    if (lock[section] !== undefined) topLevel[section] = lock[section];
+  }
+  // `patchedDependencies` keys carry a version: `@hasna/cloud@0.1.41`.
+  const patched = lock.patchedDependencies;
+  if (isRecord(patched)) {
+    const names = Object.keys(patched)
+      .map((key) => nameFromResolutionId(key) ?? key)
+      .filter((name) => name.length > 0);
+    if (names.length > 0) topLevel.dependencies = names;
+  }
+  if (Object.keys(topLevel).length > 0) roots.push({ label: null, record: topLevel });
   return roots;
+}
+
+/**
+ * Does this lockfile describe a HOISTED (flat) install, or an isolated one?
+ *
+ * This is the discriminator two earlier attempts at `hasna/logs` were missing,
+ * and it IS derivable from the lockfile. Measured on bun 1.3.14:
+ *
+ *   - single workspace entry (`workspaces: { "": … }`) — hoisted layout. A
+ *     transitive `file:`/`link:` resolution lands NOWHERE, for a dev edge and
+ *     a production edge alike. Two probes, both directions.
+ *   - more than one workspace entry — isolated layout, `node_modules/.bun/`.
+ *     The transitive linked package IS installed there. One probe.
+ *
+ * So the topology is not unknowable after all: the workspace table says which
+ * one bun will use. A single-workspace lockfile can therefore be reported
+ * accurately instead of over-approximated, which is what clears `logs`; a
+ * monorepo still follows every edge, which is what keeps the guard honest
+ * there. Anything ambiguous stays on the over-approximating path.
+ */
+function isHoistedInstall(lock: Record<string, unknown>): boolean {
+  const workspaces = lock.workspaces;
+  if (!isRecord(workspaces)) return false;
+  return Object.values(workspaces).filter(isRecord).length <= 1;
 }
 
 /**
@@ -337,6 +373,7 @@ function forbiddenIdentity(name: string, nodes: readonly LockNode[], forbidden: 
 export function lockfileEdges(lockText: string, forbidden: readonly string[]): DependencyEdge[] | null {
   const lock = parseLooseJson(lockText);
   if (!isRecord(lock)) return null;
+  const hoisted = isHoistedInstall(lock);
   const roots = installRoots(lock);
   if (roots.length === 0) return null;
   const nodes = nodesByName(lock);
@@ -346,6 +383,8 @@ export function lockfileEdges(lockText: string, forbidden: readonly string[]): D
     trail: string[];
     section: string;
     scope: EdgeScope;
+    /** Declared by a workspace, where a linked resolution really is installed. */
+    root: boolean;
   }
 
   const seeds: Visit[] = [];
@@ -354,10 +393,10 @@ export function lockfileEdges(lockText: string, forbidden: readonly string[]): D
     // which package in the repo pulled the runtime in.
     const head = label === null ? [] : [label];
     for (const section of [...PRODUCTION_SECTIONS, ...PIN_SECTIONS, ...NAME_LIST_SECTIONS]) {
-      for (const name of namesInSection(record, section)) seeds.push({ name, trail: [...head, name], section, scope: "production" });
+      for (const name of namesInSection(record, section)) seeds.push({ name, trail: [...head, name], section, scope: "production", root: true });
     }
     for (const section of DEVELOPMENT_SECTIONS) {
-      for (const name of namesInSection(record, section)) seeds.push({ name, trail: [...head, name], section, scope: "development" });
+      for (const name of namesInSection(record, section)) seeds.push({ name, trail: [...head, name], section, scope: "development", root: true });
     }
   }
 
@@ -369,7 +408,13 @@ export function lockfileEdges(lockText: string, forbidden: readonly string[]): D
 
   while (queue.length > 0) {
     const current = queue.shift()!;
-    const reachable = nodes.get(current.name) ?? [];
+    const known = nodes.get(current.name) ?? [];
+    // In a hoisted install a transitive linked resolution is not on disk, so it
+    // is not an edge and nothing behind it is reachable — see `isHoistedInstall`
+    // for the measurement. In an isolated install it IS on disk, so the filter
+    // does not apply and the walk over-approximates instead.
+    const reachable = hoisted ? known.filter((node) => current.root || !node.linked) : known;
+    if (known.length > 0 && reachable.length === 0) continue;
     const identity = forbiddenIdentity(current.name, reachable, forbidden);
     if (identity !== null) {
       const existing = best.get(identity);
@@ -396,7 +441,7 @@ export function lockfileEdges(lockText: string, forbidden: readonly string[]): D
         const key = `${candidate.scope}:${candidate.name}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        queue.push({ name: candidate.name, trail: [...current.trail, candidate.name], section: current.section, scope: candidate.scope });
+        queue.push({ name: candidate.name, trail: [...current.trail, candidate.name], section: current.section, scope: candidate.scope, root: false });
       }
     }
   }

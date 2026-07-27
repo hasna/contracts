@@ -286,6 +286,33 @@ describe("no-cloud gate: the mandated guard test", () => {
     );
   });
 
+  test("a computed BACKTICK specifier withdraws the exemption", () => {
+    // Isolates the exemption rule: the specifier is computed so importsModule
+    // does not fire, and the only thing between the mention and a finding is
+    // whether a backtick counts as "not a simple string literal".
+    withRepo(
+      {
+        files: {
+          "src/no-cloud-boundary.test.ts":
+            `const RETIRED_NAME = "${RETIRED}";\nconst m = await import(\`\${prefix}\`);\nexport { RETIRED_NAME, m };\n`,
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+        expect(patterns(report)).toContain(`src/no-cloud-boundary.test.ts:${RETIRED}`);
+      },
+    );
+  });
+
+  test("a concatenated specifier withdraws it as well", () => {
+    withRepo(
+      { files: { "src/no-cloud-boundary.test.ts": `const m = await import("${RETIRED}" + suffix);\nexport { m };\n` } },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+      },
+    );
+  });
+
   test("the allowlist is that exact filename, not any test file", () => {
     withRepo({ files: { "src/my-boundary.test.ts": guardTest } }, (report) => {
       expect(report.verdict).toBe("failed");
@@ -502,13 +529,11 @@ describe("no-cloud gate: dependency edges from bun.lock", () => {
     expect(lockfileEdges(text, [RETIRED, "open-cloud"])?.map((edge) => edge.packageName)).toEqual([RETIRED]);
   });
 
-  test("a transitive linked resolution counts as an edge, because absence cannot be proven", () => {
-    // hasna/logs' exact shape. A clean-room install of its lockfile puts no
-    // @hasna/cloud on disk in a FLAT layout — but the same chain under a
-    // WORKSPACE layout does install, measured on the same bun. The lockfile
-    // does not say which topology applies, so absence is not claimed. This is
-    // a deliberate false positive; the alternative is going quiet on every
-    // monorepo. See `isLinkedResolution`.
+  test("a HOISTED install does not materialise a transitive linked resolution", () => {
+    // hasna/logs, exactly. Single workspace entry means a hoisted layout, and
+    // measured on bun 1.3.14 a transitive file:/link: resolution lands nowhere
+    // there — dev edge and production edge alike. A clean-room install of logs'
+    // own lockfile has no @hasna/cloud on disk.
     const text = lock({
       workspaces: { "": { name: "@hasna/logs", devDependencies: { "@hasna/agent-registry": "file:../open-agent-registry" } } },
       packages: {
@@ -516,9 +541,31 @@ describe("no-cloud gate: dependency edges from bun.lock", () => {
         [`@hasna/agent-registry/${RETIRED}`]: [`${RETIRED}@file:../open-cloud`, {}],
       },
     });
-    const edges = lockfileEdges(text, [RETIRED, "open-cloud"]);
-    expect(edges?.map((edge) => edge.packageName)).toEqual([RETIRED]);
-    expect(edges?.[0]?.scope).toBe("development");
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])).toEqual([]);
+  });
+
+  test("an ISOLATED install DOES, so a monorepo still reports the edge", () => {
+    // More than one workspace entry means node_modules/.bun/, where the same
+    // chain IS installed. Skipping it there would be a false negative on every
+    // monorepo — which is what makes the workspace count the discriminator
+    // rather than a blanket rule in either direction.
+    const text = lock({
+      workspaces: { "": { name: "mono-root" }, "packages/app": { name: "app", dependencies: { wrapper: "file:../../wrapper" } } },
+      packages: {
+        app: ["app@workspace:packages/app"],
+        "app/wrapper": ["wrapper@file:wrapper", { dependencies: { [RETIRED]: "file:../retired" } }],
+        [`app/wrapper/${RETIRED}`]: [`${RETIRED}@file:retired`, {}],
+      },
+    });
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])?.map((edge) => edge.packageName)).toEqual([RETIRED]);
+  });
+
+  test("the root's own linked dependency is installed in either layout", () => {
+    const text = lock({
+      workspaces: { "": { name: "@hasna/subject", dependencies: { [RETIRED]: "file:../open-cloud" } } },
+      packages: { [RETIRED]: [`${RETIRED}@file:../open-cloud`, {}] },
+    });
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])?.[0]?.scope).toBe("production");
   });
 
   test("isLinkedResolution reads the specifier, scope sigil and all", () => {
@@ -800,6 +847,29 @@ describe("no-cloud gate: dependency edges from bun.lock", () => {
     expect(lockfileEdges(text, [RETIRED, "open-cloud"])?.map((edge) => edge.packageName)).toEqual([RETIRED]);
   });
 
+  test("the lockfile's own top-level install sections are edges", () => {
+    // A bun install with an overrides block writes it at the TOP LEVEL of
+    // bun.lock, outside every workspace record. Reading only `workspaces` left
+    // it invisible, and because the walk still returned a list rather than null
+    // the miss was signed off as clean. Confirmed against a real install.
+    for (const [label, body] of [
+      ["overrides", { overrides: { "open-cloud": "1.0.0" } }],
+      ["trustedDependencies", { trustedDependencies: [RETIRED] }],
+      ["patchedDependencies", { patchedDependencies: { [`${RETIRED}@0.1.41`]: "patches/x.patch" } }],
+    ] as const) {
+      const text = JSON.stringify({ lockfileVersion: 1, workspaces: { "": { name: "@hasna/subject" } }, ...body, packages: {} });
+      expect(lockfileEdges(text, [RETIRED, "open-cloud"])?.length, label).toBeGreaterThan(0);
+    }
+  });
+
+  test("a node's bundleDependencies are edges, the same as the manifest's", () => {
+    const text = lock({
+      workspaces: { "": { name: "@hasna/subject", dependencies: { w: "^1" } } },
+      packages: { w: ["w@1.0.0", { bundleDependencies: [RETIRED] }] },
+    });
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])?.map((edge) => edge.packageName)).toEqual([RETIRED]);
+  });
+
   test("parseLooseJson tolerates trailing commas without mangling string contents", () => {
     const parsed = parseLooseJson('{ "a": "x,]", "b": [1,2,], }') as Record<string, unknown>;
     expect(parsed.a).toBe("x,]");
@@ -858,6 +928,12 @@ describe("source-text masking primitives", () => {
       expect(importsModule(form, RETIRED)).toBe(true);
     }
     expect(importsModule(`const name = "${RETIRED}";`, RETIRED)).toBe(false);
+    // Backtick specifiers are real imports. End to end this is invisible — the
+    // bare-mention fallback reports the same file either way — so the matcher
+    // has to be asserted directly or the rule is untested.
+    expect(importsModule("import x from `" + RETIRED + "`;", RETIRED)).toBe(true);
+    expect(importsModule("const m = await import(`" + RETIRED + "/register`);", RETIRED)).toBe(true);
+    expect(importsModule("const m = require(`" + RETIRED + "`);", RETIRED)).toBe(true);
   });
 
   test("a template-literal specifier is a specifier", () => {

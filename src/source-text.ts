@@ -328,12 +328,27 @@ const SPECIFIER_CHAR = "[^\"'`]";
  * (`@hasna/open-cloud`) and a vendored copy (`../vendor/cloud-mcp/index.js`)
  * as unrelated packages, and both are real imports of the retired runtime.
  *
- * Segment boundaries are what keep the match from sliding back into substrings:
- * `open-cloudy` and `@acme/my-open-cloud` are different packages and stay out.
+ * Segment boundaries keep the match from sliding back into substrings:
+ * `open-cloudy` and `@acme/my-open-cloud` stay out OF THIS MATCHER. They are
+ * still reported by the caller's bare-mention fallback — the false-positive
+ * direction, and deliberate — but this comment used to read as though the
+ * scanner cleared them, and it does not.
+ */
+/**
+ * Quote characters a module specifier may be written with. Backticks count:
+ * `import(`@hasna/cloud`)` is a static, resolvable import that a matcher
+ * accepting only " and ' walked straight past — inside the allowlisted guard
+ * test, where it was then scored as a mention and exempted outright.
  */
 function moduleSpecifier(moduleName: string): string {
+  // Path SEGMENT, not prefix: an optional directory, the name, an optional
+  // deep path. Segment boundaries keep `open-cloudy` and `@acme/my-open-cloud`
+  // out of THIS matcher — the caller's bare-mention fallback still reports
+  // them, which is the false-positive direction and deliberate.
   return `${SPECIFIER_QUOTE}(?:${SPECIFIER_CHAR}*/)?${escapeRegex(moduleName)}(?:/${SPECIFIER_CHAR}*)?${SPECIFIER_QUOTE}`;
 }
+
+
 
 /**
  * Does this text import the module — in any of the four forms that create an

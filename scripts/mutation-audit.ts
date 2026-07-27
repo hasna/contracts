@@ -293,12 +293,10 @@ const MUTATIONS: Mutation[] = [
   },
   {
     id: "M36-nocloud-deep-imports-count",
-    // Spelled without the package name on purpose: a string literal naming it
-    // is a source reference, and this repo's own gate is right to say so.
     rule: "a deep import path is the same edge as the bare specifier",
     file: "src/source-text.ts",
-    from: "  return `${SPECIFIER_QUOTE}(?:${SPECIFIER_CHAR}*/)?${escapeRegex(moduleName)}(?:/${SPECIFIER_CHAR}*)?${SPECIFIER_QUOTE}`;",
-    to: "  return `${SPECIFIER_QUOTE}(?:${SPECIFIER_CHAR}*/)?${escapeRegex(moduleName)}${SPECIFIER_QUOTE}`;",
+    from: "${escapeRegex(moduleName)}(?:/${SPECIFIER_CHAR}*)?${SPECIFIER_QUOTE}",
+    to: "${escapeRegex(moduleName)}${SPECIFIER_QUOTE}",
   },
   {
     id: "M37-nocloud-every-workspace-is-a-seed",
@@ -337,10 +335,10 @@ const MUTATIONS: Mutation[] = [
   },
   {
     id: "M41-nocloud-specifier-is-matched-anywhere",
-    rule: "a re-scoped or vendored specifier is the same import",
+    rule: "the module name is matched as a path segment, not anchored at the quote",
     file: "src/source-text.ts",
-    from: "  return `${SPECIFIER_QUOTE}(?:${SPECIFIER_CHAR}*/)?${escapeRegex(moduleName)}(?:/${SPECIFIER_CHAR}*)?${SPECIFIER_QUOTE}`;",
-    to: "  return `${SPECIFIER_QUOTE}${escapeRegex(moduleName)}(?:/${SPECIFIER_CHAR}*)?${SPECIFIER_QUOTE}`;",
+    from: "(?:${SPECIFIER_CHAR}*/)?${escapeRegex(moduleName)}",
+    to: "${escapeRegex(moduleName)}",
   },
   {
     id: "M42-nocloud-bare-import-needs-no-space",
@@ -406,18 +404,60 @@ const MUTATIONS: Mutation[] = [
     to: "  const codeLike = true;",
   },
   {
-    id: "M57-nocloud-backtick-is-a-quote",
-    rule: "a template-literal specifier is a specifier, so its load is an import",
+    id: "M57-nocloud-lockfile-top-level-sections",
+    rule: "the lockfile's own overrides/trusted/patched sections are install-bearing",
+    file: "src/dependency-edge.ts",
+    from: "  if (Object.keys(topLevel).length > 0) roots.push({ label: null, record: topLevel });",
+    to: "  if (false) roots.push({ label: null, record: topLevel });",
+  },
+  {
+    id: "M58-nocloud-patched-key-carries-a-version",
+    rule: "a patchedDependencies key is name@version, not a bare name",
+    file: "src/dependency-edge.ts",
+    from: "      .map((key) => nameFromResolutionId(key) ?? key)",
+    to: "      .map((key) => key)",
+  },
+  {
+    id: "M59-nocloud-node-name-lists-are-edges",
+    rule: "a node's bundleDependencies pull a package in, same as the manifest's",
+    file: "src/dependency-edge.ts",
+    from: "      production: meta ? [...PRODUCTION_SECTIONS, ...PIN_SECTIONS, ...NAME_LIST_SECTIONS].flatMap((section) => namesInSection(meta, section)) : [],",
+    to: "      production: meta ? [...PRODUCTION_SECTIONS].flatMap((section) => namesInSection(meta, section)) : [],",
+  },
+  {
+    id: "M60-nocloud-dynamic-load-is-a-negative",
+    rule: "anything but one complete simple string literal withdraws the exemption",
+    file: "src/no-cloud.ts",
+    from: "\\s*(?!([\"'])[^\"'\\n]*\\1\\s*\\))/;",
+    to: "\\s*[A-Za-z_$]/;",
+  },
+  {
+    id: "M61-nocloud-backtick-is-a-specifier",
+    rule: "a template-literal specifier is a real import",
     file: "src/source-text.ts",
     from: "const SPECIFIER_QUOTE = \"[\\\"'`]\";",
     to: "const SPECIFIER_QUOTE = \"[\\\"']\";",
   },
   {
-    id: "M58-nocloud-backtick-load-withdraws-exemption",
-    rule: "an interpolated specifier in the guard test is a load, not a mention",
-    file: "src/no-cloud.ts",
-    from: "const DYNAMIC_MODULE_LOAD = /\\b(?:import|require)\\s*\\(\\s*[A-Za-z_$`]/;",
-    to: "const DYNAMIC_MODULE_LOAD = /\\b(?:import|require)\\s*\\(\\s*[A-Za-z_$]/;",
+    id: "M62-nocloud-hoisted-skips-transitive-links",
+    rule: "a hoisted install does not materialise a transitive linked resolution",
+    file: "src/dependency-edge.ts",
+    from: "    const reachable = hoisted ? known.filter((node) => current.root || !node.linked) : known;",
+    to: "    const reachable = known;",
+  },
+  {
+    id: "M63-nocloud-isolated-keeps-transitive-links",
+    rule: "an isolated (monorepo) install DOES materialise them, so they stay edges",
+    file: "src/dependency-edge.ts",
+    from: "    const reachable = hoisted ? known.filter((node) => current.root || !node.linked) : known;",
+    to: "    const reachable = known.filter((node) => current.root || !node.linked);",
+  },
+  {
+    id: "M64-nocloud-workspace-count-is-the-discriminator",
+    rule: "the workspace count is what tells hoisted from isolated",
+    file: "src/dependency-edge.ts",
+    from: "  return Object.values(workspaces).filter(isRecord).length <= 1;",
+    to: "  return true;",
   },
 ];
 
