@@ -524,13 +524,29 @@ const MUTATIONS: Mutation[] = [
     // by accident. Reverting the rule now requires saying so out loud.
     to: "    if (spans.length === keys.length) return [{ start: node.start, end: node.end, constant: text.slice(node.start + 1, node.end - 1) } as ConstantSpan];",
   },
-  {
-    id: "M93-attrib-blanks-only-the-compared-array-elements",
-    rule: "an array match blanks its elements, never the enclosing array's span",
-    file: "src/no-cloud.ts",
-    from: "    return spans;\n  }\n  if (node.kind !== \"record\") return null;",
-    to: "    return [{ start: node.start, end: node.end, constant: text.slice(node.start + 1, node.end - 1) } as ConstantSpan];\n  }\n  if (node.kind !== \"record\") return null;",
-  },
+  // M93 WAS HERE AND IS RETIRED, for the reason this file already warns about one
+  // block down: a `to:` that does not loosen anything reachable.
+  //
+  // It named "an array match blanks its elements, never the enclosing array's
+  // span". The rule is real and the code implements it, but it has NO attacker-
+  // reachable consequence. A matched array's span contains only its element
+  // literals, commas and whitespace — and comments are already masked to spaces
+  // before `parseInlineData` runs — so blanking the array span suppresses exactly
+  // the same reachable bytes as blanking the elements. An array cannot carry a
+  // duplicate key, which is what makes the record case different.
+  //
+  // Measured by an adversarial review, with the mutation applied TOGETHER WITH M94
+  // so the throw could not do the catching: the whole 140-test suite passed except
+  // M94's own test, and both array forges (`[…denylist…, <payload>]` and
+  // `[<denylist[0]>, <payload>]`) stayed at EXIT=1, identical to HEAD. Its earlier
+  // "caught 128/10" was entirely parasitic on `blankConstantSpans` throwing.
+  //
+  // Contrast, same method: M91 with M94 applied restores the vulnerability
+  // (duplicate forge EXIT=0) and fails the two duplicate-key tests on a MISSING
+  // FINDING; M92 with M94 likewise. Those three have reachable content; this did
+  // not. The array branch's confinement stays in the code as a uniformity choice —
+  // one rule, "blank only verified constants", rather than two — enforced by
+  // `ConstantSpan` and by the runtime re-check, and honestly not by a forge.
   {
     id: "M94-attrib-blanking-rechecks-the-span-against-the-text",
     rule: "a span that does not match the constant it claims throws, so a wrong span is observable",

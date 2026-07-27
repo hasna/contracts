@@ -384,39 +384,72 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
  * false-positive fix silently stops working the next time a bundler changes its
  * output, and the failure is invisible until someone re-measures.
  *
- * Second, round-tripping a whole record is a NEW comparison built on the same
- * parsed structure, so its correctness depends on that structure being faithful —
- * which is exactly the assumption the duplicate-key evasion broke. It answers
- * "does the parse describe these bytes" when the question is "were these bytes
- * compared".
+ * A SECOND REASON WAS GIVEN HERE AND IT WAS WRONG, so it is corrected rather than
+ * deleted. It claimed a record round-trip "inherits the assumption the
+ * duplicate-key evasion broke, because it is built on the same parsed structure".
+ * That inverts the argument: a round-trip does not ASSUME the parse is faithful,
+ * it TESTS whether it is — re-serialising a collapsed three-entry `Map` cannot
+ * reproduce four written entries, so a whole-record round-trip would have refused
+ * the duplicate-key forge and IS one thing that would have caught the fourth
+ * evasion. Credit where due; the rejection rests on the formatting argument above,
+ * which stands on its own.
  *
- * At the LEAF, though, round-tripping is trivial and total: a string literal's
- * only serialisation is quote + value + quote, with no formatting choices at all.
- * So the round-trip idea is kept — it is the `raw !== quote + expected + quote`
- * line in `quotedConstantSpan` — applied at the one level where it is exact
- * rather than at the level where it would be a heuristic.
+ * At the LEAF, round-tripping is trivial and total: a string literal's only
+ * serialisation is quote + value + quote, with no formatting choices at all. So
+ * the round-trip idea is kept — it is the `raw !== quote + expected + quote` line
+ * in `quotedConstantSpan` — applied at the one level where it is exact rather than
+ * at the level where it would be a heuristic about somebody else's emitter.
  *
- * THE GUARANTEE, and this clause has been wrong three times so it is written as
- * a property that can be checked rather than as a conclusion: for every span
- * this function blanks, `text.slice(start, end)` is one quote character, one
- * verbatim copy of a string this table declares, and the matching quote. Nothing
- * else is ever suppressed, anywhere, for any reason. `blankConstantSpans`
- * re-asserts exactly that against the text before it suppresses a single byte,
- * so a span that does not satisfy it throws instead of scanning clean.
+ * THE GUARANTEE. This clause has been wrong three times, every time by being read
+ * wider than it was meant, so it is scoped explicitly and stated as a property
+ * that can be checked rather than as a conclusion:
+ *
+ *     OF THE SPANS THIS FUNCTION BLANKS, every one satisfies
+ *     `text.slice(start, end) === q + c + q`, where `q` is one quote character and
+ *     `c` is a verbatim copy of a string this scanner declares as data — either a
+ *     `RUNTIME_PATTERNS` row's value or an element of
+ *     `FORBIDDEN_SHARED_CLOUD_RUNTIMES`.
+ *
+ * `blankConstantSpans` re-asserts exactly that against the text before it
+ * suppresses a single byte, so a span that does not satisfy it throws rather than
+ * scanning clean.
+ *
+ * WHAT THE SENTENCE DOES NOT SAY, because the previous wording — "nothing else is
+ * ever suppressed, anywhere, for any reason" — did say it and was false. This
+ * function is not the only thing in this file that stops a detector seeing text.
+ * `maskCommentsForPath` blanks every comment before this runs; `SKIP_DIRS` drops
+ * `tests`, `docs`, `examples` and `coverage` wholesale; `guardTestMentionsOnly`
+ * allowlists one filename. Those are separate, documented decisions with their own
+ * tests. The claim here is about THIS function's spans, and nothing more.
+ *
+ * TWO CONSTANTS, NOT ONE. The record branch compares against `RUNTIME_PATTERNS`
+ * and the array branch against `FORBIDDEN_SHARED_CLOUD_RUNTIMES`, which are
+ * different declarations that merely overlap today — see the note above
+ * `FORBIDDEN_LOCKFILE_PACKAGES` for a case where they already diverged
+ * (`cloud-mcp` is a table row and not in the schema constant). Adding a name to
+ * the schema constant without a matching row would make "a string this table
+ * declares" false in letter. It still could not admit an attacker-chosen value,
+ * because the string would be one this scanner ships.
  *
  * WHY A FIFTH SLOT CANNOT OPEN. A "slot" has always been the same thing: bytes
- * that are blanked but not compared. That set is now empty by construction, not
- * by enumeration — it is not that the known ways of hiding in it have been
- * closed, it is that the difference the slots lived in no longer exists. A future
- * field on a row, a future accepted shape, a future lossy corner of the parse:
- * none of them can widen a blanked span, because no span is derived from a parsed
- * structure at all. The parse only decides WHETHER to look; the bytes decide what
- * is dropped.
+ * that are blanked but not compared. The DERIVATION of that set no longer touches
+ * a parsed structure: a future field on a row, a future accepted shape, a future
+ * lossy corner of the parse — none of them can widen a blanked span, because spans
+ * come only from `quotedConstantSpan`. The parse decides WHETHER to look; the bytes
+ * decide what is dropped.
+ *
+ * "By construction" is the right description of the DERIVATION and would be too
+ * strong as a description of the ENFORCEMENT, which a review measured: widening the
+ * span array's type annotation and calling an unchecked blanker restores the
+ * vulnerability with no casts and a green `tsc`. Enforcement is three things, none
+ * of them the type alone — the runtime re-check in `blankConstantSpans`, the
+ * duplicate-key forges, and `M91`/`M94`/`M95`.
  *
  * THE HISTORY OF THIS CLAUSE, kept because it is what tells the next reader where
- * the reasoning is load-bearing. Review caught all four; no test caught any of
- * them — which is why the property above is now asserted in code and pinned by
- * `M91`, `M93`, `M94` and `M95` rather than argued for here.
+ * the reasoning is load-bearing. Review caught all four evasions AND the three
+ * overstatements above; no test caught any of them — which is why the property is
+ * now asserted in code and pinned by `M91`, `M94` and `M95` rather than argued for
+ * here.
  *
  *   1. "NO DETECTOR IS TURNED OFF ANYWHERE" — false while three keys were
  *      compared and the rest of the key set was not. Any extra key rode along.
@@ -425,9 +458,11 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
  *      only for being A string, never the right one.
  *   3. "there is no admitted-but-uncompared slot left" — false while a duplicate
  *      key let the span carry a shadowed value the comparison never read.
- *      `parseInlineData` stores entries in a `Map`, so `{pattern: <credential>,
- *      pattern: "@hasna/cloud", …}` presented three entries to the comparison and
- *      167 bytes to the blanker. Cost to an evader: repeat one key. This one
+ *      `parseInlineData` stores entries in a `Map`, so a record spelling `pattern`
+ *      twice presented three entries to the comparison and 166 raw bytes to the
+ *      blanker. (Reported as 167 when first found; 166 is what the forge in
+ *      `tests/no-cloud-edge.test.ts` measures, and it is the one re-runnable
+ *      number.) Cost to an evader: repeat one key. This one
  *      PREDATED the entry-for-entry rule — the union pre-filter iterated the same
  *      collapsed `Map` and missed it identically — so it was never a regression,
  *      it was the mechanism the whole time.

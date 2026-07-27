@@ -1991,9 +1991,12 @@ describe("no-cloud gate: a blanked span may carry nothing but the row this table
         ["mixed quote styles", `{ pattern: '${PAYLOAD}', pattern: "${RETIRED_ROW}", kind: "module", message: "${MSG}" }`],
         ["a comment inside the record", `{ /* filler */ pattern: "${PAYLOAD}", pattern: "${RETIRED_ROW}", kind: "module", message: "${MSG}" }`],
         ["CRLF line endings", `{\r\n pattern: "${PAYLOAD}",\r\n pattern: "${RETIRED_ROW}",\r\n kind: "module",\r\n message: "${MSG}"\r\n}`],
-        // An astral character is the known UTF-16-vs-code-point hazard in
-        // `toUnits`; it belongs in the shadowed value, where a shifted offset
-        // would blank the wrong bytes.
+        // An astral character, included as a spelling variant rather than as a
+        // hazard probe. `toUnits` is `text.split("")`, i.e. UTF-16 code units, the
+        // same index space as `.slice()`, so there is no live offset hazard here —
+        // a review confirmed that switching it to `[...text]` fails two PRE-EXISTING
+        // masker tests and not this one. Kept because a shadowed value containing
+        // one is a shape a forge can write, not because it pins `toUnits`.
         ["an astral character in the shadowed value", `{ pattern: "\u{1F600}${PAYLOAD}", pattern: "${RETIRED_ROW}", kind: "module", message: "${MSG}" }`],
       ];
       for (const [label, forged] of spellings) {
@@ -2222,10 +2225,12 @@ describe("source-text: only bytes that were compared can be blanked", () => {
   });
 
   test("blankConstantSpans REFUSES a span whose bytes are not the constant it claims", () => {
-    // The positive control for the re-check. A span that lies about itself is a
-    // bug in this file rather than something an input can cause, so it throws
-    // instead of quietly scanning clean. This is what makes the wrong span
-    // OBSERVABLE — it is how `M93` gets caught.
+    // The positive control for the re-check, and the ONLY test that catches `M94`.
+    // A span that lies about itself is a bug in this file rather than something an
+    // input can cause, so it throws instead of quietly scanning clean. An earlier
+    // version of this comment credited it with catching `M93`; that was wrong —
+    // `M93`'s failing set never contained this test, and `M93` has since been
+    // retired as a no-op. See the note where it used to live.
     const source = 'var t = [{ a: "needle" }];';
     const record = soleNode(source);
     const forged = { start: record.start, end: record.end, constant: "needle" };
@@ -2238,13 +2243,44 @@ describe("source-text: only bytes that were compared can be blanked", () => {
   });
 
   test("a genuine table row blanks its VALUES and leaves the record's own bytes alone", () => {
-    // The observable form of "the action is confined to the compared leaves".
-    // Under the old rule the whole record vanished; the keys, the braces and the
-    // punctuation are bytes nothing ever compared, so they must survive.
+    // THIS TEST USED TO ASSERT NOTHING OF THE KIND, and a review caught it: it
+    // checked only `patterns(report)` and the verdict, which are byte-identical to
+    // two other tests in this file and to the behaviour of the DEFECT — the same
+    // fixture scores EXIT=0 at `9a51cca` too. A test named for span confinement
+    // that cannot distinguish the fix from the bug is worse than no test.
+    //
+    // So it now reads the BYTES. Under the old rule the whole record vanished; the
+    // keys, the braces and the punctuation are bytes nothing ever compared, so
+    // they must survive verbatim.
     const RETIRED_ROW = ["@hasna/", "cloud"].join("");
-    const row = `{ pattern: "${RETIRED_ROW}", kind: "module", message: "Shared ${RETIRED_ROW} runtime reference is forbidden" }`;
+    const message = `Shared ${RETIRED_ROW} runtime reference is forbidden`;
+    const row = `{ pattern: "${RETIRED_ROW}", kind: "module", message: "${message}" }`;
+    const source = `var t = [${row}];`;
+
+    const [region] = inlineDataRegions(source, [RETIRED_ROW]);
+    expect(region, "the row is recognised").toBeDefined();
+    const record = region!.root.kind === "array" ? region!.root.items[0]! : region!.root;
+    if (record.kind !== "record") throw new Error("expected a record");
+
+    const spans = (["pattern", "kind", "message"] as const).map((key) => {
+      const expected = key === "pattern" ? RETIRED_ROW : key === "kind" ? "module" : message;
+      const span = quotedConstantSpan(source, record.entries.get(key), expected);
+      expect(span, `${key} is a verified constant span`).not.toBeNull();
+      return span!;
+    });
+
+    const blanked = blankConstantSpans(source, spans);
+    expect(blanked.length, "offsets still line up").toBe(source.length);
+    // The three VALUES are gone...
+    expect(blanked).not.toContain(RETIRED_ROW);
+    expect(blanked).not.toContain("module");
+    // ...and every byte the comparison never read is still there.
+    for (const survivor of ["var t = [{", "pattern:", "kind:", "message:", "}];"]) {
+      expect(blanked, `${survivor} was never compared, so it must survive`).toContain(survivor);
+    }
+    // And the whole thing still passes end to end, which is the point of blanking.
     withRepo(
-      { name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${row}];\nexport { t };\n` } },
+      { name: "@acme/consumer-app", files: { "dist/bundle.js": `${source}\nexport { t };\n` } },
       (report) => {
         expect(patterns(report), "still attributed").toEqual([]);
         expect(report.verdict).toBe("passed");

@@ -890,8 +890,21 @@ export function loadCallMentions(text: string, name: string): boolean {
   return false;
 }
 
-/** Replace the given spans with spaces, so every later offset still lines up. */
-export function blankSpans(text: string, spans: ReadonlyArray<{ start: number; end: number }>): string {
+/**
+ * Replace the given spans with spaces, so every later offset still lines up.
+ *
+ * DELIBERATELY NOT EXPORTED. It takes an unconstrained `{start, end}`, so it is
+ * the one function in this file that can suppress a byte nobody compared — and an
+ * adversarial review used exactly that to restore the vulnerability in three
+ * lines with ZERO casts and a green `tsc`: widen the span array's annotation in
+ * `withoutInlinedDeclarations`, push `{start, end}`, and call this instead of
+ * `blankConstantSpans`. Un-exporting it does not make that impossible, but it
+ * moves the edit from "change one type annotation" to "re-export the unchecked
+ * primitive", which is a line a reviewer will ask about.
+ *
+ * `blankConstantSpans` is the only caller, and the only way out of this module.
+ */
+function blankSpans(text: string, spans: ReadonlyArray<{ start: number; end: number }>): string {
   if (spans.length === 0) return text;
   const chars = toUnits(text);
   for (const span of spans) blank(chars, span.start, span.end);
@@ -906,13 +919,22 @@ export function blankSpans(text: string, spans: ReadonlyArray<{ start: number; e
  * anything. So a span cannot be moved, widened, or synthesised somewhere else
  * and still be blanked: it has to keep saying what it is, and be it.
  *
- * `quotedConstantSpan` is the only function that produces one. That is the whole
- * mechanism, so it is worth saying why the TYPE is part of it: a plain
- * `{start, end}` is not assignable here, so `tsc` rejects the edit that reverted
- * this rule four times in a row — pushing the ENCLOSING node's span instead of
- * the span that was actually compared. Reintroducing that now requires an
- * explicit cast, which is greppable and visible in review rather than being the
- * natural thing to write.
+ * `quotedConstantSpan` is the only function that produces one. The TYPE is part of
+ * the mechanism, but it is worth being exact about how much it buys, because the
+ * first wording of this comment overstated it and a review measured the gap.
+ *
+ * WHAT IT DOES BUY: a plain `{start, end}` is not assignable here, so `tsc`
+ * rejects the specific edit that reverted this rule four times in a row —
+ * pushing the ENCLOSING node's span into the span list. That edit now needs an
+ * explicit cast, which is greppable.
+ *
+ * WHAT IT DOES NOT BUY, measured: widening the span array's own annotation back
+ * to `Array<{start: number; end: number}>` and calling an unchecked blanker
+ * restores the vulnerability with ZERO casts and `tsc` green. So the type is a
+ * guardrail against the obvious edit, NOT a proof. What actually catches a
+ * determined revert is `blankConstantSpans`'s runtime re-check, the duplicate-key
+ * forges, and the mutation audit. `blankSpans` is un-exported so that route needs
+ * a visible re-export rather than a one-word annotation change.
  */
 export interface ConstantSpan {
   readonly start: number;
