@@ -155,6 +155,165 @@ const MUTATIONS: Mutation[] = [
     from: "  const text = withoutComment(segment).trim();",
     to: "  const text = segment.trim();",
   },
+
+  // ---------------------------------------------------------------------
+  // The no-cloud gate: dependency edges and real imports, not substrings.
+  //
+  // Filter to these with `bun scripts/mutation-audit.ts nocloud`.
+  //
+  // These pin the fix for the gate that failed `@hasna/connectors@1.4.0` — the
+  // one repo already remediated and published — on a JSDoc comment and on the
+  // guard test the remediation pattern itself mandates.
+  // ---------------------------------------------------------------------
+  {
+    id: "M19-nocloud-comments-are-not-code",
+    rule: "a comment is prose; only code is an edge",
+    file: "src/no-cloud.ts",
+    from: "  const masked = maskCommentsForPath(file.text, file.path);",
+    to: "  const masked = file.text;",
+  },
+  {
+    id: "M20-nocloud-symbol-needs-an-import",
+    rule: "registerCloud* is the retired surface only when imported from it",
+    file: "src/no-cloud.ts",
+    from: "      const bound = MODULE_PATTERNS.some((module) => importedBindings(masked, module.pattern).has(pattern));",
+    to: "      const bound = masked.includes(pattern);",
+  },
+  {
+    id: "M21-nocloud-guard-test-allowlisted",
+    rule: "the mandated guard test may name what it forbids",
+    file: "src/no-cloud.ts",
+    from: "  return NO_CLOUD_GUARD_TEST.test(path.replaceAll(\"\\\\\", \"/\"));",
+    to: "  return false;",
+  },
+  {
+    id: "M22-nocloud-allowlist-is-not-a-bypass",
+    rule: "the allowlist covers mentions, never a real import",
+    file: "src/no-cloud.ts",
+    from: "  return NO_CLOUD_GUARD_TEST.test(path.replaceAll(\"\\\\\", \"/\"));",
+    to: "  return /\\.test\\.[cm]?[jt]sx?$/.test(path.replaceAll(\"\\\\\", \"/\"));",
+  },
+  {
+    id: "M23-nocloud-lockfile-is-a-graph",
+    rule: "bun.lock is walked as a graph, not grepped",
+    file: "src/no-cloud.ts",
+    from: "  if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity, packageName);",
+    to: "  return textFindings(file, severity, packageName);\n  if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity, packageName);",
+  },
+  {
+    id: "M24-nocloud-unreadable-lockfile",
+    rule: "a lockfile we cannot parse is scanned, not passed",
+    file: "src/dependency-edge.ts",
+    from: "  if (!root) return null;",
+    to: "  if (!root) return [];",
+  },
+  {
+    id: "M25-nocloud-linked-dev-is-installed",
+    rule: "a linked package's devDependencies land in the tree and are edges",
+    file: "src/dependency-edge.ts",
+    from: "      if (node.linked) {",
+    to: "      if (false) {",
+  },
+  {
+    id: "M25b-nocloud-registry-dev-is-not-installed",
+    rule: "a registry package's devDependencies are not installed and not edges",
+    file: "src/dependency-edge.ts",
+    from: "      if (node.linked) {",
+    to: "      if (true) {",
+  },
+  {
+    id: "M25c-nocloud-linked-is-read-from-the-specifier",
+    rule: "file:/link:/workspace: is what marks a resolution linked",
+    file: "src/dependency-edge.ts",
+    from: "  return /^(?:file|link|workspace):/.test(id.slice(name.length + 1));",
+    to: "  return false;",
+  },
+  {
+    id: "M25d-nocloud-dev-hop-is-not-laundered",
+    rule: "a production hop after a dev hop is still a dev edge",
+    file: "src/dependency-edge.ts",
+    from: '        for (const name of node.development) next.push({ name, scope: "development" });',
+    to: "        for (const name of node.development) next.push({ name, scope: current.scope });",
+  },
+  {
+    id: "M26-nocloud-transitive-production-edge",
+    rule: "a transitive production dependency is still an edge",
+    file: "src/dependency-edge.ts",
+    from: "    for (const node of nodes.get(current.name) ?? []) {",
+    to: "    for (const node of []) {",
+  },
+  {
+    id: "M27-nocloud-pin-sections-are-edges",
+    rule: "overrides and resolutions pull a package in",
+    file: "src/dependency-edge.ts",
+    from: 'export const PIN_SECTIONS = ["overrides", "resolutions"] as const;',
+    to: "export const PIN_SECTIONS = [] as unknown as readonly [\"overrides\", \"resolutions\"];",
+  },
+  {
+    id: "M28-nocloud-name-list-sections-are-edges",
+    rule: "bundleDependencies and trustedDependencies are arrays of names",
+    file: "src/dependency-edge.ts",
+    from: '  if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === "string");',
+    to: "  if (Array.isArray(value)) return [];",
+  },
+  {
+    id: "M29-nocloud-strings-are-not-comments",
+    rule: "`//` inside a string literal does not start a comment",
+    file: "src/source-text.ts",
+    from: "    if (character === '\"' || character === \"'\") {",
+    to: "    if (false) {",
+  },
+  {
+    id: "M30-nocloud-yaml-hash-needs-space",
+    rule: "`#` opens a YAML comment only at line start or after whitespace",
+    file: "src/source-text.ts",
+    from: "        if (previous === \"\" || /\\s/.test(previous)) {",
+    to: "        if (true) {",
+  },
+  {
+    id: "M31-nocloud-json-has-no-comments",
+    rule: "JSON has no comments, so nothing in it is masked",
+    file: "src/source-text.ts",
+    from: 'const C_LIKE_EXTENSIONS = /\\.(?:[cm]?[jt]sx?|[cm]ts)$/i;',
+    to: "const C_LIKE_EXTENSIONS = /\\.(?:[cm]?[jt]sx?|[cm]ts|json)$/i;",
+  },
+  {
+    id: "M32-nocloud-template-frame-closes",
+    rule: "a closed template pops its frame, so later comments still mask",
+    file: "src/source-text.ts",
+    from: "      if (chunk.closed) templateDepths.pop();",
+    to: "      if (false) templateDepths.pop();",
+  },
+  {
+    id: "M33-nocloud-regex-literal-tracking",
+    rule: "a quote inside a regex literal does not open a string",
+    file: "src/source-text.ts",
+    from: "    if (character === \"/\" && regexCanStart(text.slice(Math.max(0, index - 64), index))) {",
+    to: "    if (false) {",
+  },
+  {
+    id: "M34-nocloud-unterminated-masks-nothing",
+    rule: "a parse we lost the thread on masks nothing, and fails closed",
+    file: "src/source-text.ts",
+    from: "      const end = text.indexOf(\"*/\", index + 2);\n      if (end === -1) return null;",
+    to: "      const end = text.indexOf(\"*/\", index + 2);\n      if (end === -1) return chars.join(\"\");",
+  },
+  {
+    id: "M35-nocloud-rename-binds-the-local-name",
+    rule: "`x as y` binds y, the name actually in scope",
+    file: "src/source-text.ts",
+    from: '      const name = (pieces[pieces.length - 1] ?? "").trim();',
+    to: '      const name = (pieces[0] ?? "").trim();',
+  },
+  {
+    id: "M36-nocloud-deep-imports-count",
+    // Spelled without the package name on purpose: a string literal naming it
+    // is a source reference, and this repo's own gate is right to say so.
+    rule: "a deep import path is the same edge as the bare specifier",
+    file: "src/source-text.ts",
+    from: "  const specifier = String.raw`[\"']${escapeRegex(moduleName)}(?:/[^\"']*)?[\"']`;",
+    to: "  const specifier = String.raw`[\"']${escapeRegex(moduleName)}[\"']`;",
+  },
 ];
 
 const repoRoot = join(import.meta.dir, "..");

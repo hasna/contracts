@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
+import { lockfileEdges, manifestEdges, type DependencyEdge } from "./dependency-edge";
 import {
   commonArchiveRoot,
   isPackedArtifactPath,
@@ -7,6 +8,7 @@ import {
   normalizeArchiveEntry,
   readArchiveMemberText
 } from "./packed-artifact";
+import { importedBindings, importsModule, maskCommentsForPath } from "./source-text";
 import {
   FORBIDDEN_SHARED_CLOUD_RUNTIMES,
   AppCloudManifestSchema,
@@ -37,16 +39,51 @@ const LOCKFILES = new Set(["bun.lock", "package-lock.json", "pnpm-lock.yaml", "y
 const SOURCE_DIRS = new Set(["src", "bin", "cli", "mcp", "server", "lib", "scripts", "config", "infra", "hooks", ".github", "dist"]);
 const MAX_TEXT_BYTES = 5 * 1024 * 1024;
 
+/**
+ * What a pattern IS, which decides what evidence counts as a hit.
+ *
+ * - `module`  — a package name. An import of it is an edge; a mention of it in
+ *   code is a lead worth failing on; a mention in a comment is prose.
+ * - `symbol`  — an export of the retired runtime. The NAME alone proves
+ *   nothing: `iapp-files` defines its own `registerCloudTools` in
+ *   `src/mcp/cloud-tools.ts` and routes it at the self-hosted files service.
+ *   Only an import binding from a forbidden module makes it a breach.
+ * - `config`  — an env or dotdir key. There is no import to look for, so any
+ *   occurrence outside a comment counts.
+ */
+type RuntimePatternKind = "module" | "symbol" | "config";
+
 const RUNTIME_PATTERNS = [
-  { pattern: "@hasna/cloud", message: "Shared @hasna/cloud runtime reference is forbidden" },
-  { pattern: "open-cloud", message: "Shared open-cloud runtime reference is forbidden" },
-  { pattern: "cloud-mcp", message: "Legacy cloud-mcp runtime surface is forbidden" },
-  { pattern: "registerCloudTools", message: "Legacy registerCloudTools runtime surface is forbidden" },
-  { pattern: "registerCloudCommands", message: "Legacy registerCloudCommands runtime surface is forbidden" },
-  { pattern: ".hasna/cloud", message: "Legacy .hasna/cloud runtime config is forbidden" },
-  { pattern: "HASNA_CLOUD_", message: "Shared HASNA_CLOUD_* runtime config is forbidden" },
-  { pattern: "HASNA_RDS_PASSWORD", message: "Legacy shared RDS credential config is forbidden" }
-] as const;
+  { pattern: "@hasna/cloud", kind: "module", message: "Shared @hasna/cloud runtime reference is forbidden" },
+  { pattern: "open-cloud", kind: "module", message: "Shared open-cloud runtime reference is forbidden" },
+  { pattern: "cloud-mcp", kind: "module", message: "Legacy cloud-mcp runtime surface is forbidden" },
+  { pattern: "registerCloudTools", kind: "symbol", message: "Legacy registerCloudTools runtime surface is forbidden" },
+  { pattern: "registerCloudCommands", kind: "symbol", message: "Legacy registerCloudCommands runtime surface is forbidden" },
+  { pattern: ".hasna/cloud", kind: "config", message: "Legacy .hasna/cloud runtime config is forbidden" },
+  { pattern: "HASNA_CLOUD_", kind: "config", message: "Shared HASNA_CLOUD_* runtime config is forbidden" },
+  { pattern: "HASNA_RDS_PASSWORD", kind: "config", message: "Legacy shared RDS credential config is forbidden" }
+] as const satisfies ReadonlyArray<{ pattern: string; kind: RuntimePatternKind; message: string }>;
+
+const MODULE_PATTERNS = RUNTIME_PATTERNS.filter((entry) => entry.kind === "module");
+
+/**
+ * The guard test every remediated repo is required to ship.
+ *
+ * It exists to assert the retired runtime is absent, which it can only do by
+ * naming it. Scoring those assertions as breaches meant the sanctioned fix
+ * tripped the gate meant to certify it — `@hasna/connectors@1.4.0` failed on
+ * its own guard test three times over. Allowlisting it here, once, is what
+ * stops twelve repos from each inventing a local exemption.
+ *
+ * The exemption covers MENTIONS only. A real `import ... from "@hasna/cloud"`
+ * in this file is still a finding, and the file cannot create an install edge
+ * without `package.json` or `bun.lock` showing it — both checked separately.
+ */
+const NO_CLOUD_GUARD_TEST = /(?:^|\/)no-cloud-boundary\.test\.(?:[cm]?[jt]sx?|[cm]ts)$/;
+
+function isNoCloudGuardTest(path: string): boolean {
+  return NO_CLOUD_GUARD_TEST.test(path.replaceAll("\\", "/"));
+}
 
 const DECLARATION_FILE_MARKERS = [
   "FORBIDDEN_SHARED_CLOUD_RUNTIMES",
@@ -138,7 +175,6 @@ function dependencyFindings(file: ScanFile): NoCloudFinding[] {
   }
   const pkg = parsed;
   const packageName = typeof pkg.name === "string" ? pkg.name : undefined;
-  const sections = ["dependencies", "optionalDependencies", "peerDependencies", "devDependencies"];
   const findings: NoCloudFinding[] = [];
 
   if (packageName && FORBIDDEN_SHARED_CLOUD_RUNTIMES.includes(packageName as (typeof FORBIDDEN_SHARED_CLOUD_RUNTIMES)[number])) {
@@ -154,23 +190,21 @@ function dependencyFindings(file: ScanFile): NoCloudFinding[] {
     });
   }
 
-  for (const section of sections) {
-    const deps = pkg[section];
-    if (!deps || typeof deps !== "object") continue;
-    for (const runtime of FORBIDDEN_SHARED_CLOUD_RUNTIMES) {
-      if (Object.prototype.hasOwnProperty.call(deps, runtime)) {
-        findings.push({
-          id: `finding_${stableId(`${file.path}:${section}:${runtime}`)}`,
-          kind: "package_manifest",
-          severity: section === "devDependencies" ? "high" : "critical",
-          path: file.path,
-          packageName,
-          pattern: runtime,
-          message: `Forbidden shared cloud runtime dependency in ${section}`,
-          evidenceRefs: []
-        });
-      }
-    }
+  // Every section that can pull the package into an install, not just the four
+  // version maps: `overrides`/`resolutions` pin a package without naming it as
+  // a dependency, and `bundleDependencies`/`trustedDependencies` are arrays of
+  // names. All of them are edges; only some of them were being read.
+  for (const edge of manifestEdges(pkg, FORBIDDEN_SHARED_CLOUD_RUNTIMES)) {
+    findings.push({
+      id: `finding_${stableId(`${file.path}:${edge.section}:${edge.packageName}`)}`,
+      kind: "package_manifest",
+      severity: edge.scope === "production" ? "critical" : "high",
+      path: file.path,
+      packageName,
+      pattern: edge.packageName,
+      message: `Forbidden shared cloud runtime dependency in ${edge.section}`,
+      evidenceRefs: []
+    });
   }
 
   return findings;
@@ -208,28 +242,89 @@ function pathFindings(file: ScanFile, severity: NoCloudFindingSeverity): NoCloud
   return findings;
 }
 
+/**
+ * Runtime-pattern findings for one file, read as source rather than as a byte
+ * stream.
+ *
+ * Comments are masked first. That single change is what clears
+ * `@hasna/connectors@1.4.0`, whose only `@hasna/cloud` reference in `src/` is
+ * the JSDoc line recording that the import was REMOVED.
+ *
+ * Each pattern yields at most one finding, and the reason is recorded in the
+ * message so a reviewer can tell an import from a mention without re-running
+ * anything.
+ */
 function textFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageName?: string): NoCloudFinding[] {
   if (isAppCloudManifestDocument(file)) return [];
   if (isNoCloudDeclarationFile(file, packageName)) return [];
+  const masked = maskCommentsForPath(file.text, file.path);
+  const guardTest = isNoCloudGuardTest(file.path);
   const findings: NoCloudFinding[] = [];
-  for (const { pattern, message } of RUNTIME_PATTERNS) {
-    if (!file.text.includes(pattern)) continue;
+
+  for (const { pattern, kind, message } of RUNTIME_PATTERNS) {
+    let reason: string | null = null;
+    if (kind === "symbol") {
+      // Bound from a forbidden module, or it is somebody else's function.
+      const bound = MODULE_PATTERNS.some((module) => importedBindings(masked, module.pattern).has(pattern));
+      if (bound) reason = "imported binding";
+    } else if (kind === "module" && importsModule(masked, pattern)) {
+      reason = "module import";
+    } else if (!guardTest && masked.includes(pattern)) {
+      reason = "source reference";
+    }
+    if (!reason) continue;
     findings.push({
       id: `finding_${stableId(`${file.path}:${pattern}`)}`,
       kind: file.kind,
       severity,
       path: file.path,
       pattern,
-      message,
+      message: `${message} (${reason})`,
       evidenceRefs: []
     });
   }
   return findings;
 }
 
+/** A dependency edge, rendered as a finding. */
+function edgeFinding(edge: DependencyEdge, path: string, kind: NoCloudCheckKind, packageName?: string): NoCloudFinding {
+  const via = edge.path.length > 1 ? ` via ${edge.path.join(" -> ")}` : "";
+  const where = edge.section ? ` (root ${edge.section})` : "";
+  return {
+    id: `finding_${stableId(`${path}:edge:${edge.scope}:${edge.packageName}`)}`,
+    kind,
+    severity: edge.scope === "production" ? "critical" : "high",
+    path,
+    ...(packageName ? { packageName } : {}),
+    pattern: edge.packageName,
+    message: `Forbidden shared cloud runtime is an installed ${edge.scope} dependency${via}${where}`,
+    evidenceRefs: []
+  };
+}
+
+const BUN_LOCKFILE = "bun.lock";
+
+/**
+ * Lockfile findings.
+ *
+ * `bun.lock` is walked as a graph — see `src/dependency-edge.ts` for why a
+ * substring is not the same question as an edge. Any other lockfile keeps the
+ * old text scan, because we have no parser for it and going quiet on an
+ * unparsed lockfile is the failure mode this whole change exists to remove.
+ */
+function lockfileFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageName?: string): NoCloudFinding[] {
+  if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity, packageName);
+  const edges = lockfileEdges(file.text, FORBIDDEN_SHARED_CLOUD_RUNTIMES, packageName);
+  if (edges === null) return textFindings(file, severity, packageName);
+  return edges.map((edge) => edgeFinding(edge, file.path, "lockfile", packageName));
+}
+
 function scanFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageName?: string): NoCloudFinding[] {
   if (file.kind === "package_manifest") {
     return [...dependencyFindings(file), ...pathFindings(file, severity), ...textFindings(file, "high", packageName)];
+  }
+  if (file.kind === "lockfile") {
+    return [...pathFindings(file, severity), ...lockfileFindings(file, severity, packageName)];
   }
   return [...pathFindings(file, severity), ...textFindings(file, severity, packageName)];
 }
