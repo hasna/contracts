@@ -2,6 +2,44 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.8.3] - 2026-07-27
+
+### `no-cloud-scan` stops reporting its own denylist as the consumer's breach
+
+`FORBIDDEN_SHARED_CLOUD_RUNTIMES` is a pair of string literals, so any repo that
+bundles `@hasna/contracts` without externalising it gets
+`["@hasna/cloud", "open-cloud"]` **inlined into its build output**. The scanner
+read its own denylist back out of the consumer's artifact and scored it as the
+consumer's breach — permanently, with nothing the consumer could remove to fix
+it. The tell was `open-cloud` reported against repos that never used it.
+
+- **The exemption is keyed on the array's VALUE, not on a variable name.** An
+  earlier spelling matched the identifier `FORBIDDEN_SHARED_CLOUD_RUNTIMES`
+  preceded by `const`/`let`/`var`, and that recognised almost nothing a bundler
+  emits: bun's lazy `__esm` wrapper hoists the declaration and emits a bare
+  assignment with no keyword, and `--minify-identifiers` renames the variable and
+  folds it into a comma sequence with no trailing `;`. Both real shapes are now
+  pinned as tests. Measured across 1656 build-output files in 41 consumer repos:
+  18 of 18 files whose only hits were the two module names are cleared; the other
+  4 are `registerCloudTools`/`registerCloudCommands` in a repo that defines its
+  own, which is a `symbol` pattern and was never a bare-mention finding.
+- **The exemption applies to build output only, so no repo can exempt itself.**
+  An authored `src/loader.ts` that writes the same array and then loads through
+  it — `await import(NAMES[0])` — is unchanged and still fails, as is the same
+  file inside a packed tarball. A folder named `dist` **under** `src/` is
+  authored, not output; authored-looking structure under build output
+  (`dist/src/index.js`, which `tsc --rootDir .` emits) is still output.
+- **Only the inlined literal is blanked, in place, with same-length spaces.** A
+  second mention on the same minified line, a real `require("@hasna/cloud")`
+  beside it, an externalised `import … from "@hasna/cloud"`, runtime config such
+  as `HASNA_CLOUD_*`, a shorter or reordered or longer array, a TOML array under
+  `dist/`, and any array the code then invokes on
+  (`[…].map((n) => require(n))`, `[…][0]`) all remain findings. `package.json`
+  and `bun.lock` edge checks are untouched, so a real install edge still fails
+  the gate regardless of what the bundle looks like.
+- Every clause above is pinned: 11 of 11 mutations to the new code are caught by
+  `tests/cli.test.ts`, each one verified to have changed the bytes on disk.
+
 ## [0.8.2] - 2026-07-27
 
 ### `no-cloud-scan` closes three blind spots that 0.8.1 opened

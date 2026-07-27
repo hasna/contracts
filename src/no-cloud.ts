@@ -369,6 +369,129 @@ function isNoCloudDeclarationFile(file: ScanFile, packageName?: string): boolean
   return markerCount >= 2;
 }
 
+/**
+ * Directories whose contents are BUILD OUTPUT — emitted by a bundler rather than
+ * written by anyone.
+ *
+ * `lib` is deliberately absent even though `SOURCE_DIRS` lists it: plenty of
+ * repos author directly in `lib/`, and mistaking authored code for output buys a
+ * false negative. Erring toward noise is the correct direction here.
+ */
+const GENERATED_OUTPUT_DIRS = new Set(["bin", "dist", "build", "out", ".output"]);
+
+/**
+ * What a bundler EMITS: a JavaScript or TypeScript module, `.d.ts` included.
+ *
+ * Sitting in `bin/` is not on its own enough to call a file generated. `bin/`
+ * and `build/` routinely hold hand-written shell scripts, and `shouldReadPath`
+ * reads `.sh`, `.yml`, `.toml` and `.env` too. A `bin/deploy.sh` exporting
+ * `HASNA_CLOUD_*` is somebody's decision, not a byte a bundler copied.
+ */
+const BUNDLED_ARTIFACT_FILE = /\.(?:[cm]?[jt]sx?)$/i;
+
+/**
+ * Directories nobody generates INTO — where a `dist` segment underneath is a
+ * folder somebody named, not a build.
+ *
+ * Without this, `src/dist/loader.ts` counted as build output, which is a
+ * self-service exemption: a repo could park authored code one directory deep and
+ * be exempt. Measured before this clause existed — that exact path scanned clean.
+ * Ordering is what separates the two: build output nested under authored source
+ * is authored, while authored-looking structure nested under build output —
+ * `dist/src/index.js`, which `tsc --rootDir .` really does emit — is still
+ * output.
+ *
+ * Kept to the three names that are never a package folder. `app` is deliberately
+ * absent: `app/dist/index.js` is a real build path in a monorepo, and listing it
+ * would trade this bypass back for the false positive #34 is about. Verified
+ * against every build-output file carrying a hit on this fleet — none has a `src`
+ * or `lib` segment above its output directory.
+ */
+const AUTHORED_SOURCE_DIRS = new Set(["src", "lib", "source"]);
+
+/**
+ * Is this path a bundler-emitted module inside build output?
+ *
+ * Directory segments only for the directory test — the basename is excluded so a
+ * FILE called `dist.ts` is still read as the source it is.
+ */
+function isGeneratedOutputPath(path: string): boolean {
+  const normalized = path.replaceAll("\\", "/");
+  if (!BUNDLED_ARTIFACT_FILE.test(normalized)) return false;
+  const dirs = normalized.split("/").slice(0, -1);
+  const output = dirs.findIndex((segment) => GENERATED_OUTPUT_DIRS.has(segment));
+  if (output === -1) return false;
+  return !dirs.slice(0, output).some((segment) => AUTHORED_SOURCE_DIRS.has(segment));
+}
+
+/**
+ * An assigned, single-line ARRAY LITERAL — captured by its VALUE, not by the
+ * name it is assigned to.
+ *
+ * WHY BY VALUE. This scanner's own denylist is a pair of string literals, so any
+ * repo that bundles `@hasna/contracts` without externalising it gets
+ * `["@hasna/cloud", "open-cloud"]` inlined into its output, and the scanner then
+ * read its own denylist back out of the consumer's artifact and scored it as the
+ * consumer's breach. The tell was `open-cloud` reported against repos that never
+ * used it.
+ *
+ * Keying on the identifier `FORBIDDEN_SHARED_CLOUD_RUNTIMES` plus a
+ * `const|let|var` prefix does NOT recognise what bundlers actually emit, and was
+ * measured missing both real shapes on this fleet:
+ *
+ *   - bun's lazy `__esm` wrapper HOISTS the declaration and emits a bare
+ *     assignment: `  FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud", …];`
+ *     with no keyword anywhere near it;
+ *   - `--minify-identifiers` RENAMES it and folds it into a comma sequence:
+ *     `…,Ob=["@hasna/cloud","open-cloud"],pG=…` — no keyword, no original name,
+ *     no trailing `;`.
+ *
+ * The value is the part a bundler cannot rewrite, so the value is what this
+ * matches. Sweep over 1656 build-output files in 41 consumer repos: 18 of 18
+ * files whose only hits were the two module names are cleared by this; the
+ * remaining 4 are `registerCloudTools`/`registerCloudCommands` in a repo that
+ * defines its own, which is a `symbol` pattern and never reached this branch.
+ *
+ * TWO NARROWINGS, both load-bearing:
+ *
+ *   - `=` immediately before the literal, so it is a VALUE BEING STORED. A
+ *     literal passed straight into a call — `loadAll(["@hasna/cloud", …])` — is
+ *     not a declaration and stays visible. The lookbehind rejects `==`, `===`,
+ *     `!==`, `<=`, `>=`; `=>` cannot match because `>` is not whitespace.
+ *   - nothing may be INVOKED on the literal. `[…].map((name) => require(name))`
+ *     and `[…][0]` turn the array into a load, which is the one move that makes
+ *     these strings live again, so `.`, `(` and `[` after the closing bracket
+ *     withdraw the mask.
+ */
+const ASSIGNED_ARRAY_LITERAL = /(?<![=!<>])=[^\S\r\n]*\[([^[\]\r\n]*)\](?![^\S\r\n]*[.(\[])/g;
+
+/** The literal's elements, or `null` for any element that is not a plain string literal. */
+function arrayLiteralStrings(elements: string): (string | null)[] {
+  return elements.split(",").map((element) => {
+    const literal = element.trim();
+    const quote = literal[0];
+    if ((quote !== '"' && quote !== "'") || literal.at(-1) !== quote || literal.length < 2) return null;
+    return literal.slice(1, -1);
+  });
+}
+
+/**
+ * Blank out inlined copies of this package's denylist, in place.
+ *
+ * Same-length spaces, so every other byte keeps its offset and no two tokens
+ * merge: a second mention, or a real import, elsewhere on the same minified line
+ * stays exactly where the scanner can still see it.
+ */
+function maskVendoredDenylistLiterals(text: string): string {
+  return text.replace(ASSIGNED_ARRAY_LITERAL, (assignment, elements: string) => {
+    const values = arrayLiteralStrings(elements);
+    const isVendoredDenylist =
+      values.length === FORBIDDEN_SHARED_CLOUD_RUNTIMES.length &&
+      values.every((value, index) => value === FORBIDDEN_SHARED_CLOUD_RUNTIMES[index]);
+    return isVendoredDenylist ? assignment.replace(/[^\r\n]/g, " ") : assignment;
+  });
+}
+
 function pathFindings(file: ScanFile, severity: NoCloudFindingSeverity): NoCloudFinding[] {
   const findings: NoCloudFinding[] = [];
   for (const { pattern, message } of RUNTIME_PATTERNS) {
@@ -410,6 +533,21 @@ function textFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageN
   // or a dotenv file has no import statements, so requiring a binding there
   // drops the check rather than scoping it.
   const codeLike = file.kind === "source_import" || file.kind === "packed_artifact";
+  /**
+   * The text a BARE MENTION is read out of — the vendored denylist blanked, but
+   * ONLY where a bundler could have put it there.
+   *
+   * Scoping this to build output is what stops a repo exempting itself: an
+   * authored `src/loader.ts` that writes the same array and then loads through it
+   * (`await import(NAMES[0])`) is unchanged here, so it stays a finding. Without
+   * the path scope the mask is a self-service exemption in hand-written code.
+   *
+   * `importsModule` and `importedBindings` keep reading the ORIGINAL bytes: an
+   * externalised `import { connect } from "@hasna/cloud"` survives bundling
+   * verbatim and is still critical in `dist/`, as are dependency edges, which
+   * `package.json` and `bun.lock` answer separately.
+   */
+  const bareMentionText = codeLike && isGeneratedOutputPath(file.path) ? maskVendoredDenylistLiterals(masked) : masked;
   const findings: NoCloudFinding[] = [];
 
   for (const { pattern, kind, message } of RUNTIME_PATTERNS) {
@@ -420,7 +558,7 @@ function textFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageN
       if (bound) reason = "imported binding";
     } else if (kind === "module" && importsModule(masked, pattern)) {
       reason = "module import";
-    } else if (!(guardTest && kind === "module") && masked.includes(pattern)) {
+    } else if (!(guardTest && kind === "module") && bareMentionText.includes(pattern)) {
       reason = "source reference";
     }
     if (!reason) continue;
