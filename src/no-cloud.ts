@@ -483,15 +483,38 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
  * re-export. `Module._load` was a fourth and is closed. The scope block at the top
  * of this file enumerates them with the controls that fail.
  *
- * They are MODULE-CLASS ONLY, and that bound comes from the two equality rules
- * rather than from an argument: the only array ever attributed equals the
- * denylist, which holds package names and nothing else, and the only record ever
- * attributed equals a table row entry for entry over an entry set the parser
- * guarantees describes the whole record, so it has no slot to carry a value in.
- * No `config` pattern and no credential env key can ride any of the three. That
- * bound is exactly as strong as the completeness of those two rules — when the
- * record rule was incomplete, a shadowed key carried all three `config` patterns
- * and a credential at once, on a plain assignment, with no aliasing needed.
+ * WHAT BOUNDS THOSE THREE, stated to the width the measurements support and no
+ * wider. It is the two equality rules rather than an argument: the only array ever
+ * attributed equals the denylist, which holds package names and nothing else, and
+ * the only record ever attributed equals a table row entry for entry over an entry
+ * set the parser guarantees describes the whole record. So no ATTACKER-CHOSEN value
+ * can ride any of the three. That bound is exactly as strong as the completeness of
+ * those two rules — when the record rule was incomplete, a shadowed key carried all
+ * three `config` patterns and a credential at once, on a plain assignment, with no
+ * aliasing needed.
+ *
+ * THIS CLAUSE PREVIOUSLY SAID "they are MODULE-CLASS ONLY … no `config` pattern and
+ * no credential env key can ride any of the three", AND THAT WAS FALSE. It is the
+ * same sentence the correction at the top of this file already retired as too
+ * strong, restated here, so the file asserted and refuted the same claim in two
+ * places. Corrected rather than deleted, because the fifth repetition of a wrong
+ * clause is the thing worth leaving a marker on.
+ *
+ * What is actually true: "no attacker-chosen value" is not "no `config` pattern".
+ * The table's own `config` rows SPELL the forbidden env keys, and attributing a row
+ * blanks those spellings, so a read through the inlined genuine table —
+ * `process.env[R[7].pattern]`, the shape written out at the top of this file —
+ * reaches a forbidden key and is not reported. Re-measured here: EXIT=0, 0 findings,
+ * against a control that spells the key literally and fails at EXIT=1. That is a
+ * `config`-class route, and it is available with no aliasing at all, which is also
+ * why it is not one of the three: it does not need them.
+ *
+ * It adds no capability. `process.env[<key assembled from two literals>]` scans
+ * clean with no table present at all, needs no inlined declaration and no
+ * indirection, and is conceded in the scope block above. The table-index read is a
+ * second instance of that same assembled-name blind spot. The honest bound is
+ * therefore about attacker-chosen VALUES, not about pattern CLASSES, and it should
+ * not be restated in class terms a sixth time.
  *
  * The earlier wording here said "bound to one name, rebound to a second", which
  * made the residual sound narrower and harder to reach than it is. Understating it
