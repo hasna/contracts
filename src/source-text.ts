@@ -203,6 +203,29 @@ function calleeBefore(text: string, parenIndex: number): string | null {
 }
 
 /**
+ * What one pass of the lexer learned about the text.
+ *
+ * The token spans and the argument openers come off the SAME bracket stack on
+ * purpose. Deciding "is this collection a call argument" from a second scan
+ * would be a second state machine drifting apart from this one, which is the
+ * class of bug this file's header is about.
+ */
+interface LexResult {
+  tokens: SourceToken[];
+  /**
+   * Indices of the `[` and `{` that open DIRECTLY inside a call's argument
+   * list — the `[` of `f(x, [...])`.
+   *
+   * The INNERMOST enclosing frame decides, and that bound is load-bearing: a
+   * constant declared inside a callback body sits under a call frame too, and
+   * `__commonJS((exports, module) => { var DENY = [...]; })` is what a bundler
+   * emits for every CommonJS module it wraps. Rejecting on any enclosing call
+   * would unattribute those.
+   */
+  callArgumentOpeners: Set<number>;
+}
+
+/**
  * Lex C-family source into its comment and literal spans.
  *
  * Returns `null` when the scan ends inside a string, template, regex or block
@@ -210,7 +233,7 @@ function calleeBefore(text: string, parenIndex: number): string | null {
  * machine lost the thread — JSX text with an apostrophe is the common cause —
  * and the caller must fall back to raw text.
  */
-function lexCLike(text: string): SourceToken[] | null {
+function lexCLike(text: string): LexResult | null {
   const tokens: SourceToken[] = [];
   let index = 0;
   const length = text.length;
@@ -222,6 +245,7 @@ function lexCLike(text: string): SourceToken[] | null {
   const brackets: Array<{ paren: boolean; callee: string | null }> = [];
   const parens: ParenKind[] = [];
   let lastCloseParen: ParenKind | "unbalanced" | null = null;
+  const callArgumentOpeners = new Set<number>();
 
   const enclosingCallees = (): ReadonlyArray<string | null> => brackets.filter((frame) => frame.paren).map((frame) => frame.callee);
 
@@ -308,6 +332,10 @@ function lexCLike(text: string): SourceToken[] | null {
     }
 
     if (character === "[" || character === "{") {
+      // A control head and a grouping call nothing, so neither makes what they
+      // enclose an argument; a named callee and `UNNAMEABLE_CALLEE` both do.
+      const enclosing = brackets[brackets.length - 1];
+      if (enclosing?.paren === true && enclosing.callee !== null) callArgumentOpeners.add(index);
       brackets.push({ paren: false, callee: null });
       lastCloseParen = null;
       index += 1;
@@ -340,15 +368,15 @@ function lexCLike(text: string): SourceToken[] | null {
   }
 
   if (templateDepths.length > 0) return null;
-  return tokens;
+  return { tokens, callArgumentOpeners };
 }
 
 /** Mask C-family comments, preserving length. `null` when the lexer lost the thread. */
 function maskCLike(text: string): string | null {
-  const tokens = lexCLike(text);
-  if (tokens === null) return null;
+  const lexed = lexCLike(text);
+  if (lexed === null) return null;
   const chars = toUnits(text);
-  for (const token of tokens) {
+  for (const token of lexed.tokens) {
     if (token.kind === "comment") blank(chars, token.start, token.end);
   }
   return chars.join("");
@@ -578,12 +606,12 @@ export function mentionsCannotLoad(text: string, path: string, moduleName: strin
   // without a real parser — see `commentSyntaxForPath`. So a JSX guard test
   // cannot claim the exemption at all.
   if (commentSyntaxForPath(path) !== "c-like") return false;
-  const tokens = lexCLike(text);
-  if (tokens === null) return false;
+  const lexed = lexCLike(text);
+  if (lexed === null) return false;
 
   for (let at = text.indexOf(moduleName); at !== -1; at = text.indexOf(moduleName, at + 1)) {
     const end = at + moduleName.length;
-    const token = tokens.find((candidate) => at >= candidate.start && end <= candidate.end);
+    const token = lexed.tokens.find((candidate) => at >= candidate.start && end <= candidate.end);
     // Prose. The caller already masked it; this loop reads raw text so the
     // offsets line up with the lexer.
     if (token?.kind === "comment") continue;
@@ -650,6 +678,8 @@ const INLINE_DATA_WINDOW = 4096;
 const IDENTIFIER_TAIL = /([A-Za-z_$][\w$]*)\s*$/;
 /** `readonly` is a type-only modifier, so what follows it is a type, not a value. */
 const TYPE_POSITION_KEYWORD = /(?:^|[^\w$])readonly$/;
+/** A record key, as it is written immediately before the `:` of its entry. */
+const RECORD_KEY_TAIL = /(?:[A-Za-z_$][\w$]*|"[^"\n]*"|'[^'\n]*')\s*$/;
 
 /** Read one string literal. Backticks count, but only without a substitution. */
 function readStringLiteral(text: string, start: number): { value: string; end: number } | null {
@@ -759,6 +789,20 @@ function parseInlineData(text: string, start: number): InlineDataNode | null {
 }
 
 /**
+ * Is the text before a `:` the KEY of a record entry?
+ *
+ * The key on its own does not settle it, because a ternary alternate is written
+ * the same way: `cond ? fallback : [...]`. What precedes the key does — the `{`
+ * that opens the record, or the `,` that ends the previous entry.
+ */
+function recordKeyPrecedes(before: string): boolean {
+  const key = RECORD_KEY_TAIL.exec(before);
+  if (key === null) return false;
+  const head = before.slice(0, key.index).replace(/\s+$/, "");
+  return head.endsWith("{") || head.endsWith(",");
+}
+
+/**
  * Is this collection sitting where data sits, and does nothing read a member
  * out of it on the spot?
  *
@@ -769,8 +813,19 @@ function parseInlineData(text: string, start: number): InlineDataNode | null {
  * after `=`, or as an element or property of another collection — and the
  * character after it must not be the `[`, `(`, `.` or `?.` that would consume
  * it in place.
+ *
+ * WHY THE BRACKET STACK AND NOT JUST THE CHARACTER BEFORE THE `[`. One character
+ * can only see the FIRST argument of a call. `load([...])` was rejected on the
+ * `(`, while `load(cfg, [...])`, `register("app", [...])` and
+ * `loadAll(cfg, [...]).then(run)` landed on `,` and were read as stored
+ * constants — attributed, and blanked. An argument is the callee's to do what it
+ * likes with, and `list.forEach((m) => __require(m))` one module away is a load
+ * whose specifier never appears in specifier position: the same shape as the
+ * `for (const m of [...]) __require(m)` the position rule exists to reject.
+ * `callArgumentOpeners` answers it for every argument position at once.
  */
-function isInertPosition(text: string, start: number, end: number): boolean {
+function isInertPosition(text: string, start: number, end: number, callArgumentOpeners: ReadonlySet<number>): boolean {
+  if (callArgumentOpeners.has(start)) return false;
   const before = text.slice(Math.max(0, start - 64), start).replace(/\s+$/, "");
   if (before !== "") {
     const last = before[before.length - 1]!;
@@ -789,6 +844,10 @@ function isInertPosition(text: string, start: number, end: number): boolean {
     // a CALL argument is not — that is `require([...][0])`'s outer shape.
     if (last === "=" && /[=!<>]$/.test(before.slice(0, -1))) return false;
     if (last === "(" && IDENTIFIER_TAIL.test(before.slice(0, -1))) return false;
+    // `:` must introduce a record VALUE. A ternary alternate ends on the same
+    // character and stores nothing, so the key has to be there and has to sit
+    // where a key sits.
+    if (!typePosition && last === ":" && !recordKeyPrecedes(before.slice(0, -1).replace(/\s+$/, ""))) return false;
   }
   const after = skipSpace(text, end);
   const next = text.slice(after, after + 2);
@@ -805,9 +864,12 @@ function boundNameBefore(text: string, start: number): string | null {
 /**
  * The outermost inert collections that contain any of `needles`.
  *
- * Driven from the occurrences rather than from every bracket in the file, so
- * the cost is proportional to how many times the caller's names appear — a
- * handful — and not to the size of a bundle.
+ * Driven from the occurrences rather than from every bracket in the file. A
+ * file that names none of them costs one substring search per needle and
+ * nothing else; a file that names one adds a single O(text) lex, which is what
+ * tells a stored constant from a call ARGUMENT. Everything after that is
+ * proportional to how many times the caller's names appear — a handful — and
+ * not to the size of a bundle.
  *
  * OUTERMOST matters for `boundName`: the record `{ pattern: "…" }` is an
  * element of `RUNTIME_PATTERNS`, and it is the array that carries the name a
@@ -816,8 +878,18 @@ function boundNameBefore(text: string, start: number): string | null {
 export function inlineDataRegions(text: string, needles: readonly string[]): InlineDataRegion[] {
   const regions: InlineDataRegion[] = [];
   const seen = new Set<number>();
+  // Whether a collection is an ARGUMENT is a question about brackets, and the
+  // lexer is what tracks them. It is O(text) where everything else here is
+  // proportional to the occurrences, so it runs at the FIRST one rather than on
+  // arrival: a file naming none of these — most of a tree — is never lexed.
+  let lexed: LexResult | null | undefined;
   for (const needle of needles) {
     for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {
+      if (lexed === undefined) lexed = lexCLike(text);
+      // A text the lexer cannot read yields no regions at all: nothing is
+      // attributed, every occurrence in it is reported, which is the direction
+      // the rest of this module fails in.
+      if (lexed === null) return regions;
       const floor = Math.max(0, at - INLINE_DATA_WINDOW);
       const openers: number[] = [];
       for (let back = at; back >= floor; back -= 1) {
@@ -841,7 +913,7 @@ export function inlineDataRegions(text: string, needles: readonly string[]): Inl
         if (!(root.start <= at && at + needle.length <= root.end)) continue;
         // Enclosing, so it is the answer for this occurrence either way.
         if (seen.has(opener)) break;
-        if (!isInertPosition(text, root.start, root.end)) break;
+        if (!isInertPosition(text, root.start, root.end, lexed.callArgumentOpeners)) break;
         seen.add(opener);
         regions.push({ root, boundName: boundNameBefore(text, root.start), start: root.start, end: root.end });
         break;
@@ -882,6 +954,66 @@ export function inlineDataNodes(node: InlineDataNode): InlineDataNode[] {
 const LOAD_CALLEE = String.raw`(?:^|[^\w$])(?:_*(?:import|require)|createRequire|Module\s*\.\s*_load)`;
 
 /**
+ * How far past a load call's `(` we look for the `)` that closes it.
+ *
+ * A bound, not a guess. Reading to the end of the file whenever the brackets do
+ * not balance — one `(` inside a regex character class is enough — would put
+ * every identifier in the bundle inside "the argument list" and withdraw every
+ * attribution in it. An argument list longer than this is not a call this rule
+ * can read.
+ */
+const LOAD_ARGUMENT_WINDOW = 4096;
+
+/**
+ * The text between a call's `(` and the `)` that closes it.
+ *
+ * `[^)]*` stopped at the FIRST `)`, so `__require(norm(base), DENY[0])` handed
+ * the bound-name test `norm(base` and nothing else. One nested call in an
+ * earlier argument was the whole of what it took: the array it should have
+ * withdrawn sits in inert position, so the name is the only thing linking it to
+ * the load.
+ *
+ * String and template bodies are skipped for DEPTH only — their text stays in
+ * the slice. A name that appears inside a literal can only ADD a withdrawal, and
+ * a withdrawal only ever adds findings, which is the direction this module fails
+ * in. An unreadable literal is read as an ordinary character rather than
+ * abandoning the scan, so one stray apostrophe cannot decide this either.
+ */
+function loadCallArguments(text: string, open: number): string {
+  const limit = Math.min(text.length, open + LOAD_ARGUMENT_WINDOW);
+  let depth = 0;
+  for (let index = open; index < limit; index += 1) {
+    const character = text[index]!;
+    if (character === '"' || character === "'" || character === "`") {
+      const literalEnd = character === "`" ? scanTemplateLiteral(text, index) : scanQuoted(text, index, character);
+      if (literalEnd !== null) {
+        index = literalEnd - 1;
+        continue;
+      }
+    }
+    if (character === "(" || character === "[" || character === "{") depth += 1;
+    else if (character === ")" || character === "]" || character === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(open + 1, index);
+    }
+  }
+  return text.slice(open + 1, limit);
+}
+
+/** Index just past the backtick that closes the template at `start`, or null. */
+function scanTemplateLiteral(text: string, start: number): number | null {
+  for (let index = start + 1; index < text.length; index += 1) {
+    const character = text[index]!;
+    if (character === "\\") {
+      index += 1;
+      continue;
+    }
+    if (character === "`") return index + 1;
+  }
+  return null;
+}
+
+/**
  * Does a load call in this text mention `name`?
  *
  * The companion to `isInertPosition`: that one refuses to explain away a
@@ -893,14 +1025,15 @@ const LOAD_CALLEE = String.raw`(?:^|[^\w$])(?:_*(?:import|require)|createRequire
  * specifier can arrive.
  */
 export function loadCallMentions(text: string, name: string): boolean {
-  const calls = new RegExp(`${LOAD_CALLEE}\\s*\\(([^)]*)`, "g");
+  const calls = new RegExp(`${LOAD_CALLEE}\\s*\\(`, "g");
   // Whole identifier, not a substring: `DENYLIST` is not `DENY`. The argument is
   // padded so the leading boundary always has a character to match — reading it
   // straight after the `(` left nothing there, and the check returned false for
   // the one shape it exists to catch, `__require(DENY[0])`.
   const bounded = new RegExp(`[^\\w$]${escapeRegex(name)}(?![\\w$])`);
   for (const match of text.matchAll(calls)) {
-    if (bounded.test(` ${match[1] ?? ""}`)) return true;
+    const open = (match.index ?? 0) + match[0].length - 1;
+    if (bounded.test(` ${loadCallArguments(text, open)}`)) return true;
   }
   return false;
 }
