@@ -309,7 +309,14 @@ function addressCandidates(view: string, codeLike: boolean): string[] {
   return found;
 }
 
-function isReservedIpv4(value: string): boolean {
+/**
+ * Is this dotted quad an address the specifications say is not a real place?
+ *
+ * Exported for `tests/source-endpoint-hostname-guard.test.ts`, which applies the
+ * same reserved-address rule at a threshold of one. Two definitions of "reserved"
+ * would drift, and the one that drifted looser would be the one nobody noticed.
+ */
+export function isReservedIpv4(value: string): boolean {
   const parts = value.split(".").map(Number);
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
   const [a, b, c] = parts as [number, number, number, number];
@@ -325,7 +332,14 @@ function isReservedIpv4(value: string): boolean {
   return false;
 }
 
-function isReservedHostname(hostname: string): boolean {
+/**
+ * Is this name one the specifications reserve as NOT REAL?
+ *
+ * Exported for the same reason as {@link isReservedIpv4}: the sibling source
+ * guard needs the identical rule, and a second copy of RFC 2606 is a second
+ * thing to forget to update.
+ */
+export function isReservedHostname(hostname: string): boolean {
   const lower = hostname.toLowerCase();
   if (RESERVED_DOMAINS.has(lower)) return true;
   const tld = lower.slice(lower.lastIndexOf(".") + 1);
@@ -455,7 +469,7 @@ export interface ArtifactScanReport {
  * the KIND and a short salted digest, which is stable within one report (so two
  * findings can be told apart) and useless outside it.
  */
-function redact(entry: string, kind: AssetInventoryKind): string {
+export function redact(entry: string, kind: AssetInventoryKind): string {
   // Labelled by the FINDING's kind, not by guessing from the value: a `domain`
   // finding printed `<host:…>`, which is merely confusing rather than unsafe,
   // but a report nobody trusts to say what it means gets skimmed.
