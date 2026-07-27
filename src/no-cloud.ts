@@ -13,7 +13,6 @@ import {
   commentSyntaxForPath,
   importedBindings,
   importsModule,
-  inlineDataNodes,
   inlineDataRegions,
   loadCallMentions,
   maskCommentsForPath,
@@ -369,7 +368,18 @@ function withoutInlinedDeclarations(masked: string, path: string): string {
     // A collection stored under a name that a load call also names is a
     // laundering route, not a declaration. Withdraw the whole region.
     if (region.boundName !== null && loadCallMentions(masked, region.boundName)) continue;
-    for (const node of inlineDataNodes(region.root)) {
+    // The region ROOT, or a direct element of a root array — not an arbitrary
+    // node anywhere inside it.
+    //
+    // This is what this package actually emits: the denylist is a bare assigned
+    // array, and `RUNTIME_PATTERNS` is an assigned array whose ELEMENTS are the
+    // rows. Nothing it emits buries either shape under a property key. Walking
+    // the whole tree instead would have attributed
+    // `var schema = { forbidden: ["…", "…"] };` — a consumer's own object, which
+    // this package never writes. It is reachable only through `schema`, and the
+    // bound-name check above already covers a load through that name, so the
+    // looser rule was not unsafe so much as unearned. Claim the shapes we emit.
+    for (const node of [region.root, ...(region.root.kind === "array" ? region.root.items : [])]) {
       if (isOwnPatternDeclaration(node)) spans.push({ start: node.start, end: node.end });
     }
   }
@@ -515,7 +525,7 @@ function pathFindings(file: ScanFile, severity: NoCloudFindingSeverity): NoCloud
  */
 function textFindings(file: ScanFile, severity: NoCloudFindingSeverity): NoCloudFinding[] {
   if (isAppCloudManifestDocument(file)) return [];
-  const masked = withoutInlinedDeclarations(maskCommentsForPath(file.text, file.path), file.path);
+  const masked = maskCommentsForPath(file.text, file.path);
   // The exemption is withdrawn from a "guard test" that can load a module at
   // all — the one move that turns a mention into a real load, and the one thing
   // a genuine guard test never does.
@@ -524,6 +534,18 @@ function textFindings(file: ScanFile, severity: NoCloudFindingSeverity): NoCloud
   // or a dotenv file has no import statements, so requiring a binding there
   // drops the check rather than scoping it.
   const codeLike = file.kind === "source_import" || file.kind === "packed_artifact";
+  /**
+   * The text a BARE MENTION is read out of, and ONLY a bare mention.
+   *
+   * `importsModule` and `importedBindings` below keep reading the ORIGINAL
+   * masked bytes. That asymmetry is deliberate and it is the cheapest safety
+   * margin available here: an externalised `import { connect } from "…"`, or a
+   * `__require("…")`, survives bundling verbatim and is still reported even if
+   * attribution were to over-mask. Dependency edges are answered separately again
+   * by `package.json` and `bun.lock`. So the attributed text is used for exactly
+   * one of four detectors, and the other three are untouched by it.
+   */
+  const bareMentionText = withoutInlinedDeclarations(masked, file.path);
   const findings: NoCloudFinding[] = [];
 
   for (const { pattern, kind, message } of RUNTIME_PATTERNS) {
@@ -534,7 +556,7 @@ function textFindings(file: ScanFile, severity: NoCloudFindingSeverity): NoCloud
       if (bound) reason = "imported binding";
     } else if (kind === "module" && importsModule(masked, pattern)) {
       reason = "module import";
-    } else if (!(guardTest && kind === "module") && masked.includes(pattern)) {
+    } else if (!(guardTest && kind === "module") && bareMentionText.includes(pattern)) {
       reason = "source reference";
     }
     if (!reason) continue;

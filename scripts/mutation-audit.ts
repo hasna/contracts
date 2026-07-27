@@ -169,8 +169,8 @@ const MUTATIONS: Mutation[] = [
     id: "M19-nocloud-comments-are-not-code",
     rule: "a comment is prose; only code is an edge",
     file: "src/no-cloud.ts",
-    from: "  const masked = withoutInlinedDeclarations(maskCommentsForPath(file.text, file.path), file.path);",
-    to: "  const masked = withoutInlinedDeclarations(file.text, file.path);",
+    from: "  const masked = maskCommentsForPath(file.text, file.path);\n  // The exemption is withdrawn",
+    to: "  const masked = file.text;\n  // The exemption is withdrawn",
   },
   {
     id: "M20-nocloud-symbol-needs-an-import",
@@ -330,8 +330,8 @@ const MUTATIONS: Mutation[] = [
     id: "M40-nocloud-allowlist-is-module-names-only",
     rule: "the guard-test allowlist never exempts runtime config",
     file: "src/no-cloud.ts",
-    from: '    } else if (!(guardTest && kind === "module") && masked.includes(pattern)) {',
-    to: "    } else if (!guardTest && masked.includes(pattern)) {",
+    from: '    } else if (!(guardTest && kind === "module") && bareMentionText.includes(pattern)) {',
+    to: "    } else if (!guardTest && bareMentionText.includes(pattern)) {",
   },
   {
     id: "M41-nocloud-specifier-is-matched-anywhere",
@@ -477,8 +477,8 @@ const MUTATIONS: Mutation[] = [
     id: "M71-attrib-happens-at-all",
     rule: "a consumer that bundles this package's own declaration is not in breach of it",
     file: "src/no-cloud.ts",
-    from: "  const masked = withoutInlinedDeclarations(maskCommentsForPath(file.text, file.path), file.path);",
-    to: "  const masked = maskCommentsForPath(file.text, file.path);",
+    from: "  const bareMentionText = withoutInlinedDeclarations(masked, file.path);",
+    to: "  const bareMentionText = masked;",
   },
   {
     id: "M72-attrib-recognised-by-content",

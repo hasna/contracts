@@ -6,6 +6,40 @@ All notable changes to `@hasna/contracts` are documented here.
 
 ### `no-cloud-scan` stops scoring its own inlined declaration, without switching a detector off
 
+SUPERSEDES the first attempt at this in the same unreleased version. That attempt
+is documented below rather than deleted, because two of its measurements are the
+reason this one is shaped the way it is — and because it was merged, so anyone
+reading `git log` will meet it.
+
+WHAT IT GOT RIGHT, and this version keeps: key the mask on the array's VALUE
+rather than on the identifier it is assigned to, because a bundler rewrites the
+name and cannot rewrite the value. Measured there over 1656 build-output files in
+41 consumer repos. Require `=` immediately before the literal so it is a value
+being STORED, and withdraw the mask when `.`, `(` or `[` follows the closing
+bracket, because that turns the array into a load. All three survive here.
+
+WHY IT WAS NOT ENOUGH, measured apples-to-apples — its own bundle, scanned by its
+own scanner: **six findings still standing**, `verdict: failed`, `EXIT=1`.
+
+- **It matched one of the two shapes this package inlines.** The denylist array is
+  the smaller half. `RUNTIME_PATTERNS` is a row per pattern —
+  `{ pattern: "…", kind: "…", message: "…" }` — and it carries ALL EIGHT patterns,
+  including both credential env keys and the legacy config dotdir. Masking the
+  array cleared nothing that the rows did not put back.
+- **Two forbidden names were spelled at finding SITES, in code rather than data.**
+  `pattern === ".hasna/cloud"` and `path.includes(".hasna/cloud")` are not
+  literals a structural rule can attribute to anything, and a bundler inlined them
+  into every consumer just the same. They are read off the pattern table now, and
+  a test asserts no forbidden name appears in `src/no-cloud.ts` outside it.
+- **It was scoped by PATH**, needing `GENERATED_OUTPUT_DIRS`, then
+  `AUTHORED_SOURCE_DIRS` to stop `src/dist/loader.ts` claiming the exemption,
+  then an ordering rule between the two. Attribution reads content, so none of
+  that apparatus exists here and `git mv` cannot change a verdict.
+- **It left the identity-keyed exemption in place** — see below, that one is a
+  live credential blind spot rather than a false positive.
+
+### `no-cloud-scan` stops scoring its own inlined declaration, without switching a detector off
+
 A repo that bundles `@hasna/contracts` without externalising it gets this
 scanner's own pattern declaration copied into its build output. The scanner read
 that copy back and scored it as the consumer's breach — measured against
@@ -80,6 +114,44 @@ Also in this release:
   baseline as "no reading" rather than "green", passes an explicit suite timeout
   so machine load cannot manufacture a red baseline, and accepts `--anchors` to
   check staleness without running the suite.
+
+<!-- superseded, retained for the record: the first 0.8.3 attempt -->
+
+### `no-cloud-scan` stops reporting its own denylist as the consumer's breach
+
+`FORBIDDEN_SHARED_CLOUD_RUNTIMES` is a pair of string literals, so any repo that
+bundles `@hasna/contracts` without externalising it gets
+`["@hasna/cloud", "open-cloud"]` **inlined into its build output**. The scanner
+read its own denylist back out of the consumer's artifact and scored it as the
+consumer's breach — permanently, with nothing the consumer could remove to fix
+it. The tell was `open-cloud` reported against repos that never used it.
+
+- **The exemption is keyed on the array's VALUE, not on a variable name.** An
+  earlier spelling matched the identifier `FORBIDDEN_SHARED_CLOUD_RUNTIMES`
+  preceded by `const`/`let`/`var`, and that recognised almost nothing a bundler
+  emits: bun's lazy `__esm` wrapper hoists the declaration and emits a bare
+  assignment with no keyword, and `--minify-identifiers` renames the variable and
+  folds it into a comma sequence with no trailing `;`. Both real shapes are now
+  pinned as tests. Measured across 1656 build-output files in 41 consumer repos:
+  18 of 18 files whose only hits were the two module names are cleared; the other
+  4 are `registerCloudTools`/`registerCloudCommands` in a repo that defines its
+  own, which is a `symbol` pattern and was never a bare-mention finding.
+- **The exemption applies to build output only, so no repo can exempt itself.**
+  An authored `src/loader.ts` that writes the same array and then loads through
+  it — `await import(NAMES[0])` — is unchanged and still fails, as is the same
+  file inside a packed tarball. A folder named `dist` **under** `src/` is
+  authored, not output; authored-looking structure under build output
+  (`dist/src/index.js`, which `tsc --rootDir .` emits) is still output.
+- **Only the inlined literal is blanked, in place, with same-length spaces.** A
+  second mention on the same minified line, a real `require("@hasna/cloud")`
+  beside it, an externalised `import … from "@hasna/cloud"`, runtime config such
+  as `HASNA_CLOUD_*`, a shorter or reordered or longer array, a TOML array under
+  `dist/`, and any array the code then invokes on
+  (`[…].map((n) => require(n))`, `[…][0]`) all remain findings. `package.json`
+  and `bun.lock` edge checks are untouched, so a real install edge still fails
+  the gate regardless of what the bundle looks like.
+- Every clause above is pinned: 11 of 11 mutations to the new code are caught by
+  `tests/cli.test.ts`, each one verified to have changed the bytes on disk.
 
 ## [0.8.2] - 2026-07-27
 

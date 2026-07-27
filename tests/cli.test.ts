@@ -384,6 +384,398 @@ describe("contracts CLI", () => {
     }
   });
 
+  test("allows vendored contracts denylist declarations in built and packed consumer output", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    const packParent = mkdtempSync(join(tmpdir(), "contracts-pack-parent-"));
+    const packageDir = join(packParent, "package");
+    const outDir = mkdtempSync(join(tmpdir(), "contracts-pack-out-"));
+    const tarball = join(outDir, "hasna-example-0.1.0.tgz");
+    const bundledDeclaration = 'var FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud","open-cloud"];\n';
+    try {
+      for (const root of [dir, packageDir]) {
+        mkdirSync(join(root, "dist"), { recursive: true });
+        writeFileSync(join(root, "package.json"), JSON.stringify({ name: "@hasna/example", version: "0.1.0" }));
+        writeFileSync(join(root, "dist", "index.js"), bundledDeclaration);
+      }
+
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(0);
+      const payload = parseStdoutJson(result);
+      expect(payload.verdict).toBe("passed");
+      expect(payload.checks.find((check: { id: string }) => check.id === "source_runtime")).toMatchObject({
+        kind: "source_import",
+        status: "succeeded"
+      });
+
+      execFileSync("tar", ["-czf", tarball, "-C", packParent, "package"]);
+      const packedResult = runContracts(["no-cloud-scan", "--json", tarball]);
+      expect(packedResult.exitCode).toBe(0);
+      const packedPayload = parseStdoutJson(packedResult);
+      expect(packedPayload.verdict).toBe("passed");
+      expect(packedPayload.checks.find((check: { id: string }) => check.id === "source_runtime")).toMatchObject({
+        kind: "packed_artifact",
+        status: "succeeded"
+      });
+
+      writeFileSync(
+        join(dir, "dist", "index.js"),
+        'var FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud","consumer-runtime"];\n'
+      );
+      const nearMatchResult = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(nearMatchResult.exitCode).toBe(1);
+      expect(
+        parseStdoutJson(nearMatchResult).findings.some(
+          (finding: { path: string; kind: string; severity: string; pattern: string }) =>
+            finding.path === "dist/index.js" &&
+            finding.kind === "source_import" &&
+            finding.severity === "high" &&
+            finding.pattern === "@hasna/cloud"
+        )
+      ).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(packParent, { recursive: true, force: true });
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
+  test("still rejects bundled imports beside vendored contracts denylist declarations", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    const packParent = mkdtempSync(join(tmpdir(), "contracts-pack-parent-"));
+    const packageDir = join(packParent, "package");
+    const outDir = mkdtempSync(join(tmpdir(), "contracts-pack-out-"));
+    const tarball = join(outDir, "hasna-example-0.1.0.tgz");
+    const bundledImport =
+      'var FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud","open-cloud"];var cloud = require("@hasna/cloud");\n' +
+      "cloud.registerCloudTools();\n";
+    try {
+      for (const root of [dir, packageDir]) {
+        mkdirSync(join(root, "dist"), { recursive: true });
+        writeFileSync(join(root, "package.json"), JSON.stringify({ name: "@hasna/example", version: "0.1.0" }));
+        writeFileSync(join(root, "dist", "index.js"), bundledImport);
+        writeFileSync(
+          join(root, "dist", "chained.js"),
+          'var FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud","open-cloud"].map((name) => require(name));\n'
+        );
+      }
+
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(1);
+      const findings = parseStdoutJson(result).findings;
+      expect(
+        findings.some(
+          (finding: { path: string; kind: string; severity: string; pattern: string; message: string }) =>
+            finding.path === "dist/index.js" &&
+            finding.kind === "source_import" &&
+            finding.severity === "high" &&
+            finding.pattern === "@hasna/cloud" &&
+            finding.message.includes("module import")
+          )
+      ).toBe(true);
+      expect(
+        findings.some(
+          (finding: { path: string; kind: string; severity: string; pattern: string }) =>
+            finding.path === "dist/chained.js" &&
+            finding.kind === "source_import" &&
+            finding.severity === "high" &&
+            finding.pattern === "@hasna/cloud"
+        )
+      ).toBe(true);
+
+      execFileSync("tar", ["-czf", tarball, "-C", packParent, "package"]);
+      const packedResult = runContracts(["no-cloud-scan", "--json", tarball]);
+      expect(packedResult.exitCode).toBe(1);
+      const packedFindings = parseStdoutJson(packedResult).findings;
+      expect(
+        packedFindings.some(
+          (finding: { path: string; kind: string; severity: string; pattern: string; message: string }) =>
+            finding.path === "dist/index.js" &&
+            finding.kind === "packed_artifact" &&
+            finding.severity === "critical" &&
+            finding.pattern === "@hasna/cloud" &&
+            finding.message.includes("module import")
+          )
+      ).toBe(true);
+      expect(
+        packedFindings.some(
+          (finding: { path: string; kind: string; severity: string; pattern: string }) =>
+            finding.path === "dist/chained.js" &&
+            finding.kind === "packed_artifact" &&
+            finding.severity === "critical" &&
+            finding.pattern === "@hasna/cloud"
+        )
+      ).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(packParent, { recursive: true, force: true });
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The vendored-denylist exemption, pinned SHAPE BY SHAPE.
+   *
+   * Keying the exemption on the identifier `FORBIDDEN_SHARED_CLOUD_RUNTIMES`
+   * with a `const|let|var` prefix looked right and recognised almost nothing a
+   * bundler emits — `__esm` hoists the declaration to a bare assignment and
+   * `--minify-identifiers` renames it into a comma sequence. Both of those real
+   * shapes are `accepts` rows below, so narrowing back to a keyword or a name
+   * fails here rather than in a consumer's CI.
+   *
+   * Every `rejects` row is a mutation trap for one clause of the exemption:
+   * drop the length check and `shorter-array` flips; drop the ordered `every`
+   * and `reversed-order` flips; drop the `=` and `object-property` /
+   * `call-argument` flip; drop the trailing `.`/`(`/`[` lookahead and
+   * `chained-require` / `indexed-load` flip; drop the build-output path scope
+   * and `authored-src` / `authored-lib` flip; widen the mask past the first `]`
+   * and `two-arrays-one-line` flips; blank the whole file instead of the span
+   * and `mention-elsewhere` / `config-env` flip.
+   */
+  const vendoredDenylistShapes: {
+    name: string;
+    accepts: boolean;
+    files: Record<string, string>;
+    findings?: { path: string; pattern: string; reason: string }[];
+  }[] = [
+    {
+      name: "accepts: bun __esm hoists the declaration to a bare assignment",
+      accepts: true,
+      files: {
+        "dist/index.js":
+          "var FORBIDDEN_SHARED_CLOUD_RUNTIMES;\nvar init_schemas = __esm(() => {\n  FORBIDDEN_SHARED_CLOUD_RUNTIMES = [\"@hasna/cloud\", \"open-cloud\"];\n});\n"
+      }
+    },
+    {
+      name: "accepts: --minify-identifiers renames it into a comma sequence",
+      accepts: true,
+      files: { "dist/index.js": 'var Sk=x.strict(),Ob=["@hasna/cloud","open-cloud"],pG=b.enum(["aws","gcp"]),qq=1;\n' }
+    },
+    {
+      name: "accepts: exported const in an esm bundle",
+      accepts: true,
+      files: { "dist/index.js": 'export const FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud", "open-cloud"];\n' }
+    },
+    {
+      name: "accepts: single-quoted elements",
+      accepts: true,
+      files: { "dist/index.js": "var names = ['@hasna/cloud', 'open-cloud'];\n" }
+    },
+    {
+      name: "accepts: no trailing semicolon",
+      accepts: true,
+      files: { "dist/index.js": 'var names = ["@hasna/cloud", "open-cloud"]\n' }
+    },
+    {
+      name: "accepts: emitted into bin/ rather than dist/",
+      accepts: true,
+      files: { "bin/cli.js": 'var q=["@hasna/cloud","open-cloud"],z=2;\n' }
+    },
+    {
+      name: "rejects: authored src cannot exempt itself and load through the array",
+      accepts: false,
+      files: {
+        "src/loader.ts":
+          'const FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud", "open-cloud"];\nexport async function load() {\n  await import(FORBIDDEN_SHARED_CLOUD_RUNTIMES[0]!);\n  return require(FORBIDDEN_SHARED_CLOUD_RUNTIMES[1]!);\n}\n'
+      },
+      findings: [
+        { path: "src/loader.ts", pattern: "@hasna/cloud", reason: "source reference" },
+        { path: "src/loader.ts", pattern: "open-cloud", reason: "source reference" }
+      ]
+    },
+    {
+      name: "rejects: a folder named dist UNDER src is a folder somebody named",
+      accepts: false,
+      files: {
+        "src/dist/loader.ts": 'const NAMES = ["@hasna/cloud", "open-cloud"];\nexport const load = () => import(NAMES[0]!);\n'
+      },
+      findings: [
+        { path: "src/dist/loader.ts", pattern: "@hasna/cloud", reason: "source reference" },
+        { path: "src/dist/loader.ts", pattern: "open-cloud", reason: "source reference" }
+      ]
+    },
+    {
+      name: "accepts: authored-looking structure UNDER build output is still output",
+      accepts: true,
+      files: { "dist/src/index.js": 'var names = ["@hasna/cloud", "open-cloud"];\n' }
+    },
+    {
+      name: "accepts: build output nested in a monorepo package",
+      accepts: true,
+      files: { "packages/consumer/dist/index.js": 'var names = ["@hasna/cloud", "open-cloud"];\n' }
+    },
+    {
+      // DELIBERATE CHANGE from the path-scoped predecessor, which rejected this
+      // because `lib/` is not a build-output directory. Attribution reads content,
+      // so there is no path scope to key on and this copy is attributed wherever
+      // it lands. What replaces the path scope is the pair below: authored code
+      // cannot exempt itself AND reach the runtime, and that holds in `lib/`,
+      // `src/` and `dist/` alike rather than only outside build output.
+      name: "accepts: a pure data copy of the denylist is attributed wherever it lands",
+      accepts: true,
+      files: { "lib/names.ts": 'const names = ["@hasna/cloud", "open-cloud"];\nexport const first = names[0];\n' }
+    },
+    {
+      name: "rejects: authored lib/ cannot exempt itself and load through the array",
+      accepts: false,
+      files: {
+        "lib/names.ts":
+          'const names = ["@hasna/cloud", "open-cloud"];\nexport const load = () => import(names[0]!);\n'
+      },
+      findings: [
+        { path: "lib/names.ts", pattern: "@hasna/cloud", reason: "source reference" },
+        { path: "lib/names.ts", pattern: "open-cloud", reason: "source reference" }
+      ]
+    },
+    {
+      name: "rejects: the literal is invoked on, which turns it into a load",
+      accepts: false,
+      files: { "dist/chained.js": 'var mods = ["@hasna/cloud", "open-cloud"].map((name) => require(name));\n' },
+      findings: [
+        { path: "dist/chained.js", pattern: "@hasna/cloud", reason: "source reference" },
+        { path: "dist/chained.js", pattern: "open-cloud", reason: "source reference" }
+      ]
+    },
+    {
+      name: "rejects: the literal is indexed and the element loaded",
+      accepts: false,
+      files: { "dist/idx.js": 'var first = ["@hasna/cloud", "open-cloud"][0];\nrequire(first);\n' },
+      findings: [
+        { path: "dist/idx.js", pattern: "@hasna/cloud", reason: "source reference" },
+        { path: "dist/idx.js", pattern: "open-cloud", reason: "source reference" }
+      ]
+    },
+    {
+      name: "rejects: passed straight into a call rather than stored",
+      accepts: false,
+      files: { "dist/arg.js": 'loadAll(["@hasna/cloud", "open-cloud"]);\n' },
+      findings: [
+        { path: "dist/arg.js", pattern: "@hasna/cloud", reason: "source reference" },
+        { path: "dist/arg.js", pattern: "open-cloud", reason: "source reference" }
+      ]
+    },
+    {
+      name: "rejects: an object property is not an assignment",
+      accepts: false,
+      files: { "dist/index.js": 'var schema = { forbidden: ["@hasna/cloud", "open-cloud"] };\n' },
+      findings: [
+        { path: "dist/index.js", pattern: "@hasna/cloud", reason: "source reference" },
+        { path: "dist/index.js", pattern: "open-cloud", reason: "source reference" }
+      ]
+    },
+    {
+      name: "rejects: a shorter array is the consumer's own list",
+      accepts: false,
+      files: { "dist/index.js": 'var names = ["@hasna/cloud"];\n' },
+      findings: [{ path: "dist/index.js", pattern: "@hasna/cloud", reason: "source reference" }]
+    },
+    {
+      name: "rejects: the same two names in the other order",
+      accepts: false,
+      files: { "dist/index.js": 'var names = ["open-cloud", "@hasna/cloud"];\n' },
+      findings: [
+        { path: "dist/index.js", pattern: "@hasna/cloud", reason: "source reference" },
+        { path: "dist/index.js", pattern: "open-cloud", reason: "source reference" }
+      ]
+    },
+    {
+      name: "rejects: a superset that also names a third forbidden runtime",
+      accepts: false,
+      files: { "dist/index.js": 'var names = ["@hasna/cloud", "open-cloud", "cloud-mcp"];\n' },
+      findings: [
+        { path: "dist/index.js", pattern: "@hasna/cloud", reason: "source reference" },
+        { path: "dist/index.js", pattern: "open-cloud", reason: "source reference" },
+        { path: "dist/index.js", pattern: "cloud-mcp", reason: "source reference" }
+      ]
+    },
+    {
+      name: "rejects: a second array on the same line the mask must not reach",
+      accepts: false,
+      files: { "dist/index.js": 'var a = ["@hasna/cloud", "open-cloud"], b = ["open-cloud", "other"];\n' },
+      findings: [{ path: "dist/index.js", pattern: "open-cloud", reason: "source reference" }]
+    },
+    {
+      name: "rejects: a bare mention elsewhere in the same build-output file",
+      accepts: false,
+      files: {
+        "dist/index.js": 'var a = ["@hasna/cloud", "open-cloud"];\nvar registry = { legacy: "open-cloud" };\n'
+      },
+      findings: [{ path: "dist/index.js", pattern: "open-cloud", reason: "source reference" }]
+    },
+    {
+      name: "rejects: runtime config in build output is still config",
+      accepts: false,
+      files: { "dist/index.js": 'var a = ["@hasna/cloud", "open-cloud"];\nprocess.env.HASNA_CLOUD_URL;\n' },
+      findings: [{ path: "dist/index.js", pattern: "HASNA_CLOUD_", reason: "source reference" }]
+    },
+    {
+      name: "rejects: a TOML array under dist/ is config a person wrote, not emit",
+      accepts: false,
+      files: { "dist/settings.toml": 'forbidden = ["@hasna/cloud", "open-cloud"]\n' },
+      findings: [
+        { path: "dist/settings.toml", pattern: "@hasna/cloud", reason: "source reference" },
+        { path: "dist/settings.toml", pattern: "open-cloud", reason: "source reference" }
+      ]
+    },
+    {
+      name: "rejects: an externalised import that survived bundling",
+      accepts: false,
+      files: {
+        "dist/index.js": 'import { connect } from "@hasna/cloud";\nvar a = ["@hasna/cloud", "open-cloud"];\n'
+      },
+      findings: [{ path: "dist/index.js", pattern: "@hasna/cloud", reason: "module import" }]
+    }
+  ];
+
+  for (const shape of vendoredDenylistShapes) {
+    test(`vendored contracts denylist — ${shape.name}`, () => {
+      const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-shape-"));
+      try {
+        writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/consumer-example", version: "0.1.0" }));
+        for (const [rel, contents] of Object.entries(shape.files)) {
+          const full = join(dir, rel);
+          mkdirSync(full.slice(0, full.lastIndexOf("/")), { recursive: true });
+          writeFileSync(full, contents);
+        }
+
+        const result = runContracts(["no-cloud-scan", "--json", dir]);
+        const payload = parseStdoutJson(result);
+        const findings = payload.findings as {
+          path: string;
+          kind: string;
+          severity: string;
+          pattern: string;
+          message: string;
+        }[];
+
+        if (shape.accepts) {
+          expect(result.exitCode).toBe(0);
+          expect(payload.verdict).toBe("passed");
+          expect(findings).toEqual([]);
+          return;
+        }
+
+        expect(result.exitCode).toBe(1);
+        expect(payload.verdict).toBe("failed");
+        for (const expected of shape.findings ?? []) {
+          expect(
+            findings.some(
+              (finding) =>
+                finding.path === expected.path &&
+                finding.kind === "source_import" &&
+                finding.severity === "high" &&
+                finding.pattern === expected.pattern &&
+                finding.message.endsWith(`(${expected.reason})`)
+            )
+          ).toBe(true);
+        }
+        // Nothing beyond the named findings, so a widened match cannot hide here.
+        expect(findings.length).toBe((shape.findings ?? []).length);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
   test("fails no-cloud scan on malformed package manifests", () => {
     const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
     try {
