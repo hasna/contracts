@@ -2,6 +2,85 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.8.3] - 2026-07-27
+
+### `no-cloud-scan` stops scoring its own inlined declaration, without switching a detector off
+
+A repo that bundles `@hasna/contracts` without externalising it gets this
+scanner's own pattern declaration copied into its build output. The scanner read
+that copy back and scored it as the consumer's breach — measured against
+published 0.8.1 and 0.8.2 on a consumer whose only import is
+`scanNoCloudTarget`: **six findings in one `dist/index.js`**, none of them
+removable by the consumer, with `open-cloud` reported against a repo that never
+used it.
+
+**A live credential blind spot is removed at the same time.** 0.8.1 and 0.8.2
+exempted a file by PATH plus package identity plus two "marker" substrings, and
+the exemption returned early for the whole file — which took the three `config`
+patterns with it, and those have no import to look for, so a bare occurrence is
+their only detector. Measured on the published bytes of both versions with a
+byte-identical `dist/no-cloud.js` carrying a planted shared-RDS credential:
+named `@hasna/contracts` it PASSED with zero findings; named anything else the
+same bytes scored two criticals. The one artifact whose credential detectors
+were off was this package's own release. That mechanism is gone.
+
+Two approaches were rejected on measurement before this one landed:
+
+- **Exempting build-output directories.** A `dist`-only tarball leaking the
+  shared RDS credential scored two criticals before and zero after. A
+  false-positive fix that opens a credential blind spot is worse than the bug.
+- **Treating a bare mention with no import specifier as a false positive.**
+  Unsound in both directions. `bun build --external` compiles `require("x")` to
+  `__require("x")` — a real load carrying no specifier the matcher could see —
+  and a source file importing its own `package.json` as JSON makes the bundler
+  inline the whole manifest, so a dependency name sits in the artifact with zero
+  specifiers anywhere in the file. Both are true positives.
+
+What is actually different about the copied declaration is that the text IS this
+scanner's own constant, still in the inert data shape it was written in. That is
+what is matched, and only the characters it spans are dropped:
+
+- the array must equal the denylist element for element, so a subset, a superset
+  and a reordering are all somebody else's data;
+- a row must match one table entry on ALL THREE of `pattern`, `kind` and
+  `message`, so a forbidden name cannot be paired with a message that is not its
+  own — wrapping a credential's env key in a three-key object buys nothing;
+- the collection must sit where data sits, must not be indexed, called or
+  member-accessed in place, and if it is bound to a name, no load call in the
+  file may name that name. `__require(DENY[0])` is a real load whose specifier
+  never appears in specifier position, and that is what these three close.
+
+**No detector is switched off anywhere.** Each occurrence is judged on its own,
+so the same file keeps every check for every other occurrence in it: a consumer
+that bundles this package AND reads the retired runtime's config, or loads it, is
+still reported. No path and no package identity is consulted, so `git mv` cannot
+change a verdict, and a `package.json` is still read whole because attribution is
+restricted to C-family source — the only thing a bundler inlines a JavaScript
+constant into.
+
+Also in this release:
+
+- **Every forbidden name is spelled exactly once, in the pattern table.** Two
+  finding sites re-spelled the legacy config dotdir. Those copies were CODE
+  rather than data, so nothing structural could ever attribute them, and a
+  bundler inlined them into every consumer just the same. A test now asserts no
+  forbidden name appears in `src/no-cloud.ts` outside the table.
+- **`importsModule` and `importedBindings` recognise the bundler's require
+  wrapper.** A word boundary does not exist inside `__require`, so the one form
+  build output actually uses was invisible to both. Widening a load matcher can
+  only ADD findings: a load it fails to recognise falls through to reporting the
+  bare name, so a name recognised here is reclassified, never cleared.
+- **`scripts/mutation-audit.ts`**: 17 new mutations (M71-M87) pinning each rule
+  above in both directions, plus repairs to TEN stale anchors — seven of which
+  were already stale on `main`, so those rules had been unverified since the last
+  refactor and the audit could not come back clean. The script now writes the
+  in-flight mutation to a gitignored sentinel and repairs an abandoned one on the
+  next run (it had committed `if (false) roots.push(...)` into this repo),
+  handles signals, strips ANSI before parsing counts, refuses a zero-pass
+  baseline as "no reading" rather than "green", passes an explicit suite timeout
+  so machine load cannot manufacture a red baseline, and accepts `--anchors` to
+  check staleness without running the suite.
+
 ## [0.8.2] - 2026-07-27
 
 ### `no-cloud-scan` closes three blind spots that 0.8.1 opened
