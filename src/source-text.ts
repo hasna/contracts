@@ -308,6 +308,19 @@ function escapeRegex(value: string): string {
 }
 
 /**
+ * The three quotes a specifier can be written in.
+ *
+ * The backtick is the one that was missing, and leaving it out cost a FALSE
+ * NEGATIVE rather than noise: a template-literal specifier is a real load the
+ * loader honours, so reading only `"` and `'` reported "no import here" about
+ * working code. In the one file the guard-test allowlist exempts, that was the
+ * whole difference between a critical edge and a clean scan.
+ */
+const SPECIFIER_QUOTE = "[\"'`]";
+/** Anything that is not a quote, so a run stays inside one specifier. */
+const SPECIFIER_CHAR = "[^\"'`]";
+
+/**
  * A quoted specifier that resolves to `moduleName`.
  *
  * The name is matched as a PATH SEGMENT anywhere in the specifier, not as a
@@ -319,7 +332,7 @@ function escapeRegex(value: string): string {
  * `open-cloudy` and `@acme/my-open-cloud` are different packages and stay out.
  */
 function moduleSpecifier(moduleName: string): string {
-  return String.raw`["'](?:[^"']*/)?${escapeRegex(moduleName)}(?:/[^"']*)?["']`;
+  return `${SPECIFIER_QUOTE}(?:${SPECIFIER_CHAR}*/)?${escapeRegex(moduleName)}(?:/${SPECIFIER_CHAR}*)?${SPECIFIER_QUOTE}`;
 }
 
 /**

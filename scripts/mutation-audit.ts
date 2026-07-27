@@ -297,8 +297,8 @@ const MUTATIONS: Mutation[] = [
     // is a source reference, and this repo's own gate is right to say so.
     rule: "a deep import path is the same edge as the bare specifier",
     file: "src/source-text.ts",
-    from: "  return String.raw`[\"'](?:[^\"']*/)?${escapeRegex(moduleName)}(?:/[^\"']*)?[\"']`;",
-    to: "  return String.raw`[\"'](?:[^\"']*/)?${escapeRegex(moduleName)}[\"']`;",
+    from: "  return `${SPECIFIER_QUOTE}(?:${SPECIFIER_CHAR}*/)?${escapeRegex(moduleName)}(?:/${SPECIFIER_CHAR}*)?${SPECIFIER_QUOTE}`;",
+    to: "  return `${SPECIFIER_QUOTE}(?:${SPECIFIER_CHAR}*/)?${escapeRegex(moduleName)}${SPECIFIER_QUOTE}`;",
   },
   {
     id: "M37-nocloud-every-workspace-is-a-seed",
@@ -339,8 +339,8 @@ const MUTATIONS: Mutation[] = [
     id: "M41-nocloud-specifier-is-matched-anywhere",
     rule: "a re-scoped or vendored specifier is the same import",
     file: "src/source-text.ts",
-    from: "  return String.raw`[\"'](?:[^\"']*/)?${escapeRegex(moduleName)}(?:/[^\"']*)?[\"']`;",
-    to: "  return String.raw`[\"']${escapeRegex(moduleName)}(?:/[^\"']*)?[\"']`;",
+    from: "  return `${SPECIFIER_QUOTE}(?:${SPECIFIER_CHAR}*/)?${escapeRegex(moduleName)}(?:/${SPECIFIER_CHAR}*)?${SPECIFIER_QUOTE}`;",
+    to: "  return `${SPECIFIER_QUOTE}${escapeRegex(moduleName)}(?:/${SPECIFIER_CHAR}*)?${SPECIFIER_QUOTE}`;",
   },
   {
     id: "M42-nocloud-bare-import-needs-no-space",
@@ -404,6 +404,20 @@ const MUTATIONS: Mutation[] = [
     file: "src/no-cloud.ts",
     from: '  const codeLike = file.kind === "source_import" || file.kind === "packed_artifact";',
     to: "  const codeLike = true;",
+  },
+  {
+    id: "M57-nocloud-backtick-is-a-quote",
+    rule: "a template-literal specifier is a specifier, so its load is an import",
+    file: "src/source-text.ts",
+    from: "const SPECIFIER_QUOTE = \"[\\\"'`]\";",
+    to: "const SPECIFIER_QUOTE = \"[\\\"']\";",
+  },
+  {
+    id: "M58-nocloud-backtick-load-withdraws-exemption",
+    rule: "an interpolated specifier in the guard test is a load, not a mention",
+    file: "src/no-cloud.ts",
+    from: "const DYNAMIC_MODULE_LOAD = /\\b(?:import|require)\\s*\\(\\s*[A-Za-z_$`]/;",
+    to: "const DYNAMIC_MODULE_LOAD = /\\b(?:import|require)\\s*\\(\\s*[A-Za-z_$]/;",
   },
 ];
 

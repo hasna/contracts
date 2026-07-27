@@ -109,13 +109,20 @@ const LOCKFILE_TEXT_PATTERNS = RUNTIME_PATTERNS.filter((entry) => entry.kind ===
 const NO_CLOUD_GUARD_TEST = /(?:^|\/)no-cloud-boundary\.test\.(?:[cm]?[jt]sx?|[cm]ts)$/;
 
 /**
- * `import(` or `require(` applied to something that is not a string literal.
+ * `import(` or `require(` applied to something that is not a plain quoted
+ * string.
  *
  * Matching an identifier start rather than "not a quote" keeps this off the
  * regex SOURCE a guard test builds to detect imports — `require\s*\(\s*` has
  * a backslash there, not an identifier.
+ *
+ * A backtick belongs in that set too. A template specifier is either computed
+ * (`${runtime}`) or a plain load spelled with the third quote; either way it is
+ * a load, and a guard test that asserts absence has no reason to write one.
+ * Reading the identifier alone let the interpolated form pass through the
+ * exemption untouched, which is the gate going blind rather than merely noisy.
  */
-const DYNAMIC_MODULE_LOAD = /\b(?:import|require)\s*\(\s*[A-Za-z_$]/;
+const DYNAMIC_MODULE_LOAD = /\b(?:import|require)\s*\(\s*[A-Za-z_$`]/;
 
 function isNoCloudGuardTest(path: string): boolean {
   return NO_CLOUD_GUARD_TEST.test(path.replaceAll("\\", "/"));

@@ -232,14 +232,19 @@ describe("no-cloud gate: the mandated guard test", () => {
 
   test("a dynamic import of a computed specifier withdraws the exemption", () => {
     // The smuggle: the guard test may NAME the package, but the moment it
-    // loads a computed specifier the mention stops being a mention.
-    withRepo(
-      { files: { "src/no-cloud-boundary.test.ts": `const runtime = "${RETIRED}";\nexport const mod = import(runtime);\n` } },
-      (report) => {
-        expect(report.verdict).toBe("failed");
-        expect(patterns(report)).toContain(`src/no-cloud-boundary.test.ts:${RETIRED}`);
-      },
-    );
+    // loads a computed specifier the mention stops being a mention. A template
+    // literal is the same move with different punctuation, so it withdraws the
+    // exemption on the same terms — reading the identifier and not the backtick
+    // left the interpolated form loading the runtime against a clean scan.
+    for (const load of ["import(runtime)", "import(`${runtime}`)", "require(`${runtime}/register`)"]) {
+      withRepo(
+        { files: { "src/no-cloud-boundary.test.ts": `const runtime = "${RETIRED}";\nexport const mod = ${load};\n` } },
+        (report) => {
+          expect(report.verdict).toBe("failed");
+          expect(patterns(report)).toContain(`src/no-cloud-boundary.test.ts:${RETIRED}`);
+        },
+      );
+    }
   });
 
   test("a genuine guard test builds import regexes without tripping the dynamic-load rule", () => {
@@ -314,12 +319,17 @@ describe("no-cloud gate: the mandated guard test", () => {
 
   test("a real import in the guard test fails whatever shape the specifier takes", () => {
     // Each of these is an edge the exemption used to swallow: the specifier
-    // does not START with the pattern, or the `import` keyword is not followed
-    // by a space.
+    // does not START with the pattern, the `import` keyword is not followed by
+    // a space, or the specifier is quoted with backticks rather than the two
+    // quotes the specifier pattern used to know about. The last shape is the
+    // one that mattered most: it is a working load of the retired runtime that
+    // scanned clean, which is the gate going blind rather than merely noisy.
     for (const statement of [
       'import { registerCloudTools } from "@hasna/open-cloud";',
       'import { x } from "../vendor/cloud-mcp/index.js";',
       `import"${RETIRED}/register";`,
+      `const mod = await import(\`${RETIRED}\`);`,
+      `const legacy = require(\`${RETIRED}/register\`);`,
     ]) {
       withRepo({ files: { "src/no-cloud-boundary.test.ts": `${statement}\n${guardTest}` } }, (report) => {
         expect(report.verdict).toBe("failed");
@@ -848,6 +858,22 @@ describe("source-text masking primitives", () => {
       expect(importsModule(form, RETIRED)).toBe(true);
     }
     expect(importsModule(`const name = "${RETIRED}";`, RETIRED)).toBe(false);
+  });
+
+  test("a template-literal specifier is a specifier", () => {
+    // A backtick is the third quote, and the loader treats it as one. Reading
+    // only two of the three said "no import here" about a working load.
+    for (const form of [
+      `import x from \`${RETIRED}\`;`,
+      `const m = await import(\`${RETIRED}\`);`,
+      `const m = require(\`${RETIRED}/register\`);`,
+    ]) {
+      expect(importsModule(form, RETIRED)).toBe(true);
+    }
+    // Still a name in a string, not an edge.
+    expect(importsModule(`const name = \`${RETIRED}\`;`, RETIRED)).toBe(false);
+    // And still a path SEGMENT: neighbouring names stay out.
+    expect(importsModule("import { a } from `open-cloudy`;", "open-cloud")).toBe(false);
   });
 
   test("importsModule reads the whole specifier, not just its first segment", () => {
