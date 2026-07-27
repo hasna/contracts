@@ -76,9 +76,13 @@ what is matched, and only the characters it spans are dropped:
 
 - the array must equal the denylist element for element, so a subset, a superset
   and a reordering are all somebody else's data;
-- a row must match one table entry on ALL THREE of `pattern`, `kind` and
-  `message`, so a forbidden name cannot be paired with a message that is not its
-  own — wrapping a credential's env key in a three-key object buys nothing;
+- a row must equal one table row ENTRY FOR ENTRY — same entry count, every value
+  equal — so a forbidden name cannot be paired with a message that is not its own,
+  and no extra field can ride along inside the span. Matching three named keys and
+  a bounded key set were both tried first and each left one free slot. The rule is
+  complete only together with its other half: the parser REFUSES a record that
+  repeats a key, because `Map` keeps the last value and a shadowed one would sit
+  inside the blanked span having been compared to nothing;
 - the collection must sit where data sits, must not be indexed, called or
   member-accessed in place, and if it is bound to a name, no load call in the
   file may name that name. `__require(DENY[0])` is a real load whose specifier

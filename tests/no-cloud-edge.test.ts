@@ -1908,6 +1908,95 @@ describe("no-cloud gate: a blanked span may carry nothing but the row this table
     });
   });
 
+  test("a REPEATED key is a FREE SLOT unless the parser refuses the record", () => {
+    // F1c, the third review blocker, and the one that survived entry-for-entry
+    // equality. Duplicate property names are legal JavaScript that a bundler
+    // preserves, and `parseInlineData` used to build the entries with `Map.set` —
+    // which keeps the LAST value and shrinks the count. So a record repeating
+    // `message` arrived at `isOwnPatternDeclaration` as a THREE-entry record whose
+    // every entry equalled a module row, and `withoutInlinedDeclarations` blanked
+    // the whole span including the shadowed value nothing had compared.
+    //
+    // Measured before the parser refused it, as tarballs under a third-party
+    // package name, each against a control that fails:
+    //
+    //   verbatim module row + shadowed `message` holding a
+    //     credential env key                                  EXIT=0, 0 findings
+    //     control: the same credential with no record          EXIT=1, 1 critical
+    //   the same slot carrying three config patterns at once   EXIT=0, 0 findings
+    //   a backtick in the shadowed slot, span over five lines  EXIT=0, 0 findings
+    //
+    // The `config` patterns have no import to look for, so the bare-mention
+    // detector is their only one and a blanked span is the whole of what stands
+    // between them and a clean scan. The fix is in `parseInlineData`, not here: a
+    // duplicate key means the text is not the inert constant this package emits,
+    // so refusing to describe it is the fail-open direction.
+    const shadowed =
+      `{ pattern: "${RETIRED_ROW}", kind: "module", message: "${CREDENTIAL}=placeholder-not-a-real-value", ` +
+      `message: "Shared ${RETIRED_ROW} runtime reference is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${shadowed}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the credential in the shadowed entry must be reported").toContain(
+        `dist/bundle.js:${CREDENTIAL}`,
+      );
+      expect(report.verdict).toBe("failed");
+    });
+    // One shadowed slot hid the credential AND all three config patterns at once,
+    // on a plain assignment with no aliasing.
+    const manyPatterns = shadowed.replace(
+      `"${CREDENTIAL}=placeholder-not-a-real-value"`,
+      `"${CREDENTIAL} ${DOTDIR_ROW} ${CONFIG_ROW}"`,
+    );
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${manyPatterns}];\nexport { t };\n` } }, (report) => {
+      for (const pattern of [CREDENTIAL, DOTDIR_ROW, CONFIG_ROW]) {
+        expect(patterns(report), pattern).toContain(`dist/bundle.js:${pattern}`);
+      }
+      expect(report.verdict).toBe("failed");
+    });
+    // A backtick in the shadowed slot, so the span it would have blanked is
+    // multi-line and arbitrarily long.
+    const multiline = shadowed.replace(
+      `"${CREDENTIAL}=placeholder-not-a-real-value"`,
+      `\`\n  ${CREDENTIAL}\n  ${DOTDIR_ROW}\n\``,
+    );
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${multiline}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toContain(`dist/bundle.js:${CREDENTIAL}`);
+      expect(report.verdict).toBe("failed");
+    });
+    // The record as the region ROOT, not just as an element of one.
+    withRepo({ name: "@acme/consumer-app", files: { "src/table.ts": `export const t = ${shadowed};\n` } }, (report) => {
+      expect(patterns(report), "hand-authored source, same content, same verdict").toContain(
+        `src/table.ts:${CREDENTIAL}`,
+      );
+    });
+    // THE PAIR, both arities: the genuine three-entry module row and the genuine
+    // four-entry config row repeat no key, and must still be attributed.
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${verbatimRow}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the 3-key row this table emits must still be attributed").toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+    const genuineFourKey =
+      `{ pattern: "${DOTDIR_ROW}", kind: "config", checkKind: "runtime_config", ` +
+      `message: "Legacy ${DOTDIR_ROW} runtime config is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${genuineFourKey}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the 4-key row this table emits must still be attributed").toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+  });
+
+  test("the parser refuses a duplicate-key record outright", () => {
+    // The rule lives in `parseInlineData`, so it is tested where it lives as well
+    // as end to end: a record with a repeated key describes nothing, and neither
+    // does any collection around it, so no span is ever blanked on its strength.
+    const duplicate = `var t = [{ pattern: "${RETIRED_ROW}", kind: "module", message: "a", message: "b" }];`;
+    expect(inlineDataRegions(duplicate, [RETIRED_ROW])).toEqual([]);
+    // A quoted key shadowing a bare one is the same key, and is refused too.
+    const quotedDuplicate = `var t = [{ pattern: "${RETIRED_ROW}", kind: "module", "kind": "config", message: "b" }];`;
+    expect(inlineDataRegions(quotedDuplicate, [RETIRED_ROW])).toEqual([]);
+    // The pair: distinct keys still parse, and the region is still found.
+    const distinct = `var t = [{ pattern: "${RETIRED_ROW}", kind: "module", message: "b" }];`;
+    expect(inlineDataRegions(distinct, [RETIRED_ROW]).length).toBe(1);
+  });
+
   test("an accepted key cannot hold a nested collection", () => {
     // Bounding the keys is not enough on its own: one key holding an object hides
     // a whole table inside the blanked span. Entry-for-entry equality covers this

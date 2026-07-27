@@ -627,6 +627,13 @@ const MUTATIONS: Mutation[] = [
     to: '      kind: entry.pattern === ".hasna/' + 'cloud" ? "runtime_config" : file.kind,',
   },
   {
+    id: "M89-attrib-a-repeated-key-is-refused",
+    rule: "a record repeating a key is not describable: `Map` keeps the last value, so the first is never compared",
+    file: "src/source-text.ts",
+    from: "      if (entries.has(key)) return null;",
+    to: "      if (false) return null;",
+  },
+  {
     id: "M87-attrib-path-config-read-off-the-table",
     rule: "a legacy config dotdir path is runtime config, decided from the table not a literal",
     file: "src/no-cloud.ts",

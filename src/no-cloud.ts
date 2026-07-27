@@ -327,31 +327,47 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
  *     element, so an array holding anything else is not it;
  *   - a row must equal one `RUNTIME_PATTERNS` row ENTRY FOR ENTRY — same key
  *     count, every value equal — which is the record analogue of the array rule
- *     above. Partial versions of this were tried twice and each left one free
- *     slot: comparing three keys left the rest of the key set uncompared, and
+ *     above. Partial versions of this were tried three times and each left one
+ *     free slot: comparing three keys left the rest of the key set uncompared;
  *     bounding the key set to a union over all rows admitted `checkKind` on all
- *     eight while only ever checking it was A string, never the RIGHT one. Full
- *     equality removes the class rather than the instance;
+ *     eight while only ever checking it was A string, never the RIGHT one; and
+ *     entry-for-entry equality by itself still counted an entry set that a
+ *     REPEATED KEY had already collapsed, so a shadowed `message:` rode through
+ *     a span the surviving one justified blanking. The comparison is complete
+ *     only because `parseInlineData` now refuses a record with a duplicate key
+ *     outright — that is the half of this rule that lives in `src/source-text.ts`,
+ *     and removing it puts the free slot straight back;
  *   - the collection must sit where data sits and must not be read in place, and
  *     if it is bound to a name, no load call in the file may mention that name.
  *     That is what keeps `__require(DENY[0])` from becoming a way to launder a
  *     specifier through a copy of the denylist.
  *
- * The consequence that matters, and the wording has been wrong twice so it is
- * worth reading precisely: no detector is turned off for any occurrence OUTSIDE a
- * blanked span, and a blanked span holds nothing but an exact copy of something
+ * The consequence that matters, and the wording has been wrong three times so it
+ * is worth reading precisely: no detector is turned off for any occurrence OUTSIDE
+ * a blanked span, and a blanked span holds nothing but an exact copy of something
  * this table declares — a record equal to a row entry for entry, or an array equal
- * to the denylist element for element. There is no admitted-but-uncompared slot
- * left for anything else to occupy, which is what finally makes the second half of
- * that sentence true.
+ * to the denylist element for element. Every character of the span was compared,
+ * and that takes TWO rules rather than one: the comparator leaves no entry
+ * uncompared, and the parser refuses to hand it a record whose text carries an
+ * entry the entry set does not hold. Both halves are load-bearing. The comparator
+ * on its own left exactly one admitted-but-uncompared slot, and a duplicate key
+ * opened it.
  *
- * It was not true before. The first version of this comment claimed "NO DETECTOR
- * IS TURNED OFF ANYWHERE" while three keys were compared and the rest of the key
- * set was not. The second claimed "nothing but a row this table emits" while
- * `checkKind` was admitted on every row and never compared — a module row carrying
- * a `checkKind` is a row this table never emits, and it was attributed. Both
- * claims were caught by review rather than by a test, which is the argument for
- * writing the guarantee as narrowly as the code earns it.
+ * It was not true before, and each time this comment overstated it, a review found
+ * the slot it was overstating. The first version claimed "NO DETECTOR IS TURNED
+ * OFF ANYWHERE" while three keys were compared and the rest of the key set was
+ * not. The second claimed "nothing but a row this table emits" while `checkKind`
+ * was admitted on every row and never compared — a module row carrying a
+ * `checkKind` is a row this table never emits, and it was attributed. The third
+ * claimed entry-for-entry equality had removed the class, while a record repeating
+ * a key — `{pattern, kind, message: "<credential>", message: "<the real one>"}` —
+ * was still attributed, because `Map.set` had dropped the shadowed value and
+ * shrunk the count before the comparison ever ran. Measured as a tarball under a
+ * third-party package name: EXIT=0 with zero findings against a control carrying
+ * the same credential unwrapped that scored one critical. All three were caught by
+ * review rather than by a test, which is the argument for writing the guarantee as
+ * narrowly as the code earns it — and for testing each narrowing in both
+ * directions, which the duplicate-key rule now is.
  *
  * Each occurrence is judged on its own, so the same file keeps every check for
  * every other occurrence in it — a consumer that bundles `@hasna/contracts` and
@@ -369,9 +385,12 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
  * They are MODULE-CLASS ONLY, and that bound comes from the two equality rules
  * rather than from an argument: the only array ever attributed equals the
  * denylist, which holds package names and nothing else, and the only record ever
- * attributed equals a table row entry for entry, so it has no slot to carry a
- * value in. No `config` pattern and no credential env key can ride any of the
- * three.
+ * attributed equals a table row entry for entry over an entry set the parser
+ * guarantees describes the whole record, so it has no slot to carry a value in.
+ * No `config` pattern and no credential env key can ride any of the three. That
+ * bound is exactly as strong as the completeness of those two rules — when the
+ * record rule was incomplete, a shadowed key carried all three `config` patterns
+ * and a credential at once, on a plain assignment, with no aliasing needed.
  *
  * The earlier wording here said "bound to one name, rebound to a second", which
  * made the residual sound narrower and harder to reach than it is. Understating it
@@ -394,13 +413,13 @@ function isOwnPatternDeclaration(node: InlineDataNode): boolean {
     );
   }
   if (node.kind !== "record") return false;
-  // A ROW MUST EQUAL ONE TABLE ROW ENTRY FOR ENTRY. Same key count, every value
-  // equal. Nothing about the record is left uncompared.
+  // A ROW MUST EQUAL ONE TABLE ROW ENTRY FOR ENTRY. Same entry count, every value
+  // equal. Nothing in the entry set is left uncompared.
   //
   // This is the record analogue of the array branch above, and it belongs beside
   // it: an array is attributed only when it matches ELEMENT FOR ELEMENT, and a
-  // record only when it matches ENTRY FOR ENTRY. Two rounds of review were spent
-  // arriving back at that symmetry, by two different partial versions of it:
+  // record only when it matches ENTRY FOR ENTRY. Three rounds of review were spent
+  // arriving at that symmetry, by three different partial versions of it:
   //
   //   1. compare three keys, ignore the rest of the key set. A verbatim
   //      `{pattern, kind, message}` triple plus one more key carried anything at
@@ -410,9 +429,15 @@ function isOwnPatternDeclaration(node: InlineDataNode): boolean {
   //      but a union admitted it on all eight — and being a string was all it had
   //      to be, never the right string. A backtick literal then made the span
   //      multi-line and arbitrarily long.
+  //   3. compare the whole ENTRY SET, while the entry set was not the whole
+  //      RECORD. Duplicate property names are legal JavaScript and a bundler
+  //      preserves them, but `parseInlineData` built the entries with `Map.set`,
+  //      which keeps only the last value — so `{pattern, kind, message: <payload>,
+  //      message: "<the real one>"}` arrived here as a three-entry record equal to
+  //      a module row, and the span blanked on that basis covered the payload.
   //
-  // Measured at the second version, as tarballs under a third-party package name,
-  // each against a control that fails:
+  // Measured at the second and third versions, as tarballs under a third-party
+  // package name, each against a control that fails:
   //
   //   verbatim module row + `checkKind` holding a credential env key -> EXIT=0, 0 findings
   //     control: the same string with no triple around it            -> EXIT=1, 1 critical
@@ -420,12 +445,17 @@ function isOwnPatternDeclaration(node: InlineDataNode): boolean {
   //     spread over five lines                                      -> EXIT=0, 0 findings
   //     control: the same payload with no triple                    -> EXIT=1, 3 critical
   //   the same slot in hand-authored `src/table.ts`                  -> EXIT=0, 0 findings
+  //   verbatim module row + a SHADOWED `message` holding a
+  //     credential env key                                          -> EXIT=0, 0 findings
+  //     control: the same credential with no record around it       -> EXIT=1, 1 critical
   //
-  // Each narrowing removed one free slot and left the next. Full equality removes
-  // the CLASS: there is no slot left that is admitted but uncompared, so a future
-  // field cannot become the next one. That is the property to preserve — if this
-  // ever needs loosening, loosen the SHAPES matched, never the completeness of the
-  // comparison.
+  // Each narrowing removed one free slot and left the next. What removes the CLASS
+  // is completeness over the whole record, and this function only supplies half of
+  // it: it compares every entry, and `parseInlineData` refuses any record whose
+  // text holds something the entry set does not. Both halves are needed — #3 is
+  // what a complete comparison over an incomplete entry set looks like. That is
+  // the property to preserve: if this ever needs loosening, loosen the SHAPES
+  // matched, never the completeness of either half.
   //
   // It costs nothing real: the build emits `{pattern, kind, message}` seven times
   // and `{pattern, kind, checkKind, message}` once, and full equality accepts

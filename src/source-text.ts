@@ -733,6 +733,21 @@ function parseInlineData(text: string, start: number): InlineDataNode | null {
       index = skipSpace(text, index + 1);
       const value = parseInlineData(text, index);
       if (value === null) return null;
+      // A REPEATED KEY IS AMBIGUITY, AND THE PARSER REFUSES TO DESCRIBE IT.
+      // `Map.set` silently keeps the LAST value and shrinks the entry count, so
+      // `{pattern, kind, message: <payload>, message: "…"}` would present itself
+      // to a caller as a three-entry record whose every value equals a table row
+      // — the shadowed value sits in no entry, so no entry-for-entry comparison
+      // can reach it, while a span blanked on the strength of that comparison
+      // still covers its characters. That is a free slot big enough for a
+      // credential env key or a multi-line backtick, and it is reachable because
+      // duplicate property names are legal JavaScript that a bundler preserves,
+      // not a parse curiosity.
+      //
+      // Refusing is the cheap direction: nothing this package emits repeats a
+      // key, so no real declaration is lost, and the caller falls back to reading
+      // the text as it is — which is how every other failure here behaves.
+      if (entries.has(key)) return null;
       entries.set(key, value);
       index = skipSpace(text, value.end);
       if (text[index] === ",") index = skipSpace(text, index + 1);
