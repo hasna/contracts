@@ -7,6 +7,28 @@ import {
 } from "./transport.js";
 import { createHasnaStorageClient, resolveStorageClient } from "./storage.js";
 
+function canStartLoopbackServer(): boolean {
+  const servers: Array<ReturnType<typeof Bun.serve>> = [];
+  try {
+    for (const hostname of ["127.0.0.1", "0.0.0.0"]) {
+      servers.push(Bun.serve({
+        hostname,
+        port: 0,
+        fetch() {
+          return new Response("ok");
+        },
+      }));
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    for (const server of servers) server.stop(true);
+  }
+}
+
+const describeLoopback = canStartLoopbackServer() ? describe : describe.skip;
+
 // A scriptable fetch stub that records requests and returns queued responses.
 function makeFetch(handler: (req: { method: string; url: string; headers: Record<string, string>; body: unknown }) => { status: number; body?: unknown; text?: string }) {
   const calls: { method: string; url: string; headers: Record<string, string>; body: unknown }[] = [];
@@ -163,7 +185,7 @@ describe("retries + idempotency", () => {
 });
 
 // End-to-end: a demo app storage resolver picks the HTTP client on flip, local otherwise.
-describe("resolveStorageClient — the resolver an app wires", () => {
+describeLoopback("resolveStorageClient — the resolver an app wires", () => {
   const KEY = "hasna_demo_resolver_secret";
   const cloud = new Map<string, { id: string; title: string }>();
   let server: ReturnType<typeof Bun.serve>;

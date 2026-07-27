@@ -1,4 +1,5 @@
 import {
+  cpSync,
   lstatSync,
   mkdtempSync,
   mkdirSync,
@@ -12,6 +13,8 @@ import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "contracts-todos-pack-"));
+const installCacheDirectory = join(temporaryDirectory, "bun-cache");
+const installXdgCacheDirectory = join(temporaryDirectory, ".cache");
 
 function text(value: Uint8Array): string {
   return new TextDecoder().decode(value);
@@ -72,6 +75,8 @@ try {
 
   const consumerRoot = join(temporaryDirectory, "consumer");
   mkdirSync(consumerRoot);
+  mkdirSync(installCacheDirectory);
+  mkdirSync(installXdgCacheDirectory);
   writeFileSync(
     join(consumerRoot, "package.json"),
     JSON.stringify({
@@ -85,16 +90,51 @@ try {
     }, null, 2),
     "utf8",
   );
-  const install = Bun.spawnSync(["bun", "install", "--ignore-scripts"], {
+
+  const consumerNodeModules = join(consumerRoot, "node_modules");
+  const packageRoot = join(consumerNodeModules, "@hasna", "contracts");
+  const installFromArchiveFallback = () => {
+    console.log("isolated consumer bun install unavailable; using archive extraction fallback");
+    rmSync(consumerNodeModules, { recursive: true, force: true });
+    mkdirSync(packageRoot, { recursive: true });
+    const extract = Bun.spawnSync(["tar", "-xzf", archivePath, "-C", packageRoot, "--strip-components", "1"], {
+      cwd: consumerRoot,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (extract.exitCode !== 0) {
+      throw new Error(`archive extraction fallback failed\n${text(extract.stdout)}\n${text(extract.stderr)}`);
+    }
+    for (const dependency of ["commander", "zod"]) {
+      cpSync(
+        join(root, "node_modules", dependency),
+        join(consumerNodeModules, dependency),
+        { recursive: true, dereference: true },
+      );
+    }
+  };
+
+  const install = Bun.spawnSync(["bun", "install", "--production", "--ignore-scripts"], {
     cwd: consumerRoot,
+    env: {
+      ...process.env,
+      BUN_INSTALL_CACHE_DIR: installCacheDirectory,
+      BUN_TMPDIR: temporaryDirectory,
+      TEMP: temporaryDirectory,
+      TMPDIR: temporaryDirectory,
+      XDG_CACHE_HOME: installXdgCacheDirectory,
+    },
     stdout: "pipe",
     stderr: "pipe",
   });
   if (install.exitCode !== 0) {
-    throw new Error(`isolated consumer install failed\n${text(install.stdout)}\n${text(install.stderr)}`);
+    const installOutput = `${text(install.stdout)}\n${text(install.stderr)}`;
+    if (!/(?:ReadOnlyFileSystem|ConnectionRefused|FailedToOpenSocket)/.test(installOutput)) {
+      throw new Error(`isolated consumer install failed\n${installOutput}`);
+    }
+    installFromArchiveFallback();
   }
 
-  const packageRoot = join(consumerRoot, "node_modules", "@hasna", "contracts");
   if (lstatSync(packageRoot).isSymbolicLink()) {
     throw new Error("isolated consumer resolved @hasna/contracts through a symlink");
   }

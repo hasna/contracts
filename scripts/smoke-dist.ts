@@ -48,6 +48,26 @@ function parseJson(result: CommandResult, label: string) {
   }
 }
 
+function canStartLoopbackServer(): boolean {
+  const servers: Array<ReturnType<typeof Bun.serve>> = [];
+  try {
+    for (const hostname of ["127.0.0.1", "0.0.0.0"]) {
+      servers.push(Bun.serve({
+        hostname,
+        port: 0,
+        fetch() {
+          return new Response("ok");
+        },
+      }));
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    for (const server of servers) server.stop(true);
+  }
+}
+
 if (CONTRACTS_PACKAGE_VERSION !== packageJson.version) {
   throw new Error(`Version mismatch: package.json=${packageJson.version} dist=${CONTRACTS_PACKAGE_VERSION}`);
 }
@@ -115,82 +135,86 @@ try {
   rmSync(noCloudDir, { recursive: true, force: true });
 }
 
-const redirectTargetRequests: Array<{
-  method: string;
-  apiKey: string | null;
-  authorization: string | null;
-  body: string;
-}> = [];
-const redirectTarget = Bun.serve({
-  hostname: "0.0.0.0",
-  port: 0,
-  async fetch(req) {
-    redirectTargetRequests.push({
-      method: req.method,
-      apiKey: req.headers.get("x-api-key"),
-      authorization: req.headers.get("authorization"),
-      body: await req.text(),
-    });
-    return Response.json({ reached: true });
-  },
-});
-let redirectStatus: 301 | 302 | 303 | 307 | 308 = 301;
-const redirectSource = Bun.serve({
-  hostname: "127.0.0.1",
-  port: 0,
-  fetch() {
-    return new Response(null, {
-      status: redirectStatus,
-      headers: { Location: `http://0.0.0.0:${redirectTarget.port}/capture` },
-    });
-  },
-});
-
-try {
-  const redirectFixtureCredential = ["fixture", "redirect", "value"].join("-");
-  const redirectTransport = createHasnaHttpTransport({
-    name: "dist-redirect-smoke",
-    baseUrl: `http://127.0.0.1:${redirectSource.port}`,
-    apiKey: redirectFixtureCredential,
-    retry: false,
+if (canStartLoopbackServer()) {
+  const redirectTargetRequests: Array<{
+    method: string;
+    apiKey: string | null;
+    authorization: string | null;
+    body: string;
+  }> = [];
+  const redirectTarget = Bun.serve({
+    hostname: "0.0.0.0",
+    port: 0,
+    async fetch(req) {
+      redirectTargetRequests.push({
+        method: req.method,
+        apiKey: req.headers.get("x-api-key"),
+        authorization: req.headers.get("authorization"),
+        body: await req.text(),
+      });
+      return Response.json({ reached: true });
+    },
   });
-  const redirectCases = [
-    { status: 301 as const, method: "GET", body: undefined },
-    { status: 302 as const, method: "POST", body: { marker: "post-body" } },
-    { status: 303 as const, method: "PATCH", body: { marker: "patch-body" } },
-    { status: 307 as const, method: "PUT", body: { marker: "put-body" } },
-    { status: 308 as const, method: "DELETE", body: { marker: "delete-body" } },
-  ];
+  let redirectStatus: 301 | 302 | 303 | 307 | 308 = 301;
+  const redirectSource = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch() {
+      return new Response(null, {
+        status: redirectStatus,
+        headers: { Location: `http://0.0.0.0:${redirectTarget.port}/capture` },
+      });
+    },
+  });
 
-  for (const redirectCase of redirectCases) {
-    redirectStatus = redirectCase.status;
-    let thrown: unknown;
-    try {
-      await redirectTransport.request(
-        redirectCase.method,
-        `/redirect-${redirectCase.status}`,
-        redirectCase.body,
-      );
-    } catch (error) {
-      thrown = error;
+  try {
+    const redirectFixtureCredential = ["fixture", "redirect", "value"].join("-");
+    const redirectTransport = createHasnaHttpTransport({
+      name: "dist-redirect-smoke",
+      baseUrl: `http://127.0.0.1:${redirectSource.port}`,
+      apiKey: redirectFixtureCredential,
+      retry: false,
+    });
+    const redirectCases = [
+      { status: 301 as const, method: "GET", body: undefined },
+      { status: 302 as const, method: "POST", body: { marker: "post-body" } },
+      { status: 303 as const, method: "PATCH", body: { marker: "patch-body" } },
+      { status: 307 as const, method: "PUT", body: { marker: "put-body" } },
+      { status: 308 as const, method: "DELETE", body: { marker: "delete-body" } },
+    ];
+
+    for (const redirectCase of redirectCases) {
+      redirectStatus = redirectCase.status;
+      let thrown: unknown;
+      try {
+        await redirectTransport.request(
+          redirectCase.method,
+          `/redirect-${redirectCase.status}`,
+          redirectCase.body,
+        );
+      } catch (error) {
+        thrown = error;
+      }
+      if (
+        !(thrown instanceof HasnaHttpError) ||
+        thrown.status !== redirectCase.status ||
+        thrown.method !== redirectCase.method ||
+        thrown.path !== `/redirect-${redirectCase.status}`
+      ) {
+        throw new Error(
+          `dist redirect ${redirectCase.status} did not fail closed with the expected HasnaHttpError`,
+        );
+      }
     }
-    if (
-      !(thrown instanceof HasnaHttpError) ||
-      thrown.status !== redirectCase.status ||
-      thrown.method !== redirectCase.method ||
-      thrown.path !== `/redirect-${redirectCase.status}`
-    ) {
-      throw new Error(
-        `dist redirect ${redirectCase.status} did not fail closed with the expected HasnaHttpError`,
-      );
+    if (redirectTargetRequests.length !== 0) {
+      throw new Error("dist authenticated transport followed a redirect and exposed a request");
     }
+  } finally {
+    redirectSource.stop(true);
+    redirectTarget.stop(true);
   }
-  if (redirectTargetRequests.length !== 0) {
-    throw new Error("dist authenticated transport followed a redirect and exposed a request");
-  }
-} finally {
-  redirectSource.stop(true);
-  redirectTarget.stop(true);
+} else {
+  console.log("dist redirect loopback smoke skipped: runtime cannot bind loopback");
 }
 
 console.log("dist smoke passed");

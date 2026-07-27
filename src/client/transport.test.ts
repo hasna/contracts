@@ -13,6 +13,30 @@ import {
   toV1BaseUrl,
 } from "./transport.js";
 
+function canStartLoopbackServer(): boolean {
+  const servers: Array<ReturnType<typeof Bun.serve>> = [];
+  try {
+    for (const hostname of ["127.0.0.1", "0.0.0.0"]) {
+      servers.push(Bun.serve({
+        hostname,
+        port: 0,
+        fetch() {
+          return new Response("ok");
+        },
+      }));
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    for (const server of servers) server.stop(true);
+  }
+}
+
+const loopbackAvailable = canStartLoopbackServer();
+const describeLoopback = loopbackAvailable ? describe : describe.skip;
+const testLoopback = loopbackAvailable ? test : test.skip;
+
 describe("resolveClientTransport — the client-flip contract", () => {
   test("no env => local", () => {
     const r = resolveClientTransport("todos", {});
@@ -472,7 +496,7 @@ describe("resolveClientTransport — the client-flip contract", () => {
 describe("authenticated redirect boundary", () => {
   const API_KEY = ["fixture", "redirect", "value"].join("-");
 
-  test("301/302/303/307/308 never forward credentials or bodies to a redirected authority", async () => {
+  testLoopback("301/302/303/307/308 never forward credentials or bodies to a redirected authority", async () => {
     const cases: Array<{
       status: 301 | 302 | 303 | 307 | 308;
       method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
@@ -562,7 +586,7 @@ describe("authenticated redirect boundary", () => {
     }
   });
 
-  test("same-origin redirects and redirect loops fail after exactly one request", async () => {
+  testLoopback("same-origin redirects and redirect loops fail after exactly one request", async () => {
     let sameOriginDestinationHits = 0;
     let loopHits = 0;
     let source: ReturnType<typeof Bun.serve>;
@@ -732,7 +756,7 @@ describe("authenticated authority-header boundary", () => {
     }
   });
 
-  test("real Bun HTTP routing never receives an authenticated Host override", async () => {
+  testLoopback("real Bun HTTP routing never receives an authenticated Host override", async () => {
     const received: Array<{
       host: string | null;
       apiKey: string | null;
@@ -791,7 +815,7 @@ interface Item {
   text: string;
 }
 
-describe("end-to-end data-source flip (real HTTP loopback)", () => {
+describeLoopback("end-to-end data-source flip (real HTTP loopback)", () => {
   const EXPECTED_KEY = "hasna_demo_e2e_secret";
   const cloudStore = new Map<string, Item>();
   const seenAuth: string[] = [];
