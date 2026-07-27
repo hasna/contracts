@@ -1724,3 +1724,16 @@ describe("source-text: inert data regions and load callees", () => {
     expect(importsModule('var legacy = __require("open-cloudy");', "open-cloud")).toBe(false);
   });
 });
+
+describe("source-text: a tuple type is inert, but not when a member is read out of it", () => {
+  test("the .d.ts shape tsc emits beside every bundle is attributable", () => {
+    // `export declare const FORBIDDEN_SHARED_CLOUD_RUNTIMES: readonly ["…"];`
+    // is emitted into `dist/schemas.d.ts` on every build, and the scanner failed
+    // its own shipped artifact on it.
+    const declaration = 'export declare const DENY: readonly ["a", "b"];';
+    expect(inlineDataRegions(declaration, ["a"]).length).toBe(1);
+    // But a member read out of a tuple type is still a read, and there is no
+    // reason for the type keyword to buy an exemption the value form is denied.
+    expect(inlineDataRegions('type T = readonly ["a", "b"][0];', ["a"])).toEqual([]);
+  });
+});

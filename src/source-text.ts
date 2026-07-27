@@ -759,13 +759,16 @@ function isInertPosition(text: string, start: number, end: number): boolean {
   const before = text.slice(Math.max(0, start - 64), start).replace(/\s+$/, "");
   if (before !== "") {
     const last = before[before.length - 1]!;
-    // A tuple TYPE, which is erased at compile time and cannot be read at
-    // runtime at all: `declare const DENY: readonly ["a", "b"];` is what `tsc`
-    // emits into the `.d.ts` beside every bundle, and `readonly` is a type-only
-    // modifier, so this cannot admit a value position by mistake. Without it the
-    // scanner failed its own shipped `dist/schemas.d.ts`.
-    if (TYPE_POSITION_KEYWORD.test(before)) return true;
-    if (!(last === "=" || last === "[" || last === "," || last === ":" || last === "(")) return false;
+    // `readonly [...]` is a tuple TYPE, erased at compile time and unreadable at
+    // runtime. It is what `tsc` emits into the `.d.ts` beside every bundle, and
+    // without it the scanner failed its own shipped `dist/schemas.d.ts`.
+    // `readonly` is a type-only modifier, so this cannot admit a value position
+    // by mistake — and it is accepted HERE rather than returned early, so the
+    // consumed-in-place check below still applies to it. Returning early made
+    // `readonly ["a","b"][0]` attributable; harmless, because an indexed access
+    // on a type is still a type, but there is no reason to allow it.
+    const typePosition = TYPE_POSITION_KEYWORD.test(before);
+    if (!typePosition && !(last === "=" || last === "[" || last === "," || last === ":" || last === "(")) return false;
     // `=` must be assignment, not a comparison: `x === [...]` cannot store it,
     // and `!== [...]` is the same. `(` is allowed for a parenthesised value but
     // a CALL argument is not — that is `require([...][0])`'s outer shape.

@@ -532,7 +532,7 @@ const MUTATIONS: Mutation[] = [
     id: "M79-declaration-must-sit-in-data-position",
     rule: "a collection handed to a call is an argument, not a stored constant",
     file: "src/source-text.ts",
-    from: '    if (!(last === "=" || last === "[" || last === "," || last === ":" || last === "(")) return false;',
+    from: '    if (!typePosition && !(last === "=" || last === "[" || last === "," || last === ":" || last === "(")) return false;',
     to: "    if (false) return false;",
   },
   {
@@ -657,11 +657,19 @@ function runSuite(): { pass: number; fail: number; failed: string[] } {
  * the mutation on disk looking exactly like someone's edit — that is how
  * `if (false) roots.push(...)` reached a commit in this repo.
  *
- * Signal handlers alone do NOT close it. SIGKILL cannot be caught, and a
- * process-group kill from a supervising tool does not give the handler a turn.
- * So the original text is also written to disk BEFORE the mutation and the next
- * run repairs from it. Recovery beats prevention here because prevention is not
- * available.
+ * SIGNAL HANDLERS DO NOT CLOSE IT, and the reason is specific to this script
+ * rather than general: it spends essentially all of its life inside a blocking
+ * `Bun.spawnSync`, which does not yield to the event loop, so a queued handler
+ * gets no turn until the suite returns. Measured during this change — SIGTERM to
+ * the audit process was delivered and the process kept going through two more
+ * mutations with the handler never running. SIGKILL cannot be caught at all.
+ *
+ * So the original text is ALSO written to disk before the mutation, and the next
+ * run repairs from it. That path is the one that works, and it was verified the
+ * only honest way: SIGKILL the audit mid-mutation, confirm the mutation is left
+ * on disk, then confirm the next run prints RECOVERED and restores the file. The
+ * handlers below are kept as a cheap best effort for the idle case, not as the
+ * guarantee.
  *
  * The sentinel lives in the repo root, gitignored, so a human or agent looking
  * at a confusing diff can SEE it.
