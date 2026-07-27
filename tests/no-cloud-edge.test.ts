@@ -1563,6 +1563,35 @@ describe("no-cloud gate: this package's inlined declaration is attributed, not e
         expect(report.verdict).toBe("passed");
       },
     );
+    // A NESTED CALL IN AN EARLIER ARGUMENT is still the same load call. The
+    // argument capture used to stop at the first `)`, so `norm(base)` was the
+    // whole of what the bound-name test ever saw and the declaration below it
+    // was attributed and blanked — with the array in inert position, the name is
+    // the only thing standing between it and a clean scan.
+    withRepo(
+      {
+        name: "iapp-consumer",
+        files: {
+          "dist/index.js": `var DENY = ["${RETIRED}", "${OTHER}"];\nvar m = __require(norm(base), DENY[0]);\nexport { m };\n`,
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+        expect(patterns(report).sort()).toEqual([`dist/index.js:${RETIRED}`, `dist/index.js:${OTHER}`].sort());
+      },
+    );
+    // Its pair: the same nesting under a callee that resolves nothing.
+    withRepo(
+      {
+        name: "iapp-consumer",
+        files: {
+          "dist/index.js": `var DENY = ["${RETIRED}", "${OTHER}"];\nvar m = harmless(norm(base), DENY[0]);\nexport { m };\n`,
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("passed");
+      },
+    );
   });
 
   test("PROOF: an inlined package.json manifest is a true positive with zero specifiers", () => {
@@ -1738,6 +1767,20 @@ describe("source-text: inert data regions and load callees", () => {
     }
     // `=` must be an assignment, not a comparison.
     expect(inlineDataRegions('var same = x === ["a"];', ["a"])).toEqual([]);
+    // A control head's `(` calls nothing, so the argument rule does not reach it
+    // — and a condition stores nothing either. This is the half of "a `(` after
+    // an identifier" that the bracket stack cannot answer.
+    expect(inlineDataRegions('while (["a"]) {}', ["a"])).toEqual([]);
+  });
+
+  test("a text the lexer cannot read yields no regions at all", () => {
+    // Whether a collection is an ARGUMENT is a question about brackets, and the
+    // lexer is what tracks them. When it loses the thread nothing is attributed,
+    // so every occurrence in the file is reported — the same direction
+    // `maskComments` fails in on the same text.
+    expect(inlineDataRegions('var deny = ["a", "b"];\n/* unterminated\n', ["a"])).toEqual([]);
+    // The pair: close the comment and the same declaration is a region again.
+    expect(inlineDataRegions('var deny = ["a", "b"];\n/* terminated */\n', ["a"]).length).toBe(1);
   });
 
   test("loadCallMentions sees the bundler's require wrapper, not just require", () => {
@@ -1747,6 +1790,23 @@ describe("source-text: inert data regions and load callees", () => {
     expect(loadCallMentions("var m = DENY.length;", "DENY")).toBe(false);
     // A name that merely CONTAINS the bound name is a different name.
     expect(loadCallMentions("var m = __require(DENYLIST[0]);", "DENY")).toBe(false);
+  });
+
+  test("loadCallMentions reads the WHOLE argument list, nested calls included", () => {
+    // `[^)]*` stopped at the first `)`, so one nested call in an earlier argument
+    // was enough to hide the name the load actually uses.
+    expect(loadCallMentions("var m = __require(norm(base), DENY[0]);", "DENY")).toBe(true);
+    expect(loadCallMentions("var m = __require(opts.get(k), DENY[0]);", "DENY")).toBe(true);
+    expect(loadCallMentions("var m = require(resolveFrom(dir), DENY[0]);", "DENY")).toBe(true);
+    expect(loadCallMentions("var m = Module._load(x(), DENY[0]);", "DENY")).toBe(true);
+    // A `)` inside a string argument does not end the list either.
+    expect(loadCallMentions('var m = __require("a)b", DENY[0]);', "DENY")).toBe(true);
+    // THE PAIR. A callee that resolves nothing withdraws nothing, however its
+    // arguments nest; and the name is still matched whole, not as a substring.
+    expect(loadCallMentions("var m = harmless(norm(base), DENY[0]);", "DENY")).toBe(false);
+    expect(loadCallMentions("var m = __require(norm(base), DENYLIST[0]);", "DENY")).toBe(false);
+    // The list ends where its `)` does: a name AFTER the call is not an argument.
+    expect(loadCallMentions("var m = __require(norm(base));\nvar n = DENY[0];", "DENY")).toBe(false);
   });
 
   test("importsModule recognises the __require form bun build --external emits", () => {
@@ -1852,6 +1912,65 @@ describe("source-text: a collection must be STORED, not just written down somewh
         expect(report.verdict).toBe("passed");
       },
     );
+  });
+
+  test("an argument is not a stored constant WHEREVER it sits in the list", () => {
+    // The character before the `[` can only ever see the FIRST argument.
+    // `load([...])` was rejected on the `(` while `load(cfg, [...])` landed on a
+    // `,` and was read as a stored constant — attributed, blanked, and scanned
+    // clean, which the base branch did not do. An argument is the callee's to do
+    // what it likes with, and `list.forEach((m) => __require(m))` one module away
+    // is the same load the for-of case above is rejected for.
+    for (const source of [
+      `var mods = registerAll(ctx, ["${RETIRED_MODULE}", "${OTHER_MODULE}"]);`,
+      `var mods = load(1, 2, ["${RETIRED_MODULE}", "${OTHER_MODULE}"]);`,
+      `var mods = register("app", ["${RETIRED_MODULE}", "${OTHER_MODULE}"]);`,
+      `loadAll(cfg, ["${RETIRED_MODULE}", "${OTHER_MODULE}"]).then(run);`,
+      // The immediately-invoked resolver, whose callee has no name to check.
+      `var mods = createRequire(url)(ctx, ["${RETIRED_MODULE}", "${OTHER_MODULE}"]);`,
+      // A ternary alternate ends on the same `:` a record key does, and stores
+      // nothing either.
+      `var mods = cond ? fallback : ["${RETIRED_MODULE}", "${OTHER_MODULE}"];`,
+    ]) {
+      expect(inlineDataRegions(source, [RETIRED_MODULE]), source).toEqual([]);
+    }
+    // THE PAIR, and the bound the argument rule needs. Only the INNERMOST
+    // bracket decides: a constant declared inside a callback BODY sits under a
+    // call frame too, and `__commonJS((exports) => { … })` is what a bundler
+    // emits for every CommonJS module it wraps. Rejecting on any enclosing call
+    // would unattribute all of them.
+    const wrapped =
+      `var mod = __commonJS((exports) => {\n  var DENY = ["${RETIRED_MODULE}", "${OTHER_MODULE}"];\n  exports.DENY = DENY;\n});`;
+    expect(inlineDataRegions(wrapped, [RETIRED_MODULE]).length).toBe(1);
+    // And a record entry is still a record entry: that `:` is a key's.
+    expect(inlineDataRegions(`var t = { deny: ["${RETIRED_MODULE}"] };`, [RETIRED_MODULE]).length).toBe(1);
+  });
+
+  test("the argument shape is still a finding end to end, in src/ as well as dist/", () => {
+    // The same fixture as the first-argument case above, with one leading
+    // argument. Attribution consults no path, so both have to behave the same
+    // way wherever they land.
+    for (const path of ["src/boot.ts", "dist/boot.js"]) {
+      withRepo(
+        {
+          name: "iapp-consumer",
+          files: { [path]: `export const mods = registerAll(ctx, ["${RETIRED_MODULE}", "${OTHER_MODULE}"]);\n` },
+        },
+        (report) => {
+          expect(report.verdict, path).toBe("failed");
+          expect(patterns(report).sort(), path).toEqual(
+            [`${path}:${RETIRED_MODULE}`, `${path}:${OTHER_MODULE}`].sort(),
+          );
+        },
+      );
+      // The pair: the same two names stored rather than handed to a call.
+      withRepo(
+        { name: "iapp-consumer", files: { [path]: `export const mods = ["${RETIRED_MODULE}", "${OTHER_MODULE}"];\n` } },
+        (report) => {
+          expect(report.verdict, path).toBe("passed");
+        },
+      );
+    }
   });
 });
 
@@ -2092,6 +2211,95 @@ describe("no-cloud gate: a blanked span may carry nothing but the row this table
     withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${wrongValue}];\nexport { t };\n` } }, (report) => {
       expect(patterns(report)).toContain(`dist/bundle.js:${CREDENTIAL}`);
     });
+  });
+
+  test("a REPEATED key is a FREE SLOT unless the parser refuses the record", () => {
+    // F1c, the third review blocker, and the one that survived entry-for-entry
+    // equality. Duplicate property names are legal JavaScript that a bundler
+    // preserves, and `parseInlineData` used to build the entries with `Map.set` —
+    // which keeps the LAST value and shrinks the count. So a record repeating
+    // `message` arrived at `isOwnPatternDeclaration` as a THREE-entry record whose
+    // every entry equalled a module row, and `withoutInlinedDeclarations` blanked
+    // the whole span including the shadowed value nothing had compared.
+    //
+    // Measured before the parser refused it, as tarballs under a third-party
+    // package name, each against a control that fails:
+    //
+    //   verbatim module row + shadowed `message` holding a
+    //     credential env key                                  EXIT=0, 0 findings
+    //     control: the same credential with no record          EXIT=1, 1 critical
+    //   the same slot carrying three config patterns at once   EXIT=0, 0 findings
+    //   a backtick in the shadowed slot, span over five lines  EXIT=0, 0 findings
+    //
+    // The `config` patterns have no import to look for, so the bare-mention
+    // detector is their only one and a blanked span is the whole of what stands
+    // between them and a clean scan. The fix is in `parseInlineData`, not here: a
+    // duplicate key means the text is not the inert constant this package emits,
+    // so refusing to describe it is the fail-open direction.
+    const shadowed =
+      `{ pattern: "${RETIRED_ROW}", kind: "module", message: "${CREDENTIAL}=placeholder-not-a-real-value", ` +
+      `message: "Shared ${RETIRED_ROW} runtime reference is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${shadowed}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the credential in the shadowed entry must be reported").toContain(
+        `dist/bundle.js:${CREDENTIAL}`,
+      );
+      expect(report.verdict).toBe("failed");
+    });
+    // One shadowed slot hid the credential AND all three config patterns at once,
+    // on a plain assignment with no aliasing.
+    const manyPatterns = shadowed.replace(
+      `"${CREDENTIAL}=placeholder-not-a-real-value"`,
+      `"${CREDENTIAL} ${DOTDIR_ROW} ${CONFIG_ROW}"`,
+    );
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${manyPatterns}];\nexport { t };\n` } }, (report) => {
+      for (const pattern of [CREDENTIAL, DOTDIR_ROW, CONFIG_ROW]) {
+        expect(patterns(report), pattern).toContain(`dist/bundle.js:${pattern}`);
+      }
+      expect(report.verdict).toBe("failed");
+    });
+    // A backtick in the shadowed slot, so the span it would have blanked is
+    // multi-line and arbitrarily long.
+    const multiline = shadowed.replace(
+      `"${CREDENTIAL}=placeholder-not-a-real-value"`,
+      `\`\n  ${CREDENTIAL}\n  ${DOTDIR_ROW}\n\``,
+    );
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${multiline}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toContain(`dist/bundle.js:${CREDENTIAL}`);
+      expect(report.verdict).toBe("failed");
+    });
+    // The record as the region ROOT, not just as an element of one.
+    withRepo({ name: "@acme/consumer-app", files: { "src/table.ts": `export const t = ${shadowed};\n` } }, (report) => {
+      expect(patterns(report), "hand-authored source, same content, same verdict").toContain(
+        `src/table.ts:${CREDENTIAL}`,
+      );
+    });
+    // THE PAIR, both arities: the genuine three-entry module row and the genuine
+    // four-entry config row repeat no key, and must still be attributed.
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${verbatimRow}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the 3-key row this table emits must still be attributed").toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+    const genuineFourKey =
+      `{ pattern: "${DOTDIR_ROW}", kind: "config", checkKind: "runtime_config", ` +
+      `message: "Legacy ${DOTDIR_ROW} runtime config is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${genuineFourKey}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the 4-key row this table emits must still be attributed").toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+  });
+
+  test("the parser refuses a duplicate-key record outright", () => {
+    // The rule lives in `parseInlineData`, so it is tested where it lives as well
+    // as end to end: a record with a repeated key describes nothing, and neither
+    // does any collection around it, so no span is ever blanked on its strength.
+    const duplicate = `var t = [{ pattern: "${RETIRED_ROW}", kind: "module", message: "a", message: "b" }];`;
+    expect(inlineDataRegions(duplicate, [RETIRED_ROW])).toEqual([]);
+    // A quoted key shadowing a bare one is the same key, and is refused too.
+    const quotedDuplicate = `var t = [{ pattern: "${RETIRED_ROW}", kind: "module", "kind": "config", message: "b" }];`;
+    expect(inlineDataRegions(quotedDuplicate, [RETIRED_ROW])).toEqual([]);
+    // The pair: distinct keys still parse, and the region is still found.
+    const distinct = `var t = [{ pattern: "${RETIRED_ROW}", kind: "module", message: "b" }];`;
+    expect(inlineDataRegions(distinct, [RETIRED_ROW]).length).toBe(1);
   });
 
   test("an accepted key cannot hold a nested collection", () => {

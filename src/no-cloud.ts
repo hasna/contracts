@@ -486,9 +486,12 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
  * They are MODULE-CLASS ONLY, and that bound comes from the two equality rules
  * rather than from an argument: the only array ever attributed equals the
  * denylist, which holds package names and nothing else, and the only record ever
- * attributed equals a table row entry for entry, so it has no slot to carry a
- * value in. No `config` pattern and no credential env key can ride any of the
- * three.
+ * attributed equals a table row entry for entry over an entry set the parser
+ * guarantees describes the whole record, so it has no slot to carry a value in.
+ * No `config` pattern and no credential env key can ride any of the three. That
+ * bound is exactly as strong as the completeness of those two rules — when the
+ * record rule was incomplete, a shadowed key carried all three `config` patterns
+ * and a credential at once, on a plain assignment, with no aliasing needed.
  *
  * The earlier wording here said "bound to one name, rebound to a second", which
  * made the residual sound narrower and harder to reach than it is. Understating it
@@ -540,9 +543,15 @@ function ownPatternDeclarationSpans(text: string, node: InlineDataNode): Constan
   //      but a union admitted it on all eight — and being a string was all it had
   //      to be, never the right string. A backtick literal then made the span
   //      multi-line and arbitrarily long.
+  //   3. compare the whole ENTRY SET, while the entry set was not the whole
+  //      RECORD. Duplicate property names are legal JavaScript and a bundler
+  //      preserves them, but `parseInlineData` built the entries with `Map.set`,
+  //      which keeps only the last value — so `{pattern, kind, message: <payload>,
+  //      message: "<the real one>"}` arrived here as a three-entry record equal to
+  //      a module row, and the span blanked on that basis covered the payload.
   //
-  // Measured at the second version, as tarballs under a third-party package name,
-  // each against a control that fails:
+  // Measured at the second and third versions, as tarballs under a third-party
+  // package name, each against a control that fails:
   //
   //   verbatim module row + `checkKind` holding a credential env key -> EXIT=0, 0 findings
   //     control: the same string with no triple around it            -> EXIT=1, 1 critical
@@ -550,6 +559,9 @@ function ownPatternDeclarationSpans(text: string, node: InlineDataNode): Constan
   //     spread over five lines                                      -> EXIT=0, 0 findings
   //     control: the same payload with no triple                    -> EXIT=1, 3 critical
   //   the same slot in hand-authored `src/table.ts`                  -> EXIT=0, 0 findings
+  //   verbatim module row + a SHADOWED `message` holding a
+  //     credential env key                                          -> EXIT=0, 0 findings
+  //     control: the same credential with no record around it       -> EXIT=1, 1 critical
   //
   // Each narrowing removed one free slot and left the next, and a THIRD arrived
   // the same way: a duplicate key. That is the point at which narrowing the

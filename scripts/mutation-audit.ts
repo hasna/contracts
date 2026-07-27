@@ -632,6 +632,36 @@ const MUTATIONS: Mutation[] = [
     to: "    if (false) return false;",
   },
   {
+    id: "M79c-attrib-an-argument-is-not-a-declaration-in-any-position",
+    rule: "a collection handed to a call is an argument WHEREVER it sits in the list, not only first",
+    file: "src/source-text.ts",
+    from: "  if (callArgumentOpeners.has(start)) return false;",
+    to: "  if (false) return false;",
+  },
+  {
+    id: "M79d-attrib-only-the-innermost-bracket-decides",
+    rule: "a constant declared in a callback BODY is not an argument, so only the innermost frame counts",
+    file: "src/source-text.ts",
+    from:
+      "      const enclosing = brackets[brackets.length - 1];\n" +
+      "      if (enclosing?.paren === true && enclosing.callee !== null) callArgumentOpeners.add(index);",
+    to: "      if (brackets.some((frame) => frame.paren && frame.callee !== null)) callArgumentOpeners.add(index);",
+  },
+  {
+    id: "M79e-attrib-a-colon-must-introduce-a-record-value",
+    rule: "a ternary alternate ends on the same `:` a record key does, and stores nothing",
+    file: "src/source-text.ts",
+    from: '    if (!typePosition && last === ":" && !recordKeyPrecedes(before.slice(0, -1).replace(/\\s+$/, ""))) return false;',
+    to: "    if (false) return false;",
+  },
+  {
+    id: "M83b-attrib-an-unreadable-text-is-attributed-nothing",
+    rule: "positions come off the lexer, so a text it cannot read yields no regions at all",
+    file: "src/source-text.ts",
+    from: "      if (lexed === undefined) lexed = lexCLike(text);",
+    to: "      if (lexed === undefined) lexed = lexCLike(text) ?? { tokens: [], callArgumentOpeners: new Set<number>() };",
+  },
+  {
     id: "M80-attrib-bound-name-in-a-load-call-withdraws-it",
     rule: "a declaration stored under a name a load call names is a laundering route",
     file: "src/no-cloud.ts",
@@ -651,6 +681,13 @@ const MUTATIONS: Mutation[] = [
     file: "src/source-text.ts",
     from: "const LOAD_CALLEE = String.raw`(?:^|[^\\w$])(?:_*(?:import|require)|createRequire|Module\\s*\\.\\s*_load)`;",
     to: "const LOAD_CALLEE = String.raw`(?:^|[^\\w$])_*(?:import|require)`;",
+  },
+  {
+    id: "M80b-attrib-the-whole-argument-list-is-read",
+    rule: "a nested call in an earlier argument does not end the load call's argument list",
+    file: "src/source-text.ts",
+    from: '    if (character === "(" || character === "[" || character === "{") depth += 1;',
+    to: '    if (character === "(" && depth === 0) depth += 1;',
   },
   {
     id: "M82-attrib-load-call-name-is-a-whole-identifier",
@@ -692,6 +729,13 @@ const MUTATIONS: Mutation[] = [
     from: '      kind: "checkKind" in entry ? entry.checkKind : file.kind,',
     // Spelled in pieces so this file does not carry a literal the gate forbids.
     to: '      kind: entry.pattern === ".hasna/' + 'cloud" ? "runtime_config" : file.kind,',
+  },
+  {
+    id: "M89-attrib-a-repeated-key-is-refused",
+    rule: "a record repeating a key is not describable: `Map` keeps the last value, so the first is never compared",
+    file: "src/source-text.ts",
+    from: "      if (entries.has(key)) return null;",
+    to: "      if (false) return null;",
   },
   {
     id: "M87-attrib-path-config-read-off-the-table",
