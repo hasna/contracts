@@ -464,7 +464,8 @@ const MUTATIONS: Mutation[] = [
   // The gate no longer scores its own inlined declaration as the consumer's
   // breach — and every detector still runs on everything else in that file.
   //
-  // Filter to these with `bun scripts/mutation-audit.ts declaration`.
+  // Filter to these with `bun scripts/mutation-audit.ts attrib` — every id in
+  // this block carries that tag, which is what makes the filter usable.
   //
   // TWO DIRECTIONS, because this rule has failed review twice in the SAME
   // direction. M71/M72/M80 revert the fix, so the false positive returns.
@@ -473,98 +474,98 @@ const MUTATIONS: Mutation[] = [
   // returned early for a whole FILE and took the credential detectors with them.
   // ---------------------------------------------------------------------
   {
-    id: "M71-declaration-is-attributed-at-all",
+    id: "M71-attrib-happens-at-all",
     rule: "a consumer that bundles this package's own declaration is not in breach of it",
     file: "src/no-cloud.ts",
     from: "  const masked = withoutInlinedDeclarations(maskCommentsForPath(file.text, file.path), file.path);",
     to: "  const masked = maskCommentsForPath(file.text, file.path);",
   },
   {
-    id: "M72-declaration-recognised-by-content",
+    id: "M72-attrib-recognised-by-content",
     rule: "the declaration is recognised, not merely parsed",
     file: "src/no-cloud.ts",
     from: "      if (isOwnPatternDeclaration(node)) spans.push({ start: node.start, end: node.end });",
     to: "      if (false) spans.push({ start: node.start, end: node.end });",
   },
   {
-    id: "M73-declaration-exemption-is-per-occurrence-not-per-file",
+    id: "M73-attrib-is-per-occurrence-not-per-file",
     rule: "attribution drops the declaration's own characters, never the whole file",
     file: "src/no-cloud.ts",
     from: "  return blankSpans(masked, spans);",
     to: '  return spans.length > 0 ? "" : masked;',
   },
   {
-    id: "M74-denylist-array-must-match-length",
+    id: "M74-attrib-array-must-match-length",
     rule: "an array holding a SUBSET or SUPERSET of the denylist is somebody else's data",
     file: "src/no-cloud.ts",
     from: "      node.items.length === FORBIDDEN_SHARED_CLOUD_RUNTIMES.length &&",
     to: "      true &&",
   },
   {
-    id: "M75-denylist-array-must-match-members",
+    id: "M75-attrib-array-must-match-members",
     rule: "an array of the right length but the wrong names is not the denylist",
     file: "src/no-cloud.ts",
     from: '      node.items.every((item, index) => item.kind === "string" && item.value === FORBIDDEN_SHARED_CLOUD_RUNTIMES[index])',
     to: '      node.items.every((item) => item.kind === "string")',
   },
   {
-    id: "M76-row-must-match-its-own-message",
+    id: "M76-attrib-row-must-match-its-own-message",
     rule: "a row cannot pair a forbidden name with a message that is not that name's own",
     file: "src/no-cloud.ts",
     from: "    (entry) => entry.pattern === pattern.value && entry.kind === kind.value && entry.message === message.value",
     to: "    (entry) => entry.pattern === pattern.value",
   },
   {
-    id: "M77-row-shape-alone-is-not-attribution",
+    id: "M77-attrib-row-shape-alone-is-not-enough",
     rule: "a three-key row that names no known pattern is not this table's row",
     file: "src/no-cloud.ts",
     from: "  return RUNTIME_PATTERNS.some(",
     to: "  return true || RUNTIME_PATTERNS.some(",
   },
   {
-    id: "M78-declaration-must-not-be-read-in-place",
+    id: "M78-attrib-not-read-in-place",
     rule: "indexing, calling or member-accessing a collection is a load, not a declaration",
     file: "src/source-text.ts",
     from: '  if (next.startsWith("[") || next.startsWith("(") || next.startsWith(".") || next.startsWith("?.")) return false;',
     to: "  if (false) return false;",
   },
   {
-    id: "M79-declaration-must-sit-in-data-position",
+    id: "M79-attrib-must-sit-in-data-position",
     rule: "a collection handed to a call is an argument, not a stored constant",
     file: "src/source-text.ts",
     from: '    if (!typePosition && !(last === "=" || last === "[" || last === "," || last === ":" || last === "(")) return false;',
     to: "    if (false) return false;",
   },
   {
-    id: "M79b-parenthesised-value-is-not-a-call-argument",
+    id: "M79b-attrib-call-argument-is-not-a-declaration",
     rule: "a `(` that follows an identifier is a CALL, and its argument is not a declaration",
     file: "src/source-text.ts",
     from: '    if (last === "(" && IDENTIFIER_TAIL.test(before.slice(0, -1))) return false;',
     to: "    if (false) return false;",
   },
   {
-    id: "M80-bound-name-a-load-call-uses-withdraws-attribution",
+    id: "M80-attrib-bound-name-in-a-load-call-withdraws-it",
     rule: "a declaration stored under a name a load call names is a laundering route",
     file: "src/no-cloud.ts",
     from: "    if (region.boundName !== null && loadCallMentions(masked, region.boundName)) continue;",
     to: "    if (false) continue;",
   },
   {
-    id: "M81-load-callee-includes-the-bundler-wrapper",
+    id: "M81-attrib-load-callee-includes-the-bundler-wrapper",
     rule: "`__require` is a load: bun build --external emits it and `\\b` cannot see it",
     file: "src/source-text.ts",
     from: "const LOAD_CALLEE = String.raw`(?:^|[^\\w$])_*(?:import|require)`;",
     to: "const LOAD_CALLEE = String.raw`\\b(?:import|require)`;",
   },
   {
-    id: "M82-load-call-name-match-is-a-whole-identifier",
+    id: "M82-attrib-load-call-name-is-a-whole-identifier",
     rule: "`DENYLIST` is not `DENY`, so a bound-name check cannot match a substring",
     file: "src/source-text.ts",
     from: "  const bounded = new RegExp(`[^\\\\w$]${escapeRegex(name)}(?![\\\\w$])`);",
     to: "  const bounded = new RegExp(escapeRegex(name));",
   },
   {
-    id: "M83-enclosure-is-checked-before-the-seen-set",
+    id: "M83-attrib-enclosure-checked-before-the-seen-set",
     rule: "an unrelated region recorded upstream does not end the search for this occurrence",
     file: "src/source-text.ts",
     from:
@@ -576,21 +577,21 @@ const MUTATIONS: Mutation[] = [
       "        if (!(root.start <= at && at + needle.length <= root.end)) continue;",
   },
   {
-    id: "M84-attribution-is-for-c-family-source-only",
+    id: "M84-attrib-c-family-source-only",
     rule: "a manifest is read structurally; its text is not edited on a shape match",
     file: "src/no-cloud.ts",
     from: '  if (commentSyntaxForPath(path) !== "c-like") return masked;',
     to: "  if (false) return masked;",
   },
   {
-    id: "M85-a-constant-is-only-string-literals",
+    id: "M85-attrib-a-constant-is-only-string-literals",
     rule: "a collection holding a call or an identifier is code, and code is never attributed",
     file: "src/source-text.ts",
     from: "      const item = parseInlineData(text, index);\n      if (item === null) return null;",
     to: "      const item = parseInlineData(text, index);\n      if (item === null) { index = skipSpace(text, index + 1); continue; }",
   },
   {
-    id: "M86-forbidden-names-are-spelled-once-in-the-table",
+    id: "M86-attrib-names-spelled-once-in-the-table",
     rule: "no finding site re-spells a forbidden name, because a re-spelling is code a bundler inlines",
     file: "src/no-cloud.ts",
     from: '      kind: "checkKind" in entry ? entry.checkKind : file.kind,',
@@ -598,7 +599,7 @@ const MUTATIONS: Mutation[] = [
     to: '      kind: entry.pattern === ".hasna/' + 'cloud" ? "runtime_config" : file.kind,',
   },
   {
-    id: "M87-path-config-patterns-are-read-off-the-table",
+    id: "M87-attrib-path-config-read-off-the-table",
     rule: "a legacy config dotdir path is runtime config, decided from the table not a literal",
     file: "src/no-cloud.ts",
     from: "  for (const entry of PATH_CONFIG_PATTERNS) {\n    if (path.includes(entry.pattern)) return entry.checkKind;\n  }",
