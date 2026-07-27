@@ -95,6 +95,86 @@ Granted wildcards such as `<app>:*`, `*:read`, and `*` are allowed only for
 explicit admin/service bootstrap cases and must be visible in audit output as
 high-risk grants.
 
+## Tenant Identifier
+
+`AuthContext.tenantId` above is a required boundary claim, but until now no
+Hasna token had a place to carry it. The API-key claim set
+(`ApiKeyClaims` in `@hasna/contracts/auth`) now carries an **optional `tid`**,
+and this section is the normative definition every Hasna auth seam binds to.
+
+**Wire type.** A tenant id is **always a JSON string**. Never a number, never an
+object, never `null`. A store with a PostgreSQL `uuid` column serializes its
+canonical string form; a store with a `text` column passes its value through.
+This is the fix for the observed drift where the same logical tenant was a
+`uuid` in one repo's schema and `text` in another's, so neither could resolve
+the other's identifier.
+
+**Grammar.** `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, maximum 64 characters
+(`TENANT_ID_PATTERN`, `MAX_TENANT_ID_LENGTH`). Deliberately permissive about
+shape — a UUID, a ULID, a slug (`acme-corp`) and a prefixed id
+(`org_01HQ…`) are all valid, because all four are already in use — and strict
+about character set: whitespace, control characters, `/`, `:` (reserved as the
+scope separator), `@`, quotes and non-ASCII are excluded, so a tenant id is
+always safe in a log line, a header value, and a URL path segment.
+
+**Comparison.** Tenant ids are **opaque and case-sensitive**, with exactly one
+exception: **UUIDs**. A PostgreSQL `uuid` column does not store what you gave
+it — it parses and rewrites it, so `9D4B2A1C0E5F4A7B8C3D1E2F3A4B5C6D`,
+`{9d4b2a1c-…}` and `9D4B2A1C-…` all come back as one canonical lowercase
+hyphenated string, while a `text` column does no such thing. That asymmetry, not
+letter case in the abstract, is the mechanism behind the drift, so
+`canonicalizeTenantId` folds **exactly the spellings a `uuid` column accepts**
+(hyphenated, hyphen-less, and either wrapped in braces, in any case) to the
+canonical form, and folds nothing else. Both sides are trimmed before
+comparison. Issuers MUST emit the canonical form; `mintApiKey` and
+`ApiKeyStore.insert` do it for the caller.
+
+**Two things this rule deliberately does NOT do.**
+
+- **ULIDs are not case-folded**, even though Crockford base32 is a
+  case-insensitive encoding. No database type silently rewrites a ULID the way
+  `uuid` rewrites a UUID, so folding would only create new ways for two distinct
+  opaque ids to collide. Issuers MUST emit the canonical uppercase form. The
+  same applies to prefixed ids such as `org_01HQ…`.
+- **It does not accommodate a store that treats two spellings of one UUID as two
+  tenants.** Under this contract they are one tenant. If a `text` column holds
+  both, that is a data-modelling bug; accommodating it would mean not closing the
+  drift at all.
+
+**Absence is not a wildcard.** A token with no `tid` is *untenanted* — it names
+no organization. A service whose rows carry an organization reference MUST
+reject it rather than treat it as "all tenants". Set `requireTenant: true` on
+`verifyApiKey` / `verifyApiKeyToken` to get that rejection from the kit;
+`expectedTid` implies it. Any truthy `requireTenant` enables the gate — a
+security control must not fail open because a config value arrived as the string
+`"true"`. Both tenant denials return **403**, not 401: the credential is
+authentic and unexpired, it is simply not permitted for this organization — the
+same shape as `insufficient_scope`.
+
+**Absence must be read as absence.** Because the untenanted case is
+load-bearing, `tid` MUST be read as an **own property** (`ownTenantId`) wherever
+it is consumed — parse, verify, mint, and persist alike. A plain `claims.tid`
+resolves through the prototype chain, so one `Object.prototype.tid` write
+anywhere in the process would hand every untenanted token a tenant, and one that
+skipped validation precisely because the claim was absent. For the same reason a
+tenant FILTER is applied on presence, not truthiness: `ApiKeyStore.list({ tid })`
+throws on an empty or ungrammatical `tid` rather than dropping the clause and
+widening the query to every organization's records.
+
+**A per-call tenant narrows; it never replaces.** When a service is pinned with
+`verifyApiKey({ expectedTid })` *and* a route supplies
+`context.expectedTid` (typically from `/v1/orgs/:tid/…`), the two MUST agree.
+Letting the per-call value win would let any holder of a valid token for the app
+— they all verify against the same signing secret — defeat the pin by addressing
+their own organization in the URL.
+
+**Tamper evidence.** `tid` lives inside the signed claim body, so altering it
+invalidates the signature. It is not a header and MUST NOT be read from one.
+
+**Compatibility.** The claim is additive. A token minted before `tid` existed
+parses, verifies, and authenticates unchanged, and minting without a tenant
+produces a byte-identical claim body — so stored `tokenHash` values still match.
+
 ## Role Model
 
 Apps may add domain roles, but the shared minimum role set is:

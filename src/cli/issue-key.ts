@@ -5,6 +5,7 @@
 // it is a freshly generated secret, not the disclosure of an at-rest credential).
 
 import { mintApiKey } from "../auth/keys";
+import { normalizeTenantId } from "../auth/tenant";
 import { ApiKeyStore, type AuthQueryClient } from "../auth/store";
 
 export interface IssueKeyDeps {
@@ -79,6 +80,17 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
 
   const agent = options.agent !== undefined ? String(options.agent) : bootstrap ? "bootstrap" : undefined;
 
+  let tid: string | undefined;
+  if (options.tid !== undefined) {
+    try {
+      tid = normalizeTenantId(String(options.tid));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      deps.report({ json }, message, { code: "bad_tid" });
+      return;
+    }
+  }
+
   // TTL: --no-expiry => null; else --ttl-days (default 90).
   let ttlSeconds: number | null;
   if (options.expiry === false) {
@@ -112,6 +124,7 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
       signingSecret,
       ttlSeconds,
       ...(agent !== undefined ? { agent } : {}),
+      ...(tid !== undefined ? { tid } : {}),
       ...(deps.now ? { nowMs: deps.now() } : {}),
     });
   } catch (error) {
@@ -164,6 +177,7 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
           app,
           kid: minted.kid,
           agent: agent ?? null,
+          tid: tid ?? null,
           scopes,
           issuedAt,
           expiresAt,
@@ -183,6 +197,7 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
   console.log(`Issued API key for app '${app}' (kid ${minted.kid})${bootstrap ? " [bootstrap]" : ""}`);
   console.log(`  scopes:    ${scopes.join(", ")}`);
   console.log(`  agent:     ${agent ?? "-"}`);
+  console.log(`  tenant:    ${tid ?? "- (untenanted)"}`);
   console.log(`  issued:    ${issuedAt}`);
   console.log(`  expires:   ${expiresAt ?? "never"}`);
   console.log(`  record:    ${stored ? `stored (${table})` : "not stored (--no-store)"}`);

@@ -9,6 +9,7 @@
 // is no cache and no local mirror; a revocation check reads the row each time.
 
 import type { ApiKeyClaims, MintedApiKey } from "./keys.js";
+import { normalizeTenantId, ownTenantId } from "./tenant.js";
 
 /** Minimal row shape. Compatible with `pg` QueryResultRow. */
 export type Row = Record<string, unknown>;
@@ -29,6 +30,8 @@ export interface ApiKeyRecord {
   kid: string;
   app: string;
   agent: string | null;
+  /** Tenant the key acts for; `null` for untenanted (pre-`tid`) keys. */
+  tid: string | null;
   scopes: string[];
   tokenHash: string;
   issuedAt: string;
@@ -64,7 +67,22 @@ function createTableSql(table: string): string {
   )`;
 }
 
-/** Ordered migrations for the api-keys table (id namespaced to avoid clashes). */
+/**
+ * Ordered migrations for the api-keys table (id namespaced to avoid clashes).
+ *
+ * 0003 adds the tenant column, as a SEPARATE migration. 0001's SQL MUST NOT be
+ * edited to include it, and not merely because a deployed ledger would not
+ * re-run 0001: consumers feed these straight into a CONTENT-ADDRESSED ledger
+ * (`checksumSql` in src/kit/templates/migrations.ts) that aborts the whole
+ * migration run on `Migration checksum mismatch`. Editing 0001 therefore breaks
+ * the upgrade AND prevents 0003 from ever running, so the column would never
+ * land. `tests/auth-tenant.test.ts` pins 0001's and 0002's checksums to make
+ * that mistake impossible to commit.
+ *
+ * The column is `TEXT NULL` with no DEFAULT — matching the contract's wire
+ * type, and nullable because keys issued before the tenant claim existed are
+ * untenanted, not tenant-zero.
+ */
 export function apiKeyMigrations(table: string = DEFAULT_API_KEYS_TABLE): AuthMigration[] {
   return [
     { id: `hasna_auth_0001_${table}`, sql: createTableSql(table) },
@@ -72,6 +90,11 @@ export function apiKeyMigrations(table: string = DEFAULT_API_KEYS_TABLE): AuthMi
       id: `hasna_auth_0002_${table}_indexes`,
       sql: `CREATE INDEX IF NOT EXISTS ${table}_app_idx ON ${table} (app);
             CREATE INDEX IF NOT EXISTS ${table}_token_hash_idx ON ${table} (token_hash);`,
+    },
+    {
+      id: `hasna_auth_0003_${table}_tenant`,
+      sql: `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS tid TEXT;
+            CREATE INDEX IF NOT EXISTS ${table}_tid_idx ON ${table} (tid);`,
     },
   ];
 }
@@ -96,10 +119,15 @@ function parseScopes(value: unknown): string[] {
 }
 
 function rowToRecord(row: Row): ApiKeyRecord {
+  // Own-property read (see `ownTenantId`): a driver returning a row from before
+  // migration 0003 has no `tid` key at all, and that absence must read as
+  // untenanted rather than as whatever sits on the prototype.
+  const tid = ownTenantId(row);
   return {
     kid: String(row.kid),
     app: String(row.app),
     agent: row.agent === null || row.agent === undefined ? null : String(row.agent),
+    tid: tid === null || tid === undefined ? null : String(tid),
     scopes: parseScopes(row.scopes),
     tokenHash: String(row.token_hash),
     issuedAt: toIso(row.issued_at) ?? new Date(0).toISOString(),
@@ -115,6 +143,13 @@ export interface InsertKeyInput {
   kid: string;
   app: string;
   agent?: string | null;
+  /**
+   * Tenant the key acts for. Omit or `null` for an untenanted key. Validated
+   * and canonicalized on the way in: a store that accepted ids no token could
+   * carry, or that stored two spellings of one UUID, would reopen the drift
+   * this claim exists to close.
+   */
+  tid?: string | null;
   scopes: string[];
   tokenHash: string;
   issuedAt: Date;
@@ -151,14 +186,18 @@ export class ApiKeyStore {
 
   /** Insert a hashed key record. Throws on duplicate kid/token hash. */
   async insert(input: InsertKeyInput): Promise<void> {
+    // Own-property read (see `ownTenantId`): a polluted prototype must not put
+    // a tenant on a row the caller inserted without one.
+    const tid = ownTenantId(input);
     await this.client.execute(
       `INSERT INTO ${this.table}
-         (kid, app, agent, scopes, token_hash, issued_at, expires_at, created_by)
-       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8)`,
+         (kid, app, agent, tid, scopes, token_hash, issued_at, expires_at, created_by)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)`,
       [
         input.kid,
         input.app,
         input.agent ?? null,
+        tid === undefined || tid === null ? null : normalizeTenantId(tid),
         JSON.stringify(input.scopes),
         input.tokenHash,
         input.issuedAt.toISOString(),
@@ -175,6 +214,7 @@ export class ApiKeyStore {
       kid: minted.kid,
       app: claims.app,
       agent: claims.agent ?? null,
+      tid: ownTenantId(claims) ?? null,
       scopes: claims.scopes,
       tokenHash: minted.tokenHash,
       issuedAt: new Date(claims.iat * 1000),
@@ -245,19 +285,40 @@ export class ApiKeyStore {
     ]);
   }
 
-  /** List keys, optionally filtered by app / excluding revoked. */
-  async list(options: { app?: string; includeRevoked?: boolean } = {}): Promise<ApiKeyRecord[]> {
+  /**
+   * List keys, optionally filtered by app and/or tenant, excluding revoked by
+   * default. `tid` filters to exactly that tenant; it never falls back to
+   * "all tenants" when the filter does not match, so an operator listing one
+   * organization's keys cannot accidentally enumerate another's. A `tid` that
+   * is present but unusable (empty, whitespace, or outside the grammar) THROWS
+   * rather than listing anything.
+   */
+  async list(options: { app?: string; tid?: string; includeRevoked?: boolean } = {}): Promise<ApiKeyRecord[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (options.app) {
       params.push(options.app);
       clauses.push(`app = $${params.length}`);
     }
+    // PRESENCE, not truthiness. `tid: ""` — a `req.params.tid` that was empty,
+    // or a `String(req.query.tid ?? "")` — is a caller that MEANT to filter by
+    // tenant, so dropping the clause would widen the query to every
+    // organization's key records: the exact enumeration this filter exists to
+    // prevent, and the opposite of what the guarantee above promises.
+    // `normalizeTenantId` therefore does the work: it trims, canonicalizes so
+    // that listing by the UUID an operator pasted from a `uuid` column matches
+    // a row written from a `text` column and vice versa, and throws on anything
+    // no token could ever carry — the same rule `insert` already applies.
+    const tid = ownTenantId(options);
+    if (tid !== undefined) {
+      params.push(normalizeTenantId(tid));
+      clauses.push(`tid = $${params.length}`);
+    }
     if (!options.includeRevoked) {
       clauses.push("revoked_at IS NULL");
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-    const rows = await this.client.many<Row>(`SELECT * FROM ${this.table} ${where} ORDER BY issued_at DESC`);
+    const rows = await this.client.many<Row>(`SELECT * FROM ${this.table} ${where} ORDER BY issued_at DESC`, params);
     return rows.map(rowToRecord);
   }
 

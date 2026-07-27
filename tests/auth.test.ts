@@ -153,9 +153,9 @@ class FakeStoreClient implements AuthQueryClient {
   rows = new Map<string, Row>();
 
   async execute(sql: string, params: readonly unknown[] = []): Promise<void> {
-    if (sql.includes("CREATE TABLE") || sql.includes("CREATE INDEX")) return;
+    if (sql.includes("CREATE TABLE") || sql.includes("CREATE INDEX") || sql.includes("ALTER TABLE")) return;
     if (sql.startsWith("INSERT INTO")) {
-      const [kid, app, agent, scopes, token_hash, issued_at, expires_at, created_by] = params as unknown[];
+      const [kid, app, agent, tid, scopes, token_hash, issued_at, expires_at, created_by] = params as unknown[];
       if (this.rows.has(String(kid))) throw new Error("duplicate key value violates unique constraint (kid)");
       for (const row of this.rows.values()) {
         if (row.token_hash === token_hash) throw new Error("duplicate key value violates unique constraint (token_hash)");
@@ -164,6 +164,7 @@ class FakeStoreClient implements AuthQueryClient {
         kid,
         app,
         agent,
+        tid,
         scopes,
         token_hash,
         issued_at,
@@ -225,7 +226,8 @@ describe("api key store (fake client)", () => {
   test("migration ids are namespaced and deterministic", () => {
     const m = apiKeyMigrations("api_keys");
     expect(m[0]?.id).toBe("hasna_auth_0001_api_keys");
-    expect(m.length).toBe(2);
+    expect(m[2]?.id).toBe("hasna_auth_0003_api_keys_tenant");
+    expect(m.length).toBe(3);
   });
 
   test("insert, find, status, revoke lifecycle", async () => {

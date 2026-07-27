@@ -5,7 +5,7 @@
 //   hasna_<app>_<body>.<sig>
 //
 //   <app>  = app slug ([a-z][a-z0-9-]*), also embedded in the signed claims
-//   <body> = base64url(JSON claims) — { v, kid, app, scopes, iat, exp, agent? }
+//   <body> = base64url(JSON claims) — { v, kid, app, tid?, scopes, iat, exp, agent? }
 //   <sig>  = base64url(HMAC-SHA256(signingSecret, "hasna_<app>_<body>"))
 //
 // Verification is STATELESS: the server recomputes the HMAC with its signing
@@ -18,6 +18,7 @@
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { isValidScope } from "./scopes.js";
+import { canonicalizeTenantId, isValidTenantId, normalizeTenantId, ownTenantId, tenantIdsEqual } from "./tenant.js";
 
 /** Token wire-format version. Bump only on a breaking format change. */
 export const API_KEY_TOKEN_VERSION = 1;
@@ -41,6 +42,19 @@ export interface ApiKeyClaims {
   kid: string;
   /** App slug the key authenticates against. */
   app: string;
+  /**
+   * Tenant (organization) the key acts for, in the issuer's namespace.
+   *
+   * OPTIONAL AND ADDITIVE. Absent means the key is UNTENANTED — it names no
+   * organization. Absent is NOT a wildcard: a service that scopes data by
+   * tenant must reject an untenanted key rather than treat it as "all
+   * tenants". Pass `requireTenant` to {@link verifyApiKeyToken} to get that
+   * rejection from the kit instead of hand-rolling it per service.
+   *
+   * The value is inside the signed body, so it is tamper-evident: changing
+   * `tid` invalidates the signature.
+   */
+  tid?: string;
   /** Granted scopes (`<app>:<action>` or wildcards). */
   scopes: string[];
   /** Issued-at, epoch seconds. */
@@ -54,6 +68,13 @@ export interface ApiKeyClaims {
 export interface MintApiKeyOptions {
   app: string;
   scopes: string[];
+  /**
+   * Tenant (organization) the key acts for. Omit to mint an untenanted key —
+   * the pre-`tid` behaviour, and still the correct choice for a single-org
+   * deployment or an operator/bootstrap key. Validated and canonicalized by
+   * `normalizeTenantId` at mint time so a malformed id can never enter a token.
+   */
+  tid?: string;
   /** HMAC signing secret (server-held). Never embedded in the token. */
   signingSecret: string | Buffer;
   /** Seconds until expiry. Omit for the default; pass `null` for no expiry. */
@@ -133,6 +154,15 @@ export function mintApiKey(options: MintApiKeyOptions): MintedApiKey {
     throw new Error(`Invalid kid '${kid}'. Expected url-safe characters only.`);
   }
 
+  // `undefined` means untenanted and stays out of the body entirely, so a token
+  // minted without a tenant is byte-identical to one minted before `tid`
+  // existed. Any other value must be well-formed — a silently-dropped bad
+  // tenant id would mint a key that authenticates as untenanted. Read as an OWN
+  // property (see `ownTenantId`) so a polluted prototype cannot put a tenant
+  // into a token the caller minted without one.
+  const requestedTid = ownTenantId(options);
+  const tid = requestedTid === undefined ? undefined : normalizeTenantId(requestedTid);
+
   const nowMs = options.nowMs ?? Date.now();
   const iat = Math.floor(nowMs / 1000);
   const ttl = options.ttlSeconds === undefined ? DEFAULT_API_KEY_TTL_SECONDS : options.ttlSeconds;
@@ -145,6 +175,7 @@ export function mintApiKey(options: MintApiKeyOptions): MintedApiKey {
     v: API_KEY_TOKEN_VERSION,
     kid,
     app,
+    ...(tid !== undefined ? { tid } : {}),
     scopes: [...options.scopes],
     iat,
     exp,
@@ -194,6 +225,15 @@ export function parseApiKey(token: string): ParsedApiKey | null {
   ) {
     return null;
   }
+  // A present-but-malformed `tid` is a malformed token, not an untenanted one.
+  // Treating it as absent would let a body with `tid: null` or `tid: 0` slip
+  // past a `requireTenant` gate as "no tenant claimed". The value validated
+  // here is the OWN one, and so is every later read of it — validating the own
+  // property while consuming the inherited one would be worse than no check.
+  const claimedTid = ownTenantId(claims);
+  if (claimedTid !== undefined && !isValidTenantId(claimedTid)) {
+    return null;
+  }
   return { app, body, sig, claims };
 }
 
@@ -205,11 +245,33 @@ export type ApiKeyVerifyFailureReason =
   | "not_yet_valid"
   | "expired"
   | "revoked"
-  | "insufficient_scope";
+  | "insufficient_scope"
+  | "tenant_required"
+  | "tenant_mismatch";
 
 export type ApiKeyVerifyResult =
-  | { ok: true; claims: ApiKeyClaims; kid: string; app: string }
-  | { ok: false; reason: ApiKeyVerifyFailureReason; message: string };
+  | {
+      ok: true;
+      claims: ApiKeyClaims;
+      kid: string;
+      app: string;
+      /** Canonical tenant id, or `null` for an untenanted key. */
+      tid: string | null;
+    }
+  | {
+      ok: false;
+      reason: ApiKeyVerifyFailureReason;
+      message: string;
+      /**
+       * Key id and tenant, populated once the SIGNATURE has verified — so a
+       * tenant denial, the most security-relevant deny there is, can name the
+       * offending key in the audit trail instead of logging `null`. Absent for
+       * failures that occur before authenticity is established, because nothing
+       * in an unverified token may be believed.
+       */
+      kid?: string;
+      tid?: string | null;
+    };
 
 export interface VerifyApiKeyTokenOptions {
   signingSecret: string | Buffer;
@@ -221,12 +283,24 @@ export interface VerifyApiKeyTokenOptions {
   leewaySeconds?: number;
   /** Concrete `app:action` scopes ALL of which must be granted. */
   requiredScopes?: readonly string[];
+  /**
+   * Reject untenanted tokens. Set this in any service whose data is scoped by
+   * organization: without it, a pre-`tid` token authenticates and the caller is
+   * left to remember the tenant check itself.
+   */
+  requireTenant?: boolean;
+  /**
+   * Restrict verification to one tenant. Implies {@link requireTenant}.
+   * Compared with `tenantIdsEqual`, so a `uuid`-column tenant and a `text`-column
+   * tenant holding the same UUID match regardless of case.
+   */
+  expectedTid?: string;
 }
 
 /**
- * Fully verify a token's authenticity, TTL, app binding, and (optionally)
- * scopes. Stateless — no revocation lookup. Layer revocation on top via the
- * store/middleware. Constant-time on the signature comparison.
+ * Fully verify a token's authenticity, TTL, app binding, tenant, and
+ * (optionally) scopes. Stateless — no revocation lookup. Layer revocation on
+ * top via the store/middleware. Constant-time on the signature comparison.
  */
 export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptions): ApiKeyVerifyResult {
   const parsed = parseApiKey(token);
@@ -265,6 +339,49 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
     return { ok: false, reason: "expired", message: "Token has expired." };
   }
 
+  // Tenant binding is an identity check, so it runs before authorization: a
+  // token for the wrong organization must not be reported as merely
+  // under-scoped.
+  const verifiedTid = ownTenantId(claims);
+  const tid = verifiedTid === undefined ? null : canonicalizeTenantId(verifiedTid);
+  // Any truthy value enables the gate. `=== true` would fail OPEN for a config
+  // value that arrived as the string "true" or the number 1 — the wrong
+  // direction for a security control to be strict in.
+  const tenantRequired = Boolean(options.requireTenant) || options.expectedTid !== undefined;
+  if (tenantRequired && tid === null) {
+    return {
+      ok: false,
+      reason: "tenant_required",
+      message: "Token carries no tenant id ('tid') and this service requires one.",
+      kid: claims.kid,
+      tid: null,
+    };
+  }
+  if (options.expectedTid !== undefined && !tenantIdsEqual(tid, options.expectedTid)) {
+    // A malformed `expectedTid` lands here too, and deliberately: this runs in
+    // the request path, so a misconfigured expectation must deny rather than
+    // throw a 500. That includes values that are not strings at ALL — Express
+    // turns `?tid=a&tid=b` into an array, and a JSON body can carry a number or
+    // `null` — so the type is checked BEFORE any string method is reached.
+    // Calling `.trim()` first threw a TypeError straight out of the request
+    // path, which is the very 500 this branch exists to avoid. `tenantIdsEqual`
+    // already refuses non-strings, so the deny itself was never in doubt; only
+    // the message needed the guard. The message still distinguishes the two so
+    // it is diagnosable. Construction-time config is validated eagerly by
+    // `verifyApiKey()`.
+    const expectationIsWellFormed =
+      typeof options.expectedTid === "string" && isValidTenantId(options.expectedTid.trim());
+    return {
+      ok: false,
+      reason: "tenant_mismatch",
+      message: expectationIsWellFormed
+        ? "Token is for a different tenant than the one this service accepts."
+        : "Token tenant cannot be checked: the expected tenant id is not a valid tenant id.",
+      kid: claims.kid,
+      tid,
+    };
+  }
+
   if (options.requiredScopes && options.requiredScopes.length > 0) {
     // Local import avoided to keep the crypto module leaf; inline the check.
     const granted = claims.scopes;
@@ -287,5 +404,5 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
     }
   }
 
-  return { ok: true, claims, kid: claims.kid, app };
+  return { ok: true, claims, kid: claims.kid, app, tid };
 }

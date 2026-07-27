@@ -11,6 +11,7 @@ import {
   type ApiKeyClaims,
   type ApiKeyVerifyFailureReason,
 } from "./keys.js";
+import { isValidTenantId, ownTenantId, tenantIdsEqual } from "./tenant.js";
 
 /** Header sources the middleware can read tokens from. */
 export type HeaderSource =
@@ -38,6 +39,12 @@ export interface ApiKeyPrincipal {
   app: string;
   scopes: string[];
   agent: string | null;
+  /**
+   * Canonical tenant id, or `null` when the key is untenanted. Handlers that
+   * scope data by organization read this instead of digging into `claims`.
+   * `null` here means "no tenant claimed" — never "every tenant".
+   */
+  tid: string | null;
   claims: ApiKeyClaims;
 }
 
@@ -45,6 +52,12 @@ export interface AuthAuditEvent {
   outcome: "allow" | "deny";
   app: string;
   kid: string | null;
+  /**
+   * Tenant the request authenticated as, or `null` when the key is untenanted
+   * or the request never got far enough to establish one. Present so an audit
+   * trail can answer "which organization did this" without re-parsing tokens.
+   */
+  tid: string | null;
   reason: ApiKeyVerifyFailureReason | "missing_token" | null;
   scopesRequired: string[];
   method: string | null;
@@ -64,6 +77,18 @@ export interface ApiKeyAuthContext {
   path?: string | null;
   /** Concrete `app:action` scopes ALL of which must be granted for this call. */
   requiredScopes?: readonly string[];
+  /**
+   * Tenant this specific call must belong to — for routes that address an
+   * organization directly (`/v1/orgs/:tid/...`). Denies with `tenant_mismatch`
+   * when the token names a different tenant, and with `tenant_required` when it
+   * names none. A malformed value denies rather than throwing, because it can
+   * come from a request path.
+   *
+   * Only OMITTING the key means "no per-call expectation". Supplying one that
+   * did not resolve — `null`, `""`, an Express multi-value array — is a denial,
+   * never a fallback to the middleware-wide setting and never a wildcard.
+   */
+  expectedTid?: string;
 }
 
 export interface VerifyApiKeyOptions {
@@ -80,6 +105,19 @@ export interface VerifyApiKeyOptions {
   audit?: AuthAuditHook;
   /** Scopes required for every request this middleware guards. */
   requiredScopes?: readonly string[];
+  /**
+   * Reject untenanted keys for every request this middleware guards. Turn this
+   * on in any service whose rows carry an organization reference — otherwise a
+   * pre-`tid` key authenticates with no organization and the tenant check has
+   * to be remembered in every handler.
+   */
+  requireTenant?: boolean;
+  /**
+   * Pin the whole middleware to one tenant. Implies {@link requireTenant}.
+   * Validated eagerly: an invalid value throws at construction rather than
+   * denying every request at runtime.
+   */
+  expectedTid?: string;
   /** Custom header for the raw key. Default `x-api-key`. */
   headerName?: string;
   /** Authorization scheme also accepted. Default `Bearer`. */
@@ -120,6 +158,9 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
   if (!options.signingSecret) {
     throw new Error("verifyApiKey requires a 'signingSecret'. Set it from HASNA_<APP>_API_SIGNING_KEY.");
   }
+  if (options.expectedTid !== undefined && !isValidTenantId(options.expectedTid)) {
+    throw new Error(`verifyApiKey received an invalid 'expectedTid': '${options.expectedTid}'.`);
+  }
   const headerName = options.headerName ?? "x-api-key";
   const scheme = options.scheme ?? "Bearer";
   const clock = options.nowMs ?? (() => Date.now());
@@ -139,6 +180,44 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
     const requiredScopes = [...(options.requiredScopes ?? []), ...(context.requiredScopes ?? [])];
     const at = new Date(clock()).toISOString();
 
+    // A per-call tenant NARROWS the middleware-wide one; it must never replace
+    // it. `context.expectedTid` typically comes from a request path
+    // (`/v1/orgs/:tid/...`), so letting it win outright would let any holder of
+    // a valid token for this app defeat a service pinned to another tenant just
+    // by addressing their own org in the URL. When both are set they must agree,
+    // and disagreement is a denial — not a silent preference for either one.
+    //
+    // PRESENCE, not truthiness, decides whether the caller expressed an
+    // expectation. A `??` here collapsed a NULLISH per-call value into "no
+    // expectation at all", so an un-pinned service whose route computed
+    // `req.params.tid ?? null` (or read a JSON body carrying `orgId: null`) sent
+    // NO tenant to the verifier and let another organization's token straight
+    // through the route it meant to guard. Absence is not a wildcard — and
+    // neither is a value that failed to resolve. Anything the caller actually
+    // supplied is forwarded as-is and denied downstream by `verifyApiKeyToken`,
+    // which refuses every non-grammatical expectation including `null`; only a
+    // genuinely absent key falls back to the middleware-wide pin.
+    //
+    // Read as an OWN property for the same reason `ownTenantId` exists: a plain
+    // read on a caller-built options bag resolves through the prototype chain,
+    // so one `Object.prototype.expectedTid` write would pin every un-pinned
+    // route to a tenant nothing validated.
+    const perCallTid = Object.hasOwn(context, "expectedTid") ? context.expectedTid : undefined;
+    const expectedTid = perCallTid !== undefined ? perCallTid : options.expectedTid;
+    if (
+      perCallTid !== undefined &&
+      options.expectedTid !== undefined &&
+      !tenantIdsEqual(perCallTid, options.expectedTid)
+    ) {
+      await emit({ outcome: "deny", app: options.app, kid: null, tid: null, reason: "tenant_mismatch", scopesRequired: requiredScopes, method, path, status: 403, at });
+      return {
+        ok: false,
+        status: 403,
+        reason: "tenant_mismatch",
+        message: "This route addresses a tenant other than the one this service is pinned to.",
+      };
+    }
+
     const token = extractToken(headers, headerName, scheme);
     if (!token) {
       const decision: AuthDecision = {
@@ -147,7 +226,7 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
         reason: "missing_token",
         message: `Missing API key. Send it as '${headerName}: <key>' or 'Authorization: ${scheme} <key>'.`,
       };
-      await emit({ outcome: "deny", app: options.app, kid: null, reason: "missing_token", scopesRequired: requiredScopes, method, path, status: 401, at });
+      await emit({ outcome: "deny", app: options.app, kid: null, tid: null, reason: "missing_token", scopesRequired: requiredScopes, method, path, status: 401, at });
       return decision;
     }
 
@@ -156,19 +235,35 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
       expectedApp: options.app,
       nowMs: clock(),
       ...(options.leewaySeconds !== undefined ? { leewaySeconds: options.leewaySeconds } : {}),
+      ...(options.requireTenant !== undefined ? { requireTenant: options.requireTenant } : {}),
+      ...(expectedTid !== undefined ? { expectedTid } : {}),
       requiredScopes,
     });
 
     if (!verified.ok) {
-      const status: 401 | 403 = verified.reason === "insufficient_scope" ? 403 : 401;
-      await emit({ outcome: "deny", app: options.app, kid: null, reason: verified.reason, scopesRequired: requiredScopes, method, path, status, at });
+      // 403, not 401, for both tenant reasons: the credential is authentic and
+      // unexpired, so telling the client to re-authenticate would be wrong. It
+      // is simply not permitted for this organization — the same shape as
+      // `insufficient_scope`.
+      const status: 401 | 403 =
+        verified.reason === "insufficient_scope" ||
+        verified.reason === "tenant_mismatch" ||
+        verified.reason === "tenant_required"
+          ? 403
+          : 401;
+      // `kid`/`tid` are present only once the signature has verified, which is
+      // exactly when a denial is worth attributing to a specific key. Their
+      // ABSENCE is therefore meaningful, so `tid` is read as an own property
+      // (see `ownTenantId`) — an audit line must never name an organization the
+      // request never proved.
+      await emit({ outcome: "deny", app: options.app, kid: verified.kid ?? null, tid: ownTenantId(verified) ?? null, reason: verified.reason, scopesRequired: requiredScopes, method, path, status, at });
       return { ok: false, status, reason: verified.reason, message: verified.message };
     }
 
     if (options.isRevoked) {
       const revoked = await options.isRevoked(verified.kid);
       if (revoked) {
-        await emit({ outcome: "deny", app: options.app, kid: verified.kid, reason: "revoked", scopesRequired: requiredScopes, method, path, status: 401, at });
+        await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, reason: "revoked", scopesRequired: requiredScopes, method, path, status: 401, at });
         return { ok: false, status: 401, reason: "revoked", message: "API key has been revoked." };
       }
     }
@@ -178,9 +273,10 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
       app: verified.app,
       scopes: verified.claims.scopes,
       agent: verified.claims.agent ?? null,
+      tid: verified.tid,
       claims: verified.claims,
     };
-    await emit({ outcome: "allow", app: options.app, kid: verified.kid, reason: null, scopesRequired: requiredScopes, method, path, status: 200, at });
+    await emit({ outcome: "allow", app: options.app, kid: verified.kid, tid: verified.tid, reason: null, scopesRequired: requiredScopes, method, path, status: 200, at });
     return { ok: true, status: 200, principal };
   }
 
