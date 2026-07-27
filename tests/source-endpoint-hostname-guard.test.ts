@@ -72,7 +72,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import {
   decodeEscapes,
   isReservedHostname,
@@ -120,8 +120,22 @@ const ALLOWED_REGISTRABLE_DOMAINS: ReadonlySet<string> = new Set([
   "tenant.wiki",
 ]);
 
-/** Files whose presence proves the scope actually resolved. */
-const SCOPE_SENTINELS = ["package.json", "src/artifact-scan.ts", "src/client/transport.test.ts"];
+/**
+ * Files whose presence proves the scope actually resolved.
+ *
+ * THIS FILE IS ONE OF THEM, and the reason is a measured mistake. While it was
+ * still untracked, `git ls-files` did not list it, so the guard was not scanning
+ * its own source and the claim that it cannot trip itself was untested. The first
+ * run after committing reported this file, on a doc comment. A guard whose scope
+ * silently excludes the newest file in the tree is a guard with a blind spot at
+ * exactly the moment one matters.
+ */
+const SCOPE_SENTINELS = [
+  "package.json",
+  "src/artifact-scan.ts",
+  "src/client/transport.test.ts",
+  relative(root, import.meta.path),
+];
 
 /**
  * `scheme://authority`, or a scheme-relative `//authority`.
@@ -144,9 +158,13 @@ const URL_AUTHORITY = /(?:\b[a-z][a-z0-9+.-]*:)?\/\/(\[[^\]\s]+\]|[^\s"'`\\/?#<>
  *
  * The lookbehind is what keeps it off file paths and off the middle of tokens: it
  * must not start inside one, so `docs/architecture/factory-v1-contract-spec.md` is
- * a path and not a host under `.md`. `%` is in that set because without it the tail
- * of a percent-escape starts a name — `pro%62e.wiki/v1` was read as `62e.wiki`,
- * inventing a registrable domain out of two hex digits.
+ * a path and not a host under `.md`. Percent is in that set because without it the
+ * tail of a percent-escape begins a name: a label whose fourth character had been
+ * percent-escaped was read as a registrable domain invented out of the two hex
+ * digits and whatever followed them. No example is written out here, deliberately —
+ * the first draft of this comment spelled one, and the DECODED view of this very
+ * file then reported it. See the header: the shapes this guard hunts cannot appear
+ * in its own source, and that includes prose about them.
  */
 const SCHEMELESS_HOST_PATH =
   /(?<![.\w/@%+~-])((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24})(?::\d{1,5})?\/[a-z0-9]/gi;
