@@ -3,3 +3,7 @@ dist/
 .hasna/
 *.log
 .DS_Store
+# scripts/mutation-audit.ts writes this before it edits a tracked file, and
+# removes it after restoring. Its presence means a run was killed mid-mutation;
+# the next run repairs from it.
+.mutation-audit-inflight.json

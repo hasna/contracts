@@ -484,29 +484,129 @@ describe("contracts CLI", () => {
     expect(JSON.stringify(payload)).not.toContain(import.meta.dir);
   });
 
-  test("allows only exact generated contracts declaration bundles to skip runtime edge scanning", () => {
+  test("does not score its own inlined denylist as a consumer's breach", () => {
+    // THE REGRESSION THIS PINS. `FORBIDDEN_SHARED_CLOUD_RUNTIMES` is a pair of
+    // string literals, so any repo that imports `@hasna/contracts` without
+    // externalising it gets the denylist inlined into its bundle. The scanner
+    // then read its own denylist back out of the consumer's artifact and failed
+    // it — permanently, and with nothing the consumer could remove to fix it.
+    //
+    // The fixture is the shape measured in a real consumer's build output: one
+    // bare mention of each forbidden module name, ZERO import specifiers, and
+    // `open-cloud` present in a package that never used it.
     const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
-    const declarationText =
-      "const markerA = 'FORBIDDEN_SHARED_CLOUD_RUNTIMES';\n" +
-      "const markerB = 'hasna.no_cloud_evidence_pack.v1';\n" +
-      "const runtime = '@hasna/cloud';\n";
+    const inlinedDenylist =
+      'var FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud", "open-cloud"];\n' +
+      'var SCHEMA_IDS = { noCloudEvidencePack: "hasna.no_cloud_evidence_pack.v1" };\n' +
+      "export { FORBIDDEN_SHARED_CLOUD_RUNTIMES, SCHEMA_IDS };\n";
     try {
       mkdirSync(join(dir, "dist"));
-      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/contracts", version: "0.4.1" }));
-      writeFileSync(join(dir, "dist", "mode.js"), declarationText);
-      writeFileSync(join(dir, "dist", "service-contract.js"), declarationText);
-      writeFileSync(join(dir, "dist", "secure-local-store.js"), declarationText);
-      writeFileSync(join(dir, "dist", "conformance.js"), declarationText);
+      mkdirSync(join(dir, "bin"));
+      mkdirSync(join(dir, "src"));
+      writeFileSync(
+        join(dir, "package.json"),
+        JSON.stringify({ name: "@example/consumer-app", version: "1.0.0", dependencies: { "@hasna/contracts": "^0.8.2" } })
+      );
+      // Build output, in both conventional directories.
+      writeFileSync(join(dir, "dist", "index.js"), inlinedDenylist);
+      writeFileSync(join(dir, "bin", "cli.js"), inlinedDenylist);
+      // Authored source that is clean, so nothing else can explain a pass.
+      writeFileSync(join(dir, "src", "index.ts"), "export const ok = true;\n");
 
       const result = runContracts(["no-cloud-scan", "--json", dir]);
       expect(result.exitCode).toBe(0);
-      expect(parseStdoutJson(result).verdict).toBe("passed");
+      const payload = parseStdoutJson(result);
+      expect(payload.verdict).toBe("passed");
+      expect(payload.findings).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
-      writeFileSync(join(dir, "dist", "other.js"), declarationText);
-      const invalidResult = runContracts(["no-cloud-scan", "--json", dir]);
-      expect(invalidResult.exitCode).toBe(1);
-      const payload = parseStdoutJson(invalidResult);
-      expect(payload.findings.some((finding: { path: string; pattern: string }) => finding.path === "dist/other.js" && finding.pattern === "@hasna/cloud")).toBe(true);
+  test("still fails build output that really resolves the retired runtime", () => {
+    // The other half of the same rule, and the reason the rule is safe: an
+    // externalised import survives bundling verbatim, so build output is judged
+    // by the specifiers it still carries. A bare mention is exempt there; an
+    // import never is.
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    try {
+      mkdirSync(join(dir, "dist"));
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@example/consumer-app", version: "1.0.0" }));
+      writeFileSync(
+        join(dir, "dist", "index.js"),
+        'var FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud", "open-cloud"];\n' +
+          'import { connect } from "@hasna/cloud";\n' +
+          "export const c = connect();\n"
+      );
+
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(1);
+      const payload = parseStdoutJson(result);
+      expect(payload.verdict).toBe("failed");
+      expect(
+        payload.findings.some(
+          (finding: { path: string; pattern: string; message: string }) =>
+            finding.path === "dist/index.js" && finding.pattern === "@hasna/cloud" && finding.message.includes("module import")
+        )
+      ).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a declaration file's exemption covers mentions, never a real import", () => {
+    // On 0.8.1 this scan PASSED: `isNoCloudDeclarationFile` returned early for
+    // the whole file, so a live import inside one was exempt along with the
+    // mentions it was meant to cover. Verified against the v0.8.1 tag.
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    try {
+      mkdirSync(join(dir, "src"));
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/contracts", version: "0.8.2" }));
+      writeFileSync(
+        join(dir, "src", "schemas.ts"),
+        "const markerA = 'FORBIDDEN_SHARED_CLOUD_RUNTIMES';\n" +
+          "const markerB = 'hasna.no_cloud_evidence_pack.v1';\n" +
+          "import { connect } from '@hasna/cloud';\n" +
+          "export const c = connect;\n"
+      );
+
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(1);
+      const payload = parseStdoutJson(result);
+      expect(
+        payload.findings.some(
+          (finding: { path: string; pattern: string; message: string }) =>
+            finding.path === "src/schemas.ts" && finding.pattern === "@hasna/cloud" && finding.message.includes("module import")
+        )
+      ).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("authored source is still failed on a bare mention, wherever it sits", () => {
+    // The exemption is for GENERATED output only. `lib/` is authored in plenty
+    // of repos and is deliberately not treated as build output, and a file
+    // merely NAMED `dist` is a file, not a directory of output.
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    try {
+      mkdirSync(join(dir, "lib"));
+      mkdirSync(join(dir, "src"));
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@example/consumer-app", version: "1.0.0" }));
+      writeFileSync(join(dir, "lib", "runtime.js"), "export const runtime = 'open-cloud';\n");
+      writeFileSync(join(dir, "src", "dist.ts"), "export const token = process.env.HASNA_CLOUD_TOKEN;\n");
+      // A hand-written script in an output directory. `bin/` and `build/` hold
+      // these routinely, and a shell script setting the retired runtime's env is
+      // a decision, not a byte a bundler copied — the exemption must not reach it.
+      mkdirSync(join(dir, "bin"));
+      writeFileSync(join(dir, "bin", "deploy.sh"), "#!/bin/sh\nexport HASNA_CLOUD_URL=https://example.invalid\n");
+
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(1);
+      const payload = parseStdoutJson(result);
+      expect(payload.findings.some((finding: { path: string; pattern: string }) => finding.path === "lib/runtime.js" && finding.pattern === "open-cloud")).toBe(true);
+      expect(payload.findings.some((finding: { path: string; pattern: string }) => finding.path === "src/dist.ts" && finding.pattern === "HASNA_CLOUD_")).toBe(true);
+      expect(payload.findings.some((finding: { path: string; pattern: string }) => finding.path === "bin/deploy.sh" && finding.pattern === "HASNA_CLOUD_")).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

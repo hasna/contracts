@@ -13,7 +13,7 @@
 // A mutation that leaves the suite green is a rule with no test. That is a
 // defect in this file's terms, not a curiosity.
 
-import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 interface Mutation {
@@ -459,18 +459,161 @@ const MUTATIONS: Mutation[] = [
     from: "  return Object.values(workspaces).filter(isRecord).length <= 1;",
     to: "  return true;",
   },
+
+  // ---------------------------------------------------------------------
+  // The gate no longer flags itself.
+  //
+  // This scanner's denylist is a pair of string literals, so every repo that
+  // imports this package without externalising it got the denylist inlined into
+  // its build output — and the scanner read its own denylist back out of the
+  // consumer's artifact and failed it. Permanently: there was nothing the
+  // consumer could remove.
+  //
+  // M65/M66 revert the fix. M67/M68 push it TOO FAR, which is the direction a
+  // false-positive fix actually fails in, and the direction this file has been
+  // weakest on.
+  // ---------------------------------------------------------------------
+  {
+    id: "M65-nocloud-generated-output-mention-is-not-evidence",
+    rule: "a bare mention in build output is not a finding; only a resolving import is",
+    file: "src/no-cloud.ts",
+    from: "    } else if (bareMentionIsEvidence && !(guardTest && kind === \"module\") && masked.includes(pattern)) {",
+    to: "    } else if (!(guardTest && kind === \"module\") && masked.includes(pattern)) {",
+  },
+  {
+    id: "M66-nocloud-generated-output-is-detected",
+    rule: "build-output directories are actually recognised as build output",
+    file: "src/no-cloud.ts",
+    from: "  return segments.slice(0, -1).some((segment) => GENERATED_OUTPUT_DIRS.has(segment));",
+    to: "  return false;",
+  },
+  {
+    id: "M67-nocloud-authored-dirs-are-not-output",
+    rule: "the exemption never spreads to a directory repos author in",
+    file: "src/no-cloud.ts",
+    from: "const GENERATED_OUTPUT_DIRS = new Set([\"bin\", \"dist\", \"build\", \"out\", \".output\"]);",
+    to: "const GENERATED_OUTPUT_DIRS = new Set([\"bin\", \"dist\", \"build\", \"out\", \".output\", \"lib\", \"src\"]);",
+  },
+  {
+    id: "M68-nocloud-output-is-a-directory-not-a-basename",
+    rule: "a FILE named dist is source, not a directory of output",
+    file: "src/no-cloud.ts",
+    from: "  return segments.slice(0, -1).some((segment) => GENERATED_OUTPUT_DIRS.has(segment));",
+    to: "  return segments.some((segment) => GENERATED_OUTPUT_DIRS.has(segment));",
+  },
+  {
+    id: "M70-nocloud-output-exemption-is-for-emitted-modules",
+    rule: "a hand-written script in bin/ or build/ is not bundler output",
+    file: "src/no-cloud.ts",
+    from: "  if (!BUNDLED_ARTIFACT_FILE.test(normalized)) return false;",
+    to: "  if (false) return false;",
+  },
+  {
+    id: "M69-nocloud-declaration-exemption-spares-no-import",
+    rule: "the declaration exemption covers mentions, never a live import",
+    file: "src/no-cloud.ts",
+    from: "  const bareMentionIsEvidence = !isGeneratedOutputPath(file.path) && !isNoCloudDeclarationFile(file, packageName);",
+    to:
+      "  if (isNoCloudDeclarationFile(file, packageName)) return [];\n" +
+      "  const bareMentionIsEvidence = !isGeneratedOutputPath(file.path);",
+  },
 ];
 
 const repoRoot = join(import.meta.dir, "..");
 
+/**
+ * CSI escape sequences, so a coloured suite still parses.
+ *
+ * Written as `\x1b` rather than a literal escape byte: a raw control character
+ * in source is invisible in review and easy for an editor to eat. Anchoring on
+ * ESC also matters — matching a bare `[...]` would eat ordinary text, and a test
+ * named `handles [1m] input` would lose part of its name.
+ */
+const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
+
 function runSuite(): { pass: number; fail: number; failed: string[] } {
-  const result = Bun.spawnSync(["bun", "test"], { cwd: repoRoot, stdout: "pipe", stderr: "pipe" });
-  const blob = new TextDecoder().decode(result.stdout) + new TextDecoder().decode(result.stderr);
+  const result = Bun.spawnSync(["bun", "test"], {
+    cwd: repoRoot,
+    stdout: "pipe",
+    stderr: "pipe",
+    // `bun test` drops colour when stdout is a pipe, EXCEPT when something in
+    // the environment forces it. `FORCE_COLOR=3` is set by some terminals and
+    // agent harnesses, and then every count arrives wrapped in escapes,
+    // `/^\s*(\d+) pass$/m` matches nothing, and the audit reports NO-RESULT for
+    // mutations that the suite actually caught. Ask for plain output, then strip
+    // escapes anyway, because the env is not ours to rely on.
+    env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+  });
+  const blob = (new TextDecoder().decode(result.stdout) + new TextDecoder().decode(result.stderr)).replace(ANSI, "");
   const pass = Number(/^\s*(\d+) pass$/m.exec(blob)?.[1] ?? "0");
   const fail = Number(/^\s*(\d+) fail$/m.exec(blob)?.[1] ?? "0");
   const failed = [...blob.matchAll(/^\(fail\) (.+?) \[/gm)].map((match) => match[1]!);
   return { pass, fail, failed };
 }
+
+/**
+ * Crash-surviving record of the file currently holding a mutation.
+ *
+ * WHY THIS EXISTS. This script edits tracked source in place and restores it on
+ * the next line. Anything that stops the process between those two lines leaves
+ * the mutation on disk, looking exactly like someone's edit — that is how
+ * `if (false) roots.push(...)` reached a commit.
+ *
+ * Signal handlers alone do NOT close this. SIGKILL cannot be caught, and a
+ * process-group kill from a supervising tool does not give the handler a turn;
+ * that was reproduced during this change, leaving `return false;` in
+ * `src/no-cloud.ts`. So the original text is also written to disk BEFORE the
+ * mutation, and the next run repairs from it. Recovery beats prevention here
+ * because prevention is not available.
+ *
+ * The sentinel lives in the repo root, gitignored, because a human or agent
+ * looking at a confusing diff needs to SEE it.
+ */
+const SENTINEL = join(import.meta.dir, "..", ".mutation-audit-inflight.json");
+
+let inFlight: { path: string; original: string } | null = null;
+
+function beginMutation(path: string, original: string): void {
+  inFlight = { path, original };
+  writeFileSync(SENTINEL, JSON.stringify({ path, original }));
+}
+
+function restoreInFlight(): void {
+  if (inFlight) {
+    const { path, original } = inFlight;
+    inFlight = null;
+    writeFileSync(path, original);
+  }
+  if (existsSync(SENTINEL)) rmSync(SENTINEL, { force: true });
+}
+
+/** Repair a previous run that was killed before it could restore. */
+function recoverAbandonedMutation(): void {
+  if (!existsSync(SENTINEL)) return;
+  const record = JSON.parse(readFileSync(SENTINEL, "utf8")) as { path: string; original: string };
+  const current = readFileSync(record.path, "utf8");
+  if (current !== record.original) {
+    writeFileSync(record.path, record.original);
+    console.error(`RECOVERED: a previous run left ${record.path} mutated. Restored it.`);
+  }
+  rmSync(SENTINEL, { force: true });
+}
+
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"] as const) {
+  process.on(signal, () => {
+    restoreInFlight();
+    console.error(`\n${signal} — restored the mutated file before exiting.`);
+    process.exit(130);
+  });
+}
+process.on("uncaughtException", (error) => {
+  restoreInFlight();
+  console.error(error);
+  process.exit(1);
+});
+process.on("exit", restoreInFlight);
+
+recoverAbandonedMutation();
 
 const only = process.argv[2];
 const selected = only ? MUTATIONS.filter((mutation) => mutation.id.includes(only)) : MUTATIONS;
@@ -481,10 +624,20 @@ if (selected.length === 0) {
 
 const baseline = runSuite();
 console.log(`baseline: ${baseline.pass} pass / ${baseline.fail} fail\n`);
+// A baseline of zero passes is not a green suite, it is no reading at all — the
+// suite failed to start, or its output could not be parsed. Continuing from it
+// scores every mutation NO-RESULT and reports a clean-looking audit that proves
+// nothing. That is the exact failure this file exists to prevent, so it is fatal
+// rather than a warning.
+if (baseline.pass === 0) {
+  console.error("Refusing to audit: the baseline suite reported no passing tests, so nothing here can be measured.");
+  process.exit(2);
+}
 if (baseline.fail !== 0) {
   console.error("Refusing to audit against a red suite.");
   process.exit(2);
 }
+
 
 let survivors = 0;
 for (const mutation of selected) {
@@ -495,6 +648,7 @@ for (const mutation of selected) {
     survivors += 1;
     continue;
   }
+  beginMutation(path, original);
   writeFileSync(path, original.replace(mutation.from, mutation.to));
   let result = runSuite();
   // A suite that reported NOTHING did not survive the mutation — it failed to
@@ -502,7 +656,7 @@ for (const mutation of selected) {
   // review saw `M21 SURVIVED 0/0` that re-ran clean in isolation. Retry once,
   // then say "no result" rather than blame the rule.
   if (result.pass === 0 && result.fail === 0) result = runSuite();
-  writeFileSync(path, original);
+  restoreInFlight();
   const ranAtAll = result.pass > 0 || result.fail > 0;
   const caught = result.fail > 0;
   if (!caught) survivors += 1;

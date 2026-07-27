@@ -2,6 +2,51 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.8.2] - 2026-07-27
+
+### `no-cloud-scan` no longer reports its own denylist as the consumer's breach
+
+- `FORBIDDEN_SHARED_CLOUD_RUNTIMES` is a pair of string literals, so any repo
+  that imports `@hasna/contracts` without externalising it gets the denylist
+  **inlined into its build output**. The scanner then matched its own denylist in
+  the consumer's artifact and failed the gate — permanently, with nothing the
+  consumer could remove to fix it. The tell was `open-cloud` being reported
+  against repos that never used it. Measured on a real bundle: two module names
+  present with **zero** import specifiers, both dropping to zero when
+  `@hasna/contracts` is externalised. All eight runtime patterns leak this way,
+  not only the two module names.
+- Build output is now judged by what it still **resolves** — import specifiers —
+  and by dependency edges, never by bare mentions. `package.json` and `bun.lock`
+  checks are untouched, and an externalised `import { … } from "@hasna/cloud"`
+  survives bundling verbatim, so it is still a critical finding in `dist/`.
+- The exemption is for **generated modules only**: a file must be both under a
+  build-output directory (`bin`, `dist`, `build`, `out`, `.output`) and a
+  bundler-emitted `.js`/`.ts` family file. `lib/` is authored in too many repos
+  to count as output, and a hand-written `bin/deploy.sh` that sets
+  `HASNA_CLOUD_*` is still a finding — the one pattern kind with no import to
+  look for keeps its coverage.
+- The declaration-file exemption no longer returns early for the whole file, so a
+  **real import inside a declaration file is no longer exempt**. That was a false
+  negative in 0.8.1: such a scan passed on the `v0.8.1` tag and now fails with
+  `(module import)`.
+- `CONTRACTS_DECLARATION_PATHS` shrank from nineteen hand-listed paths to the two
+  authored sources. Enumerating every `dist/` bundle by hand was what made the
+  bug possible: the list could only ever describe this package's own output,
+  never a consumer's, which is where the declaration actually lands.
+
+### `scripts/mutation-audit.ts` can measure again, and no longer corrupts the tree
+
+- The audit parsed `bun test` output with `/^\s*(\d+) pass$/m`. With
+  `FORCE_COLOR` set — common in terminals and agent harnesses — Bun emits ANSI
+  into a pipe, nothing matched, and **every mutation scored `NO-RESULT` while the
+  run still exited 0**. The suite is now spawned with colour disabled, escapes
+  are stripped regardless, and a baseline reporting zero passes is a hard failure
+  instead of a silent pass-through.
+- The audit edits tracked source in place. It now records the original to a
+  gitignored sentinel *before* mutating and repairs an abandoned mutation on the
+  next run, because signal handlers cannot cover `SIGKILL` or a process-group
+  kill — which is how `if (false) roots.push(...)` reached a commit.
+
 ## [0.8.1] - 2026-07-27
 
 ### `no-cloud-scan` matches dependency edges and real imports, not substrings
