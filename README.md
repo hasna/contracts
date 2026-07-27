@@ -442,8 +442,11 @@ contracts issue-key --app todos --scopes 'todos:read' --no-store --json
 ```
 
 Signing secret is read from `HASNA_<APP>_API_SIGNING_KEY` (then `HASNA_API_SIGNING_KEY`);
-the record store uses `HASNA_<APP>_DATABASE_URL`. Generate a signing secret with
-`openssl rand -hex 32`. Revoke with `store.revoke(kid)`.
+when `HASNA_<APP>_API_URL` + `HASNA_<APP>_API_KEY` select the API transport, the
+hashed record is posted to `/v1/api-keys` with an idempotency key and the
+plaintext token is never sent. Without API transport, the record store uses
+`HASNA_<APP>_DATABASE_URL`. Generate a signing secret with `openssl rand -hex
+32`. Revoke with `store.revoke(kid)`.
 
 Services that expose API, MCP, CLI-token, dashboard, worker, sync/export, or
 provider webhook surfaces must also follow the shared
