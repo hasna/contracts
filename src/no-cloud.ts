@@ -67,10 +67,20 @@ interface ScanFile {
  *     else does.
  *   - a `git+ssh:` dependency that installs UNDER the package name without the
  *     name appearing in the specifier.
- *   - a copy of this scanner's own denylist, bound to one name, rebound to a
- *     second, and indexed into a load through that second name. Reaching it
- *     needs a hand-built fake denylist; the assembled-name case above needs
- *     nothing. See `isOwnPatternDeclaration`.
+ *   - a copy of this scanner's own denylist reached through a SECOND binding, so
+ *     the bound-name check never sees the name the load uses. Three routes were
+ *     measured, each with a plain-`require` control that fails:
+ *       * array destructuring — `var DENY = […]; var [a] = DENY; __require(a)`;
+ *       * a function RETURNED by a resolver — `var r = createRequire(…); r(DENY[0])`,
+ *         where the callee is `r` and no callee list can name it;
+ *       * a two-file re-export — `export const DENY` in one module, the load in
+ *         another. Single-file text matching cannot follow it, by construction.
+ *     `Module._load(DENY[0])` was a fourth and is now closed — see `LOAD_CALLEE`.
+ *     All three need a hand-built fake denylist; the assembled-name case above
+ *     needs nothing. Note the path-scoped predecessor did not close the two-file
+ *     route either: it caught it in `lib/` only because it declined to attribute
+ *     outside build output at all, and the same two files under `dist/` scanned
+ *     clean there too. See `isOwnPatternDeclaration`.
  */
 const SKIP_DIRS = new Set([".git", "node_modules", ".cache", ".next", ".turbo", "coverage", "docs", "examples", "tests"]);
 const LOCKFILES = new Set(["bun.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"]);
@@ -121,6 +131,19 @@ const RUNTIME_PATTERNS = [
 const PATH_CONFIG_PATTERNS = RUNTIME_PATTERNS.filter(
   (entry): entry is typeof entry & { checkKind: NoCloudCheckKind } => "checkKind" in entry
 );
+
+/**
+ * Every key this table emits, and therefore every key an inlined copy of one of
+ * its rows may carry — `pattern`, `kind`, `message`, plus `checkKind` on the one
+ * row that declares it.
+ *
+ * Derived rather than written out. A literal list is a second copy that drifts:
+ * add a field to `RUNTIME_PATTERNS` and a written-out list silently stops
+ * recognising the rows this package emits, which shows up as the false positive
+ * coming back. Deriving it also means the bound can only ever describe shapes
+ * this package really produces.
+ */
+const RUNTIME_PATTERN_KEYS: ReadonlySet<string> = new Set(RUNTIME_PATTERNS.flatMap((entry) => Object.keys(entry)));
 
 const MODULE_PATTERNS = RUNTIME_PATTERNS.filter((entry) => entry.kind === "module");
 
@@ -318,19 +341,30 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
  *     That is what keeps `__require(DENY[0])` from becoming a way to launder a
  *     specifier through a copy of the denylist.
  *
- * The consequence that matters: NO DETECTOR IS TURNED OFF ANYWHERE. Each
- * occurrence is judged on its own, so the same file keeps every check for every
- * other occurrence in it — a consumer that bundles `@hasna/contracts` and also
+ * The consequence that matters, stated as narrowly as it is true: no detector is
+ * turned off for any occurrence OUTSIDE a blanked span, and a blanked span may
+ * hold nothing but a row this table emits — see the key-set bound below, which is
+ * what makes the two halves of that sentence add up. An earlier version of this
+ * comment claimed "NO DETECTOR IS TURNED OFF ANYWHERE", and a review showed that
+ * was inaccurate while the key set was unbounded: inside the span, the three
+ * `config` patterns had nothing else watching them. Each occurrence is judged on
+ * its own, so the same file keeps every check for every other occurrence in it — a consumer that bundles `@hasna/contracts` and also
  * reads `HASNA_CLOUD_*`, or also loads the retired runtime, is still reported.
  * No path is consulted, so nothing is exempt for living in `dist/`, and
  * `git mv` cannot change a verdict.
  *
- * WHAT IT DOES NOT CLOSE, stated rather than implied: a copy of the denylist
- * bound to one name, rebound to a second, and indexed into a load through the
- * second name. Reaching that needs the evader to build a fake denylist; the
- * scope block at the top of this file already concedes the strictly easier
- * `"@hasna/" + "cloud"`, which needs nothing. This is inside that documented
- * limit, not a new hole beside it.
+ * WHAT IT DOES NOT CLOSE, corrected after a review measured it: not one route
+ * but THREE, and they are single-binding rather than two-step. Each reaches a copy
+ * of the denylist through a name the bound-name check cannot see — array
+ * destructuring, a function returned by `createRequire`, and a two-file
+ * re-export. `Module._load` was a fourth and is closed. The scope block at the top
+ * of this file enumerates them with the controls that fail.
+ *
+ * The earlier wording here said "bound to one name, rebound to a second", which
+ * made the residual sound narrower and harder to reach than it is. It is inside
+ * the module class that scope block already concedes alongside
+ * `"@hasna/" + "cloud"` — which needs no fake denylist at all — but understating
+ * it was wrong.
  */
 function isOwnPatternDeclaration(node: InlineDataNode): boolean {
   if (node.kind === "array") {
@@ -340,6 +374,30 @@ function isOwnPatternDeclaration(node: InlineDataNode): boolean {
     );
   }
   if (node.kind !== "record") return false;
+  // THE KEY SET IS BOUNDED, AND THAT IS THE WHOLE SAFETY OF BLANKING A SPAN.
+  //
+  // Checking three keys and ignoring the rest was a hole of exactly the shape
+  // that got the first attempt at this rejected. `withoutInlinedDeclarations`
+  // blanks `node.start..node.end` — the WHOLE record — so a verbatim
+  // `{pattern, kind, message}` triple plus one more key carried anything at all
+  // inside the blanked span, and the three `config` patterns have no second
+  // detector to fall back on. Measured before this bound existed, as a tarball
+  // under a third-party package name:
+  //
+  //   verbatim module row + 4th key holding a credential assignment  -> EXIT=0, 0 findings
+  //   the same string with no triple around it (control)              -> EXIT=1, 1 critical
+  //   verbatim config row + 4th key holding a NESTED object of four
+  //     more patterns                                                 -> EXIT=0, 0 findings
+  //   both forges in hand-authored `src/table.ts`, not build output    -> EXIT=0, 0 findings
+  //
+  // So: every key must be one this table actually emits, and every value must be
+  // a plain string, which is what stops a nested collection hiding under an
+  // accepted key. Read off the table rather than written out, so adding a field
+  // to `RUNTIME_PATTERNS` widens the bound with it and cannot drift.
+  for (const [key, value] of node.entries) {
+    if (!RUNTIME_PATTERN_KEYS.has(key)) return false;
+    if (value.kind !== "string") return false;
+  }
   const pattern = node.entries.get("pattern");
   const kind = node.entries.get("kind");
   const message = node.entries.get("message");

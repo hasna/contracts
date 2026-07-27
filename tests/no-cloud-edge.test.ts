@@ -1822,3 +1822,156 @@ describe("source-text: a collection must be STORED, not just written down somewh
     );
   });
 });
+
+describe("no-cloud gate: a blanked span may carry nothing but the row this table emits", () => {
+  // THE BLOCKING DEFECT A REVIEW FOUND, and it is the same shape as the rejection
+  // that killed the first attempt at this fix. `isOwnPatternDeclaration` checked
+  // three keys and ignored the rest of the key set, while
+  // `withoutInlinedDeclarations` blanks the WHOLE record. So a verbatim
+  // `{pattern, kind, message}` triple plus one more key smuggled anything at all
+  // through the blanked span — and the three `config` patterns have no second
+  // detector, so blanking a span is the only thing standing between them and a
+  // clean scan.
+  //
+  // Measured before the key-set bound existed, as a tarball under a third-party
+  // package name: the forge scored EXIT=0 with zero findings while the identical
+  // credential string WITHOUT a triple around it scored EXIT=1. In authored
+  // `src/` as well as in build output.
+  const RETIRED_ROW = ["@hasna/", "cloud"].join("");
+  const CONFIG_ROW = ["HASNA_CLOUD", "_"].join("");
+  const CREDENTIAL = ["HASNA_RDS", "_PASSWORD"].join("");
+  const DOTDIR_ROW = [".hasna/", "cloud"].join("");
+  const verbatimRow =
+    `{ pattern: "${RETIRED_ROW}", kind: "module", message: "Shared ${RETIRED_ROW} runtime reference is forbidden" }`;
+
+  test("the row this table emits is attributed", () => {
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${verbatimRow}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+  });
+
+  test("a verbatim row plus ONE extra key is not that row, and the extra key is read", () => {
+    const forged = verbatimRow.replace(
+      " }",
+      `, note: "${CREDENTIAL}=placeholder-not-a-real-value" }`,
+    );
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${forged}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the smuggled credential must be reported").toContain(`dist/bundle.js:${CREDENTIAL}`);
+      expect(report.verdict).toBe("failed");
+    });
+  });
+
+  test("an accepted key cannot hold a nested collection", () => {
+    // The second half of the same hole: bounding the KEYS is not enough on its
+    // own, because one accepted key holding an object hides a whole table inside
+    // the blanked span.
+    //
+    // THE NESTED VALUE HAS TO SIT UNDER `checkKind`, and getting that wrong is how
+    // this test first shipped useless. An earlier version put it under a duplicate
+    // `message` key, so the object won the Map and the existing
+    // `message?.kind !== "string"` check rejected the row before the key-set loop
+    // was consulted at all — the test passed while proving nothing about the rule
+    // it was named for. The mutation audit's full-failing-set output is what
+    // exposed it: M89 was caught only by two repo-wide self-scan tests.
+    //
+    // `checkKind` is accepted BY NAME and is not one of the three the row must
+    // match, so only the value-kind check can reject this.
+    const nested =
+      `{ pattern: "${DOTDIR_ROW}", kind: "config", checkKind: { a: "${CREDENTIAL}", b: "registerCloudTools" }, ` +
+      `message: "Legacy ${DOTDIR_ROW} runtime config is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${nested}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the credential nested under an accepted key must be reported").toContain(
+        `dist/bundle.js:${CREDENTIAL}`,
+      );
+      expect(report.verdict).toBe("failed");
+    });
+    // The pair: the same row with `checkKind` holding the string it really holds.
+    const real =
+      `{ pattern: "${DOTDIR_ROW}", kind: "config", checkKind: "runtime_config", ` +
+      `message: "Legacy ${DOTDIR_ROW} runtime config is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${real}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toEqual([]);
+    });
+  });
+
+  test("the bound holds in hand-authored source, not only in build output", () => {
+    // Attribution reads content and consults no path, so the forge and its
+    // rejection have to behave identically wherever they land. This is also the
+    // half a build-output path scope could never have covered.
+    const forged = verbatimRow.replace(" }", `, note: "${CREDENTIAL}=placeholder" }`);
+    for (const path of ["src/table.ts", "dist/bundle.js", "lib/table.js"]) {
+      withRepo({ name: "@acme/consumer-app", files: { [path]: `export const t = [${forged}];\n` } }, (report) => {
+        expect(patterns(report), path).toContain(`${path}:${CREDENTIAL}`);
+      });
+      withRepo({ name: "@acme/consumer-app", files: { [path]: `export const t = [${verbatimRow}];\n` } }, (report) => {
+        expect(patterns(report), path).toEqual([]);
+      });
+    }
+  });
+
+  test("the accepted key set is derived from the table, so it cannot drift", () => {
+    // A written-out list would be a second copy: add a field to RUNTIME_PATTERNS
+    // and the list silently stops recognising the rows this package emits, which
+    // surfaces as the false positive coming back rather than as an error. The
+    // `.hasna/cloud` row is the one that carries a fourth key today.
+    const withCheckKind =
+      `{ pattern: "${DOTDIR_ROW}", kind: "config", checkKind: "runtime_config", message: "Legacy ${DOTDIR_ROW} runtime config is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${withCheckKind}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toEqual([]);
+    });
+    // And a key that is NOT in the table is rejected even when its value is inert.
+    const strangeKey = withCheckKind.replace(" }", ', severity: "high" }');
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${strangeKey}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toContain(`dist/bundle.js:${DOTDIR_ROW}`);
+    });
+  });
+});
+
+describe("source-text: resolver callees the underscore rule cannot reach", () => {
+  // A review reached a copy of the denylist through `Module._load(DENY[0])` and
+  // through a function returned by `createRequire`. The first is a member name, so
+  // `_*` never applies to it; the second has no word boundary before `Require` and
+  // differs in case. Both are spelled out in `LOAD_CALLEE` now.
+  //
+  // Only ONE of the two is actually closed by naming the callee, and the comment
+  // in `LOAD_CALLEE` says which: `Module._load(DENY[0])` names the array, so the
+  // bound-name check sees it. `var r = createRequire(…); r(DENY[0])` calls `r`,
+  // and no list of callee names can catch a name the caller chose — that route is
+  // conceded in the scope block at the top of `src/no-cloud.ts` rather than
+  // claimed here.
+  const DENY_A = ["@hasna/", "cloud"].join("");
+  const DENY_B = ["open-", "cloud"].join("");
+
+  test("Module._load counts as a load call", () => {
+    expect(loadCallMentions("var m = Module._load(DENY[0]);", "DENY")).toBe(true);
+    expect(loadCallMentions("var r = createRequire(DENY[0]);", "DENY")).toBe(true);
+    // Still a whole identifier, and still not just any call.
+    expect(loadCallMentions("var m = Module._loader(DENYLIST[0]);", "DENY")).toBe(false);
+    expect(loadCallMentions("var m = harmless(DENY[0]);", "DENY")).toBe(false);
+  });
+
+  test("a denylist copy loaded through Module._load is a finding", () => {
+    withRepo(
+      {
+        name: "@acme/consumer-app",
+        files: {
+          "dist/bundle.js": `var DENY = ["${DENY_A}", "${DENY_B}"];\nvar m = Module._load(DENY[0]);\nexport { m };\n`,
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+      },
+    );
+    // The pair: the same copy with a call that resolves nothing.
+    withRepo(
+      {
+        name: "@acme/consumer-app",
+        files: { "dist/bundle.js": `var DENY = ["${DENY_A}", "${DENY_B}"];\nvar m = harmless(DENY[0]);\nexport { m };\n` },
+      },
+      (report) => {
+        expect(report.verdict).toBe("passed");
+      },
+    );
+  });
+});

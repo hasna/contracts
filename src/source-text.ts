@@ -853,11 +853,18 @@ export function inlineDataNodes(node: InlineDataNode): InlineDataNode[] {
  * convention across bundlers (`__require`, `__toESM`-fed requires), so the
  * underscores are matched rather than enumerated.
  *
- * Widening this can only ADD findings: a caller that fails to recognise a load
- * falls through to reporting the bare name instead, so a name recognised here
- * is reclassified, never cleared.
+ * `createRequire` and `Module._load` are spelled out because the underscore rule
+ * does not reach them: `createRequire` has no boundary before `Require` AND
+ * differs in case, and `_load` is a member. A review reached a copy of the
+ * denylist through both.
+ *
+ * Widening this can only ADD findings, in both of its callers: `importsModule`
+ * falls through to reporting the bare name when it fails to recognise a load, so
+ * a name recognised here is reclassified rather than cleared; and
+ * `loadCallMentions` only ever WITHDRAWS an attribution. There is no direction in
+ * which a longer list here hides something.
  */
-const LOAD_CALLEE = String.raw`(?:^|[^\w$])_*(?:import|require)`;
+const LOAD_CALLEE = String.raw`(?:^|[^\w$])(?:_*(?:import|require)|createRequire|Module\s*\.\s*_load)`;
 
 /**
  * Does a load call in this text mention `name`?

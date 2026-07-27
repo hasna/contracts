@@ -554,8 +554,15 @@ const MUTATIONS: Mutation[] = [
     id: "M81-attrib-load-callee-includes-the-bundler-wrapper",
     rule: "`__require` is a load: bun build --external emits it and `\\b` cannot see it",
     file: "src/source-text.ts",
-    from: "const LOAD_CALLEE = String.raw`(?:^|[^\\w$])_*(?:import|require)`;",
+    from: "const LOAD_CALLEE = String.raw`(?:^|[^\\w$])(?:_*(?:import|require)|createRequire|Module\\s*\\.\\s*_load)`;",
     to: "const LOAD_CALLEE = String.raw`\\b(?:import|require)`;",
+  },
+  {
+    id: "M81b-attrib-resolver-callees-are-spelled-out",
+    rule: "createRequire and Module._load are loads the underscore rule cannot reach",
+    file: "src/source-text.ts",
+    from: "const LOAD_CALLEE = String.raw`(?:^|[^\\w$])(?:_*(?:import|require)|createRequire|Module\\s*\\.\\s*_load)`;",
+    to: "const LOAD_CALLEE = String.raw`(?:^|[^\\w$])_*(?:import|require)`;",
   },
   {
     id: "M82-attrib-load-call-name-is-a-whole-identifier",
@@ -597,6 +604,27 @@ const MUTATIONS: Mutation[] = [
     from: '      kind: "checkKind" in entry ? entry.checkKind : file.kind,',
     // Spelled in pieces so this file does not carry a literal the gate forbids.
     to: '      kind: entry.pattern === ".hasna/' + 'cloud" ? "runtime_config" : file.kind,',
+  },
+  {
+    id: "M88-attrib-record-key-set-is-bounded",
+    rule: "a blanked span may carry no key this table does not emit",
+    file: "src/no-cloud.ts",
+    from: "    if (!RUNTIME_PATTERN_KEYS.has(key)) return false;",
+    to: "    if (false) return false;",
+  },
+  {
+    id: "M89-attrib-accepted-key-holds-only-a-string",
+    rule: "an accepted key cannot hold a nested collection",
+    file: "src/no-cloud.ts",
+    from: '    if (value.kind !== "string") return false;',
+    to: "    if (false) return false;",
+  },
+  {
+    id: "M90-attrib-key-set-is-derived-from-the-table",
+    rule: "the accepted key set comes from RUNTIME_PATTERNS, so it cannot drift",
+    file: "src/no-cloud.ts",
+    from: "const RUNTIME_PATTERN_KEYS: ReadonlySet<string> = new Set(RUNTIME_PATTERNS.flatMap((entry) => Object.keys(entry)));",
+    to: 'const RUNTIME_PATTERN_KEYS: ReadonlySet<string> = new Set(["pattern", "kind", "message"]);',
   },
   {
     id: "M87-attrib-path-config-read-off-the-table",
@@ -729,7 +757,7 @@ let inFlight: { path: string; original: string } | null = null;
 
 function beginMutation(path: string, original: string): void {
   inFlight = { path, original };
-  writeFileSync(SENTINEL, JSON.stringify({ path, original }));
+  writeFileSync(SENTINEL, JSON.stringify({ pid: process.pid, path, original }));
 }
 
 function endMutation(): void {
@@ -741,15 +769,47 @@ function endMutation(): void {
   if (existsSync(SENTINEL)) rmSync(SENTINEL, { force: true });
 }
 
-/** Repair a previous run that was killed before it could restore. */
+/**
+ * Repair a previous run that was killed before it could restore.
+ *
+ * REFUSES TO RUN CONCURRENTLY, and that guard is not hygiene — without it this
+ * function is a corruption source. Two audits in the same worktree share one
+ * tree: the second one's recovery restores the file the first one is actively
+ * mutating, so the first then measures an unmutated tree and reports SURVIVED
+ * for rules that are fine. Reproduced by starting a second run by accident during
+ * this change.
+ *
+ * The sentinel carries the owning pid, so "abandoned" can be told from "someone
+ * else is working". A stale pid that has been recycled onto an unrelated process
+ * is possible and would make this refuse instead of recover — the safe direction,
+ * and the message says what to do.
+ */
 function recoverAbandonedMutation(): void {
   if (!existsSync(SENTINEL)) return;
-  const record = JSON.parse(readFileSync(SENTINEL, "utf8")) as { path: string; original: string };
+  const record = JSON.parse(readFileSync(SENTINEL, "utf8")) as { pid?: number; path: string; original: string };
+  if (record.pid !== undefined && record.pid !== process.pid && processIsAlive(record.pid)) {
+    console.error(
+      `Refusing to run: pid ${record.pid} holds a mutation in ${record.path}. ` +
+        `Wait for it, or kill that pid and re-run to recover.`,
+    );
+    process.exit(2);
+  }
   if (readFileSync(record.path, "utf8") !== record.original) {
     writeFileSync(record.path, record.original);
     console.error(`RECOVERED: a previous run left ${record.path} mutated. Restored it.`);
   }
   rmSync(SENTINEL, { force: true });
+}
+
+/** `kill -0`: does this pid exist and are we allowed to signal it? */
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means it exists and belongs to somebody else, which still counts.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"] as const) {
@@ -851,10 +911,19 @@ for (const mutation of selected) {
   const caught = result.fail > 0;
   if (!caught) survivors += 1;
   const verdict = !ranAtAll ? "NO-RESULT" : caught ? "caught " : "SURVIVED";
-  console.log(
-    `${mutation.id.padEnd(38)} ${verdict} ${result.pass}/${result.fail}` +
-      (caught ? `  -> ${result.failed[0]?.slice(0, 60) ?? ""}` : `  (rule: ${mutation.rule})`),
-  );
+  // THE FULL FAILING SET, not the first failure.
+  //
+  // Most mutations in the no-cloud blocks trip `open-contracts passes
+  // conformance against itself`, which scans this repo with its own scanner. It
+  // sorts first, so printing `failed[0]` printed the SAME string for 13 of 18
+  // attribution mutations — and that uniformity is exactly what hid a rule with
+  // no test of its own behind a rule that had one. Printing every failing test
+  // makes "this mutation is only caught by the self-scan" visible without having
+  // to re-run anything.
+  const detail = caught
+    ? result.failed.map((name) => `\n      ${name}`).join("")
+    : `  (rule: ${mutation.rule})`;
+  console.log(`${mutation.id.padEnd(38)} ${verdict} ${result.pass}/${result.fail}${detail}`);
 }
 
 console.log(`\n${selected.length - survivors}/${selected.length} caught`);
