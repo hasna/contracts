@@ -899,6 +899,110 @@ export function blankSpans(text: string, spans: ReadonlyArray<{ start: number; e
 }
 
 /**
+ * A span whose BYTES have been read and found to be one quoted constant.
+ *
+ * `constant` is not decoration — it is the claim the span carries, and
+ * `blankConstantSpans` re-checks it against the text before suppressing
+ * anything. So a span cannot be moved, widened, or synthesised somewhere else
+ * and still be blanked: it has to keep saying what it is, and be it.
+ *
+ * `quotedConstantSpan` is the only function that produces one. That is the whole
+ * mechanism, so it is worth saying why the TYPE is part of it: a plain
+ * `{start, end}` is not assignable here, so `tsc` rejects the edit that reverted
+ * this rule four times in a row — pushing the ENCLOSING node's span instead of
+ * the span that was actually compared. Reintroducing that now requires an
+ * explicit cast, which is greppable and visible in review rather than being the
+ * natural thing to write.
+ */
+export interface ConstantSpan {
+  readonly start: number;
+  readonly end: number;
+  /** The constant these bytes were compared against, quotes excluded. */
+  readonly constant: string;
+}
+
+/** The three quotes a string literal can be written with. */
+function quoteCharacter(character: string | undefined): boolean {
+  return character === '"' || character === "'" || character === "`";
+}
+
+/**
+ * The span of `node`, IF the bytes it covers are exactly one quoted `expected`.
+ *
+ * THIS IS THE WHOLE RULE, AND IT IS A BYTE COMPARISON ON PURPOSE.
+ *
+ * Four evasions reached a copy of this repo's own denylist through one gap:
+ * every one of them was caught, or not caught, by a check that read a PARSED
+ * structure while the caller suppressed RAW BYTES. The parse is lossy — most
+ * recently and most cheaply, `parseInlineData` stores a record's entries in a
+ * `Map`, so a duplicate key collapses last-wins and the shadowed value is a
+ * region of text nothing ever looked at. Repeating one key was the entire cost
+ * of getting a credential through a blanked span.
+ *
+ * So the comparison and the action are now on the SAME representation. What is
+ * compared is `text.slice(node.start, node.end)`; what gets blanked is
+ * `node.start .. node.end`. There is no third thing in between for a shape to
+ * hide in.
+ *
+ * WHY THIS DELETES CHECKS INSTEAD OF ADDING ONE, which is the reason to believe
+ * it is not another narrowing. Three separately-tested rules are strictly
+ * implied by this single line and were removed with it:
+ *
+ *   - "the value must be a plain string, not a nested collection" — a record's
+ *     span opens with `{` and an array's with `[`, so neither can equal
+ *     `quote + expected + quote`;
+ *   - "the value must equal the row's value" — that IS this comparison, on the
+ *     stricter representation;
+ *   - "the value's kind must be `string`" — subsumed by the opening quote.
+ *
+ * WHAT IT NEWLY REFUSES, and the refusal is deliberate: a literal that needs an
+ * escape to spell the constant. `"a\"b"` decodes to `a"b`, so the old check
+ * would call it equal — while the span it authorises is two bytes longer than
+ * the thing that was compared. No pattern in the table contains a quote or a
+ * backslash today, so this costs nothing measurable; it is here so that the
+ * guarantee does not quietly depend on that staying true. A row that one day
+ * needs an escape simply stops being attributed, which is the noisy direction.
+ */
+export function quotedConstantSpan(
+  text: string,
+  node: InlineDataNode | undefined,
+  expected: string
+): ConstantSpan | null {
+  if (node === undefined) return null;
+  const raw = text.slice(node.start, node.end);
+  const quote = raw[0];
+  if (!quoteCharacter(quote)) return null;
+  if (raw !== `${quote}${expected}${quote}`) return null;
+  return { start: node.start, end: node.end, constant: expected };
+}
+
+/**
+ * Blank verified spans, re-checking each one's claim against the text first.
+ *
+ * The check is not belt-and-braces on `quotedConstantSpan`; it is what makes a
+ * WRONG span observable instead of silent. A caller that casts its way past
+ * `ConstantSpan` — or that computes an offset from one text and blanks it in
+ * another — trips this, and it trips as a thrown error in the scanner's own
+ * test suite rather than as a quietly clean scan of somebody's artifact.
+ *
+ * It throws rather than dropping the span, because a span that does not match
+ * its own claim is a bug in this file, not something an input can cause. Every
+ * shape an INPUT can produce is answered by returning `null` above.
+ */
+export function blankConstantSpans(text: string, spans: readonly ConstantSpan[]): string {
+  for (const span of spans) {
+    const raw = text.slice(span.start, span.end);
+    const quote = raw[0];
+    if (!quoteCharacter(quote) || raw !== `${quote}${span.constant}${quote}`) {
+      throw new Error(
+        `refusing to blank ${span.start}..${span.end}: its bytes are not the constant it claims`
+      );
+    }
+  }
+  return blankSpans(text, spans);
+}
+
+/**
  * The three quotes a specifier can be written in.
  *
  * The backtick is the one that was missing, and leaving it out cost a FALSE

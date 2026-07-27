@@ -27,6 +27,7 @@ import {
   resolutionTarget
 } from "../src/dependency-edge";
 import {
+  blankConstantSpans,
   importedBindings,
   importsModule,
   inlineDataNodes,
@@ -34,7 +35,8 @@ import {
   loadCallMentions,
   maskComments,
   maskCommentsForPath,
-  mentionsCannotLoad
+  mentionsCannotLoad,
+  quotedConstantSpan
 } from "../src/source-text";
 
 /** The retired runtime, spelled in pieces so this file does not trip its own gate. */
@@ -1643,6 +1645,36 @@ describe("no-cloud gate: this package's inlined declaration is attributed, not e
         expect(patterns(report).sort()).toEqual([`package.json:${RETIRED}`, `package.json:${OTHER}`].sort());
       },
     );
+    // THE FIXTURE THAT ACTUALLY PINS THE RULE, and the one above does not.
+    //
+    // Found by narrowing the mutation audit: `M84` — "a manifest is read
+    // structurally; its text is not edited on a shape match" — SURVIVED at this
+    // commit and at `9a51cca` before it. The fixture above puts the array under
+    // the `keywords` KEY, and attribution only ever considers the region root or
+    // a direct element of a root array, so a SECOND rule was protecting it and
+    // `M84`'s own rule was never exercised. Two rules, one test, and the test
+    // proved the wrong one — the same failure mode the `--suite` flag exists to
+    // expose.
+    //
+    // So: a manifest whose ROOT is a verbatim table row. If the c-family
+    // restriction were removed, this record would match entry for entry and its
+    // value literals would be blanked; with the restriction it is read whole.
+    withRepo(
+      {
+        files: {
+          "package.json": JSON.stringify({
+            pattern: RETIRED,
+            kind: "module",
+            message: `Shared ${RETIRED} runtime reference is forbidden`,
+          }),
+        },
+      },
+      (report) => {
+        expect(patterns(report), "a manifest that LOOKS like our row is still read as text").toContain(
+          `package.json:${RETIRED}`,
+        );
+      },
+    );
   });
 
   test("a file living at the legacy config dotdir is read as runtime config", () => {
@@ -1825,7 +1857,7 @@ describe("source-text: a collection must be STORED, not just written down somewh
 
 describe("no-cloud gate: a blanked span may carry nothing but the row this table emits", () => {
   // THE BLOCKING DEFECT A REVIEW FOUND, and it is the same shape as the rejection
-  // that killed the first attempt at this fix. `isOwnPatternDeclaration` checked
+  // that killed the first attempt at this fix. `ownPatternDeclarationSpans` (then `isOwnPatternDeclaration`) checked
   // three keys and ignored the rest of the key set, while
   // `withoutInlinedDeclarations` blanks the WHOLE record. So a verbatim
   // `{pattern, kind, message}` triple plus one more key smuggled anything at all
@@ -1857,8 +1889,117 @@ describe("no-cloud gate: a blanked span may carry nothing but the row this table
       `, note: "${CREDENTIAL}=placeholder-not-a-real-value" }`,
     );
     withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${forged}];\nexport { t };\n` } }, (report) => {
-      expect(patterns(report), "the smuggled credential must be reported").toContain(`dist/bundle.js:${CREDENTIAL}`);
+      // THE FULL FINDING SET, not just the credential, and the strengthening is
+      // load-bearing. Byte-confined blanking reports the smuggled credential
+      // whether or not the key-count bound exists — the extra key's bytes were
+      // never compared, so they are never blanked either way. So the weaker
+      // `toContain(CREDENTIAL)` assertion let `M88` read as caught while proving
+      // nothing about the rule it names. What the bound actually decides is
+      // whether this record is claimed AT ALL, and that shows up as the module
+      // pattern being reported too.
+      expect(patterns(report).sort(), "an extra key means the row is not claimed, so BOTH patterns are read").toEqual(
+        [`dist/bundle.js:${CREDENTIAL}`, `dist/bundle.js:${RETIRED_ROW}`].sort(),
+      );
       expect(report.verdict).toBe("failed");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // DUPLICATE KEYS: the fourth evasion, and the one that ended the strategy of
+  // narrowing the comparison.
+  //
+  // `parseInlineData` stores a record's entries in a `Map`, so a repeated key
+  // collapses last-wins. Entry-for-entry equality was complete FOR THE MAP and
+  // therefore blind to the shadowed entry: three entries compared, 167 raw bytes
+  // blanked. Duplicate data properties are legal modern JS — `node
+  // --input-type=module` parses the forge without complaint — so this is a valid
+  // shippable file carrying both strings, and the cost to an evader is repeating
+  // one key.
+  //
+  // Measured at `9a51cca`, and again at `b7fd289` which had the union key-set
+  // pre-filter instead: EXIT=0 on both, because both iterated the same collapsed
+  // `Map`. The hole PREDATED the equality rule; it was never a regression the
+  // last narrowing introduced.
+  //
+  // This block is deliberately written in BOTH duplicated positions, because two
+  // people found this independently with different keys — the review used
+  // `pattern`, a second reproduction used `message`.
+  // -------------------------------------------------------------------------
+  describe("a duplicate key cannot shadow a payload into a blanked span", () => {
+    const PAYLOAD = `${CREDENTIAL}=placeholder-not-a-real-value`;
+
+    function scanBundle(source: string, assert: (report: ReturnType<typeof scanNoCloudTarget>) => void) {
+      withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${source}];\nexport { t };\n` } }, assert);
+    }
+
+    test("the shadowed `pattern` is read, and the winning one is still attributed", () => {
+      const forged =
+        `{ pattern: "${PAYLOAD}", pattern: "${RETIRED_ROW}", kind: "module", ` +
+        `message: "Shared ${RETIRED_ROW} runtime reference is forbidden" }`;
+      scanBundle(forged, (report) => {
+        expect(patterns(report), "the shadowed value's bytes were never compared, so they are never blanked").toContain(
+          `dist/bundle.js:${CREDENTIAL}`,
+        );
+        expect(report.verdict).toBe("failed");
+      });
+    });
+
+    test("the same shadowing in `message` is read too", () => {
+      const forged =
+        `{ pattern: "${RETIRED_ROW}", kind: "module", message: "${PAYLOAD}", ` +
+        `message: "Shared ${RETIRED_ROW} runtime reference is forbidden" }`;
+      scanBundle(forged, (report) => {
+        expect(patterns(report)).toContain(`dist/bundle.js:${CREDENTIAL}`);
+        expect(report.verdict).toBe("failed");
+      });
+    });
+
+    test("CONTROL: the same payload in the WINNING position fails, as it always did", () => {
+      const forged =
+        `{ pattern: "${RETIRED_ROW}", pattern: "${PAYLOAD}", kind: "module", ` +
+        `message: "Shared ${RETIRED_ROW} runtime reference is forbidden" }`;
+      scanBundle(forged, (report) => {
+        expect(patterns(report)).toContain(`dist/bundle.js:${CREDENTIAL}`);
+        expect(report.verdict).toBe("failed");
+      });
+    });
+
+    test("CONTROL: the same payload with no row around it fails", () => {
+      scanBundle(`"${PAYLOAD}"`, (report) => {
+        expect(patterns(report)).toContain(`dist/bundle.js:${CREDENTIAL}`);
+        expect(report.verdict).toBe("failed");
+      });
+    });
+
+    test("CONTROL: the row WITHOUT a duplicate is still attributed, so this is not just over-reporting", () => {
+      scanBundle(verbatimRow, (report) => {
+        expect(patterns(report)).toEqual([]);
+        expect(report.verdict).toBe("passed");
+      });
+    });
+
+    test("the PARSE is still lossy — that is the point, and it is why the action moved", () => {
+      // This asserts the defect is still present in the representation, because
+      // the fix deliberately does NOT patch the parser. Patching `parseInlineData`
+      // to refuse duplicates would be a fifth narrowing: it closes this instance
+      // while leaving the gap between what is compared and what is blanked. If
+      // someone later makes the parse faithful, this test fails loudly and the
+      // duplicate-key forges above stop pinning the mechanism — read the clause in
+      // `withoutInlinedDeclarations` before changing it.
+      const source = `var t = [{ pattern: "x", pattern: "y", kind: "z" }];`;
+      const [region] = inlineDataRegions(source, ["x", "y", "z"]);
+      expect(region, "the region is produced").toBeDefined();
+      const record = region!.root.kind === "array" ? region!.root.items[0]! : region!.root;
+      expect(record.kind).toBe("record");
+      if (record.kind !== "record") throw new Error("unreachable");
+      expect(record.entries.size, "three written entries collapse to two").toBe(2);
+      expect([...record.entries.keys()]).toEqual(["pattern", "kind"]);
+      const kept = record.entries.get("pattern");
+      expect(kept?.kind === "string" ? kept.value : null, "last write wins").toBe("y");
+      expect(
+        source.slice(record.start, record.end),
+        "and the raw span still carries the shadowed value",
+      ).toContain('"x"');
     });
   });
 
@@ -1957,6 +2098,116 @@ describe("no-cloud gate: a blanked span may carry nothing but the row this table
     withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${strangeKey}];\nexport { t };\n` } }, (report) => {
       expect(patterns(report)).toContain(`dist/bundle.js:${DOTDIR_ROW}`);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE MECHANISM ITSELF: the comparison and the action are on the same bytes.
+//
+// `quotedConstantSpan` is the only thing in this codebase that can authorise a
+// byte to be suppressed, so it is tested directly rather than only through the
+// gate. Four evasions all lived in the difference between a parsed structure and
+// a raw span; these tests assert that difference no longer exists.
+// ---------------------------------------------------------------------------
+describe("source-text: only bytes that were compared can be blanked", () => {
+  /** The single-node parse of `source`, whatever kind it is. */
+  function soleNode(source: string) {
+    const [region] = inlineDataRegions(source, ["needle"]);
+    if (region === undefined) throw new Error(`no region in ${source}`);
+    return region.root.kind === "array" ? region.root.items[0]! : region.root;
+  }
+
+  test("a plain literal in any of the three quotes yields its own span, and nothing more", () => {
+    for (const quote of ['"', "'", "`"]) {
+      const source = `var t = [${quote}needle${quote}];`;
+      const node = soleNode(source);
+      const span = quotedConstantSpan(source, node, "needle");
+      expect(span, `quote ${quote}`).not.toBeNull();
+      expect(source.slice(span!.start, span!.end), "exactly quote + constant + quote").toBe(`${quote}needle${quote}`);
+      expect(span!.constant).toBe("needle");
+    }
+  });
+
+  test("a value that is not the constant yields nothing", () => {
+    const source = 'var t = ["needle"];';
+    expect(quotedConstantSpan(source, soleNode(source), "haystack")).toBeNull();
+  });
+
+  test("a COLLECTION never yields a span, because its bytes do not open with a quote", () => {
+    // The rule that used to be a separate `kind === "string"` check, and is now
+    // implied. A record's span opens with `{` and an array's with `[`, so neither
+    // can equal quote + constant + quote for any constant at all.
+    for (const source of ['var t = [{ a: "needle" }];', 'var t = [["needle"]];']) {
+      const node = soleNode(source);
+      expect(quotedConstantSpan(source, node, "needle"), source).toBeNull();
+      expect(quotedConstantSpan(source, node, source.slice(node.start, node.end)), source).toBeNull();
+    }
+  });
+
+  test("an undefined node — an absent key — yields nothing", () => {
+    expect(quotedConstantSpan('var t = ["needle"];', undefined, "needle")).toBeNull();
+  });
+
+  test("A LITERAL THAT NEEDS AN ESCAPE TO SPELL THE CONSTANT IS REFUSED", () => {
+    // THE SIGNATURE CASE, and the one that distinguishes this mechanism from
+    // every version before it. `"a\"b"` DECODES to `a"b`, so a check on the
+    // parsed value calls it equal — while the span it would authorise is two
+    // bytes wider than the thing that was compared. That is the four-time flaw
+    // in miniature: compare a lossy representation, act on raw bytes.
+    //
+    // No pattern in the table contains a quote or a backslash today, so refusing
+    // this costs nothing measurable. It is here so the guarantee does not quietly
+    // depend on that staying true — a row that one day needs an escape simply
+    // stops being attributed, which is the noisy direction.
+    const source = 'var t = ["a\\"b"];';
+    const [region] = inlineDataRegions(source, ['a\\"b']);
+    const literal = region === undefined ? null : region.root.kind === "array" ? region.root.items[0]! : region.root;
+    expect(literal, "the parse reads it").not.toBeNull();
+    if (literal === null) throw new Error("unreachable");
+    expect(literal.kind === "string" ? literal.value : null, "and DECODES it to the three-character value").toBe('a"b');
+    expect(
+      quotedConstantSpan(source, literal, 'a"b'),
+      "but the bytes are five characters plus quotes, so no span is authorised",
+    ).toBeNull();
+  });
+
+  test("blankConstantSpans blanks exactly the spans it is given", () => {
+    const source = 'var t = ["needle"];';
+    const span = quotedConstantSpan(source, soleNode(source), "needle")!;
+    const blanked = blankConstantSpans(source, [span]);
+    expect(blanked.length, "offsets still line up").toBe(source.length);
+    expect(blanked).toBe('var t = [        ];');
+  });
+
+  test("blankConstantSpans REFUSES a span whose bytes are not the constant it claims", () => {
+    // The positive control for the re-check. A span that lies about itself is a
+    // bug in this file rather than something an input can cause, so it throws
+    // instead of quietly scanning clean. This is what makes the wrong span
+    // OBSERVABLE — it is how `M93` gets caught.
+    const source = 'var t = [{ a: "needle" }];';
+    const record = soleNode(source);
+    const forged = { start: record.start, end: record.end, constant: "needle" };
+    expect(() => blankConstantSpans(source, [forged])).toThrow(/not the constant it claims/);
+    // And a span that is a correct literal but claims the wrong constant.
+    const inner = record.kind === "record" ? [...record.entries.values()][0]! : record;
+    expect(() => blankConstantSpans(source, [{ start: inner.start, end: inner.end, constant: "haystack" }])).toThrow(
+      /not the constant it claims/,
+    );
+  });
+
+  test("a genuine table row blanks its VALUES and leaves the record's own bytes alone", () => {
+    // The observable form of "the action is confined to the compared leaves".
+    // Under the old rule the whole record vanished; the keys, the braces and the
+    // punctuation are bytes nothing ever compared, so they must survive.
+    const RETIRED_ROW = ["@hasna/", "cloud"].join("");
+    const row = `{ pattern: "${RETIRED_ROW}", kind: "module", message: "Shared ${RETIRED_ROW} runtime reference is forbidden" }`;
+    withRepo(
+      { name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${row}];\nexport { t };\n` } },
+      (report) => {
+        expect(patterns(report), "still attributed").toEqual([]);
+        expect(report.verdict).toBe("passed");
+      },
+    );
   });
 });
 

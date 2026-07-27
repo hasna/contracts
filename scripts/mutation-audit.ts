@@ -484,50 +484,86 @@ const MUTATIONS: Mutation[] = [
     id: "M72-attrib-recognised-by-content",
     rule: "the declaration is recognised, not merely parsed",
     file: "src/no-cloud.ts",
-    from: "      if (isOwnPatternDeclaration(node)) spans.push({ start: node.start, end: node.end });",
-    to: "      if (false) spans.push({ start: node.start, end: node.end });",
+    from: "      const verified = ownPatternDeclarationSpans(masked, node);\n      if (verified !== null) spans.push(...verified);",
+    to: "      const verified = ownPatternDeclarationSpans(masked, node);\n      if (false) spans.push(...verified!);",
   },
   {
     id: "M73-attrib-is-per-occurrence-not-per-file",
     rule: "attribution drops the declaration's own characters, never the whole file",
     file: "src/no-cloud.ts",
-    from: "  return blankSpans(masked, spans);",
+    from: "  return blankConstantSpans(masked, spans);",
     to: '  return spans.length > 0 ? "" : masked;',
   },
   {
     id: "M74-attrib-array-must-match-length",
     rule: "an array holding a SUBSET or SUPERSET of the denylist is somebody else's data",
     file: "src/no-cloud.ts",
-    from: "      node.items.length === FORBIDDEN_SHARED_CLOUD_RUNTIMES.length &&",
-    to: "      true &&",
+    from: "    if (node.items.length !== FORBIDDEN_SHARED_CLOUD_RUNTIMES.length) return null;",
+    to: "    if (false) return null;",
   },
   {
     id: "M75-attrib-array-must-match-members",
     rule: "an array of the right length but the wrong names is not the denylist",
     file: "src/no-cloud.ts",
-    from: '      node.items.every((item, index) => item.kind === "string" && item.value === FORBIDDEN_SHARED_CLOUD_RUNTIMES[index])',
-    to: '      node.items.every((item) => item.kind === "string")',
+    from: "      const span = quotedConstantSpan(text, item, FORBIDDEN_SHARED_CLOUD_RUNTIMES[index]!);",
+    to: "      const span = quotedConstantSpan(text, item, item.kind === \"string\" ? item.value : \"\");",
+  },
+
+  // THE MECHANISM: the comparison and the action are on the same bytes.
+  //
+  // M91/M93/M94/M95 are the four that pin it, and they exist because M71..M90
+  // above could ALL be satisfied while a shadowed duplicate key rode through a
+  // blanked span. Every one of those rules asks "how completely was the structure
+  // compared"; none of them asks "were these bytes compared at all".
+  {
+    id: "M91-attrib-blanks-only-the-compared-record-leaves",
+    rule: "a record match blanks its compared VALUE literals, never the enclosing record's span",
+    file: "src/no-cloud.ts",
+    from: "    if (spans.length === keys.length) return spans;",
+    // The cast is the point: `ConstantSpan` makes this edit impossible to write
+    // by accident. Reverting the rule now requires saying so out loud.
+    to: "    if (spans.length === keys.length) return [{ start: node.start, end: node.end, constant: text.slice(node.start + 1, node.end - 1) } as ConstantSpan];",
   },
   {
-    id: "M76-attrib-row-equals-a-table-row-entry-for-entry",
-    rule: "a row must equal a table row's VALUES, not merely carry the right keys",
+    id: "M93-attrib-blanks-only-the-compared-array-elements",
+    rule: "an array match blanks its elements, never the enclosing array's span",
     file: "src/no-cloud.ts",
-    from: "      return value?.kind === \"string\" && value.value === row[key];",
-    to: '      return value?.kind === "string";',
+    from: "    return spans;\n  }\n  if (node.kind !== \"record\") return null;",
+    to: "    return [{ start: node.start, end: node.end, constant: text.slice(node.start + 1, node.end - 1) } as ConstantSpan];\n  }\n  if (node.kind !== \"record\") return null;",
+  },
+  {
+    id: "M94-attrib-blanking-rechecks-the-span-against-the-text",
+    rule: "a span that does not match the constant it claims throws, so a wrong span is observable",
+    file: "src/source-text.ts",
+    from:
+      "      throw new Error(\n" +
+      "        `refusing to blank ${span.start}..${span.end}: its bytes are not the constant it claims`\n" +
+      "      );",
+    to: "      continue;",
+  },
+  {
+    id: "M95-attrib-compares-bytes-not-the-decoded-value",
+    rule: "THE FOUR-TIME FLAW: comparing the parsed value while blanking raw bytes",
+    file: "src/source-text.ts",
+    from: "  if (raw !== `${quote}${expected}${quote}`) return null;",
+    // Exactly the old behaviour, in miniature: read the lossy representation,
+    // act on the bytes. An escaped literal is then blanked over bytes nothing
+    // compared.
+    to: '  if (node.kind !== "string" || node.value !== expected) return null;',
+  },
+  {
+    id: "M92-attrib-value-must-equal-the-rows-value",
+    rule: "a row's value must BE the table's value, not merely be a quoted string",
+    file: "src/source-text.ts",
+    from: "  if (raw !== `${quote}${expected}${quote}`) return null;",
+    to: "  if (raw.length < 2) return null;",
   },
   {
     id: "M88-attrib-record-key-count-is-bounded",
-    rule: "an extra key means it is not the row, because the whole record gets blanked",
+    rule: "a record carrying a key this table does not emit is not this table's record",
     file: "src/no-cloud.ts",
-    from: "    if (keys.length !== node.entries.size) return false;",
-    to: "    if (false) return false;",
-  },
-  {
-    id: "M89-attrib-row-values-must-be-plain-strings",
-    rule: "a row's value cannot be a nested collection",
-    file: "src/no-cloud.ts",
-    from: "      return value?.kind === \"string\" && value.value === row[key];",
-    to: "      return value === undefined ? false : value.kind !== \"string\" ? true : value.value === row[key];",
+    from: "    if (keys.length !== node.entries.size) continue;",
+    to: "    if (false) continue;",
   },
   {
     id: "M90-attrib-row-keys-come-from-the-matched-row",
@@ -536,13 +572,28 @@ const MUTATIONS: Mutation[] = [
     from: "    const keys = Object.keys(row) as ReadonlyArray<keyof typeof row>;",
     to: '    const keys = ["pattern", "kind", "message"] as unknown as ReadonlyArray<keyof typeof row>;',
   },
-  {
-    id: "M77-attrib-row-shape-alone-is-not-enough",
-    rule: "a three-key row that names no known pattern is not this table's row",
-    file: "src/no-cloud.ts",
-    from: "  return RUNTIME_PATTERNS.some(",
-    to: "  return true || RUNTIME_PATTERNS.some(",
-  },
+  // THREE MUTATIONS WERE REMOVED HERE, and removing a mutation is a claim, so
+  // here is the claim. `M76` ("a row must equal a table row's VALUES"), `M89`
+  // ("a row's value cannot be a nested collection") and `M77` ("a three-key row
+  // that names no known pattern is not this table's row") each named a rule that
+  // is now a strict consequence of ONE byte comparison in `quotedConstantSpan`,
+  // and each was implemented by its own line before:
+  //
+  //   - a nested collection's span opens with `{` or `[`, so it cannot equal
+  //     quote + constant + quote for any constant;
+  //   - a value that is not the row's value fails that same comparison;
+  //   - a record that names no table pattern fails it for every row.
+  //
+  // Their replacement is `M92` (drop the equality, keep the quotes) and `M95`
+  // (compare the DECODED value instead of the bytes). Keeping M76/M77/M89 as well
+  // would put three more mutations over one line — the same defect that retiring
+  // the union key-set pre-filter was meant to avoid, where an audit reports
+  // coverage for rules that no longer have independent code to remove.
+  //
+  // Do not re-add them without a `to:` that actually loosens something. M77's
+  // last spelling appended a synthetic empty-pattern row to the loop and was
+  // measured a NO-OP survivor: an empty expected value matches only a literal
+  // `""`, which no forge writes.
   {
     id: "M78-attrib-not-read-in-place",
     rule: "indexing, calling or member-accessing a collection is a load, not a declaration",
