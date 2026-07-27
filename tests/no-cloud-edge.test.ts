@@ -2043,6 +2043,43 @@ describe("no-cloud gate: a blanked span may carry nothing but the row this table
   // This block is deliberately written in BOTH duplicated positions, because two
   // people found this independently with different keys — the review used
   // `pattern`, a second reproduction used `message`.
+  //
+  // WHICH HALF THESE FORGES PIN, AND IT IS NO LONGER THE ONE THE NAMES SUGGEST.
+  // Read this before treating any test in this block as evidence about span
+  // confinement.
+  //
+  // Two fixes for this evasion landed, from two different branches, and they close
+  // it at different depths:
+  //
+  //   UPSTREAM — `parseInlineData` REFUSES a record that repeats a key
+  //     (`src/source-text.ts`, the `entries.has(key)` line). A duplicate-key record
+  //     now produces NO region at all, so it never reaches attribution.
+  //   DOWNSTREAM — `quotedConstantSpan` / `blankConstantSpans` blank only bytes
+  //     that were compared, so even an attributed record cannot hide a shadowed
+  //     value inside a blanked span.
+  //
+  // With both present the upstream refusal fires FIRST. Every forge below is still
+  // caught, and the assertions still hold — but they now hold because nothing was
+  // attributed, not because blanking was confined. Measured on this tree:
+  // `inlineDataRegions` returns 0 regions for a duplicate-key record, so
+  // `quotedConstantSpan` is never called on one.
+  //
+  // That makes these forges a real test of the UPSTREAM half and a NO-OP for the
+  // downstream half. They are kept, because the upstream half needs pinning too and
+  // this is where it is pinned — but they must not be read as pinning byte
+  // confinement, because they cannot fail if it is removed. The test that DOES pin
+  // byte confinement, non-vacuously and on an input that still reaches the
+  // mechanism, is "a genuine table row blanks its VALUES and leaves the record's
+  // own bytes alone" further down this file: it takes a row with NO duplicate key,
+  // so the parser accepts it, and then reads the bytes. Measured on that test's own
+  // fixture: the record is 106 bytes, 74 of them are inside verified constant spans,
+  // and the remaining 32 — the keys, the colons, the commas, the braces — are not.
+  // Under whole-node blanking all 106 went. That difference is what a test of this
+  // mechanism has to be able to see.
+  //
+  // This is exactly the failure mode `M93` was retired for: an assertion that
+  // cannot distinguish the fix from the bug. Naming it here rather than deleting
+  // the forges is the deliberate choice.
   // -------------------------------------------------------------------------
   describe("a duplicate key cannot shadow a payload into a blanked span", () => {
     const PAYLOAD = `${CREDENTIAL}=placeholder-not-a-real-value`;
@@ -2142,28 +2179,49 @@ describe("no-cloud gate: a blanked span may carry nothing but the row this table
       }
     });
 
-    test("the PARSE is still lossy — that is the point, and it is why the action moved", () => {
-      // This asserts the defect is still present in the representation, because
-      // the fix deliberately does NOT patch the parser. Patching `parseInlineData`
-      // to refuse duplicates would be a fifth narrowing: it closes this instance
-      // while leaving the gap between what is compared and what is blanked. If
-      // someone later makes the parse faithful, this test fails loudly and the
-      // duplicate-key forges above stop pinning the mechanism — read the clause in
-      // `withoutInlinedDeclarations` before changing it.
-      const source = `var t = [{ pattern: "x", pattern: "y", kind: "z" }];`;
-      const [region] = inlineDataRegions(source, ["x", "y", "z"]);
-      expect(region, "the region is produced").toBeDefined();
-      const record = region!.root.kind === "array" ? region!.root.items[0]! : region!.root;
+    test("the duplicate-key route is closed UPSTREAM, so it no longer reaches the span logic at all", () => {
+      // THIS TEST WAS INVERTED ON PURPOSE, and the reason is recorded because the
+      // inversion is the interesting part.
+      //
+      // It used to assert that the PARSE IS STILL LOSSY — that a repeated key
+      // collapses in the `Map` and the raw span still carries the shadowed value —
+      // on the reasoning that this branch deliberately does not patch the parser,
+      // and that patching it would be a fifth narrowing rather than a fix for the
+      // class. That reasoning was sound for this branch ALONE.
+      //
+      // It is no longer true of the tree. The branch this one now sits on top of
+      // patched the parser: `parseInlineData` refuses a record that repeats a key.
+      // Both halves are present, and the refusal fires first. Keeping the old
+      // assertion would mean asserting a defect that has been fixed, which is a test
+      // that fails for being right.
+      //
+      // So the tripwire is kept and re-pointed. It now pins the UPSTREAM half — the
+      // refusal — and it fails loudly if that refusal is ever removed, which is the
+      // event that would silently turn every duplicate-key forge above back into a
+      // test of the downstream half without anyone noticing the swap. The header
+      // comment on this `describe` says which half each forge pins today.
+      const MSG = `Shared ${RETIRED_ROW} runtime reference is forbidden`;
+      const forged = `{ pattern: "${PAYLOAD}", pattern: "${RETIRED_ROW}", kind: "module", message: "${MSG}" }`;
+      const source = `var t = [${forged}];`;
+
+      // No region: the parser refuses to describe an ambiguous record, so
+      // attribution is never offered one and `quotedConstantSpan` is never called.
+      expect(
+        inlineDataRegions(source, [RETIRED_ROW, PAYLOAD]),
+        "a repeated key is refused by the parser, so nothing is attributed",
+      ).toEqual([]);
+
+      // CONTROL, and it is what makes the assertion above mean something: the SAME
+      // record without the duplicate is accepted and does produce a region. So the
+      // refusal is specific to the ambiguity, not a blanket parse failure that would
+      // make the line above pass for the wrong reason.
+      const clean = `var t = [{ pattern: "${RETIRED_ROW}", kind: "module", message: "${MSG}" }];`;
+      const [cleanRegion] = inlineDataRegions(clean, [RETIRED_ROW]);
+      expect(cleanRegion, "the same record without a duplicate key is still recognised").toBeDefined();
+      const record = cleanRegion!.root.kind === "array" ? cleanRegion!.root.items[0]! : cleanRegion!.root;
       expect(record.kind).toBe("record");
       if (record.kind !== "record") throw new Error("unreachable");
-      expect(record.entries.size, "three written entries collapse to two").toBe(2);
-      expect([...record.entries.keys()]).toEqual(["pattern", "kind"]);
-      const kept = record.entries.get("pattern");
-      expect(kept?.kind === "string" ? kept.value : null, "last write wins").toBe("y");
-      expect(
-        source.slice(record.start, record.end),
-        "and the raw span still carries the shadowed value",
-      ).toContain('"x"');
+      expect([...record.entries.keys()]).toEqual(["pattern", "kind", "message"]);
     });
   });
 
