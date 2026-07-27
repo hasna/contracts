@@ -85,9 +85,12 @@ function blank(chars: string[], start: number, end: number): void {
  * what keeps `const re = /["']/;` from being read as an unterminated string,
  * which would drag the rest of the file into string state.
  *
- * The classic heuristic: after a value (identifier, literal, `)`, `]`) a slash
- * is division; after an operator, punctuation, or a value-position keyword it
+ * The classic heuristic: after a value (identifier, literal, `]`) a slash is
+ * division; after an operator, punctuation, or a value-position keyword it
  * opens a regex.
+ *
+ * `)` is NOT decidable from the character alone and this function no longer
+ * pretends otherwise — see `slashOpensRegex`.
  */
 const VALUE_POSITION_KEYWORD = /(?:^|[^\w$])(?:return|typeof|instanceof|in|of|new|delete|void|throw|case|do|else|yield|await)$/;
 
@@ -95,9 +98,10 @@ function regexCanStart(before: string): boolean {
   const trimmed = before.replace(/\s+$/, "");
   if (trimmed === "") return true;
   const last = trimmed[trimmed.length - 1]!;
-  if (/[)\]}]/.test(last)) {
+  if (/[\])}]/.test(last)) {
     // `}` closes a block far more often than an object literal in the positions
-    // that matter here, so treat it as value-position; `)` and `]` are values.
+    // that matter here, so treat it as value-position; `]` is a value. `)` never
+    // reaches here.
     return last === "}";
   }
   if (/[\w$]/.test(last)) return VALUE_POSITION_KEYWORD.test(trimmed);
@@ -106,28 +110,131 @@ function regexCanStart(before: string): boolean {
 }
 
 /**
- * Mask C-family comments, preserving length.
+ * What a `(` opened: the head of a control statement, or a value.
+ *
+ * This is the discriminator the masker was missing. After `)` the old rule said
+ * "division, always", and in JS that is wrong for exactly the shape a guard
+ * test writes: `if (s) /a[//]b/.test(s)` opens a REGEX after the `)`. Calling it
+ * division walked the lexer into the regex body, met the `//` inside the
+ * character class, and blanked the rest of the line — including a live
+ * `require()` of the retired runtime. The masker believed it had succeeded, so
+ * the fail-open path never fired and the scan reported a clean tree.
+ *
+ * The provenance of the `(` settles it: a control head (`if`, `for`, `while`,
+ * `switch`, `catch`, `with`) is followed by a statement, where a `/` opens a
+ * regex; anything else — a call, a grouping — is followed by an operator
+ * position, where a `/` is division.
+ */
+type ParenKind = "control" | "value";
+const CONTROL_HEAD_KEYWORD = /(?:^|[^\w$])(?:if|for|while|switch|catch|with)\s*$/;
+
+/**
+ * Would reading this `/` as a regex rather than as division change what gets
+ * masked?
+ *
+ * Only when the would-be regex body contains a comment opener. If it does not,
+ * both readings mask the same characters and the ambiguity is harmless; if it
+ * does, one reading blanks live code and the other does not, and we have no way
+ * to tell which is right. That is the "could not classify" case the header
+ * promises to fail open on.
+ */
+function ambiguityChangesTheMask(text: string, index: number): boolean {
+  const end = scanRegex(text, index);
+  if (end === null) return false;
+  const body = text.slice(index + 1, end);
+  return body.includes("//") || body.includes("/*");
+}
+
+/**
+ * Does the `/` at `index` open a regex literal?
+ *
+ * `null` means the lexer cannot tell, and the caller must discard the whole
+ * mask rather than guess — the fail-open guarantee this module's header
+ * describes.
+ */
+function slashOpensRegex(text: string, index: number, lastCloseParen: ParenKind | "unbalanced" | null): boolean | null {
+  const before = text.slice(Math.max(0, index - 64), index);
+  if (!before.replace(/\s+$/, "").endsWith(")")) return regexCanStart(before);
+  if (lastCloseParen === "control") return true;
+  // An unbalanced `)`, or one whose `(` fell outside anything we tracked, is a
+  // parse we do not have. Refuse to blank on the strength of it.
+  if (lastCloseParen === null || lastCloseParen === "unbalanced") return null;
+  return ambiguityChangesTheMask(text, index) ? null : false;
+}
+
+/**
+ * A span of the source that is not code: a comment, or a string/template
+ * literal.
+ *
+ * The masker needs the comments. The guard-test mention audit needs the
+ * literals and the bracket they sit inside, which is why one lexer produces
+ * both rather than two state machines drifting apart.
+ */
+export interface SourceToken {
+  kind: "comment" | "literal";
+  start: number;
+  /** Exclusive. */
+  end: number;
+  /**
+   * Callees of every unclosed call this token sits inside, innermost last.
+   * `null` entries are groupings and control heads, which call nothing.
+   */
+  callees?: ReadonlyArray<string | null>;
+  /** A template chunk that RESUMES after `${…}`, so its own text is spliced with computed values. */
+  interpolated?: true;
+}
+
+/** The callee immediately before a `(`, last member segment only: `Bun.resolveSync` -> `resolveSync`. */
+const CALLEE_BEFORE_PAREN = /([A-Za-z_$][\w$]*)\s*$/;
+
+/**
+ * A `(` that calls whatever another expression produced, so the callee has no
+ * name to check: `createRequire(import.meta.url)("@hasna/cloud")` and
+ * `loaders["cjs"]("@hasna/cloud")`. Not an identifier, so it can never appear on
+ * an allowlist — which is the point. Reading it as "no callee" made the
+ * immediately-invoked form look like a plain grouping.
+ */
+const UNNAMEABLE_CALLEE = "()";
+
+function calleeBefore(text: string, parenIndex: number): string | null {
+  const before = text.slice(Math.max(0, parenIndex - 96), parenIndex).replace(/\s+$/, "");
+  if (before.endsWith(")") || before.endsWith("]")) return UNNAMEABLE_CALLEE;
+  return CALLEE_BEFORE_PAREN.exec(before)?.[1] ?? null;
+}
+
+/**
+ * Lex C-family source into its comment and literal spans.
  *
  * Returns `null` when the scan ends inside a string, template, regex or block
- * comment. That means the state machine lost the thread — JSX text with an
- * apostrophe is the common cause — and the caller must fall back to raw text.
+ * comment, or when it hits a slash it cannot classify. That means the state
+ * machine lost the thread — JSX text with an apostrophe is the common cause —
+ * and the caller must fall back to raw text.
  */
-function maskCLike(text: string): string | null {
-  const chars = toUnits(text);
+function lexCLike(text: string): SourceToken[] | null {
+  const tokens: SourceToken[] = [];
   let index = 0;
   const length = text.length;
   // Template-literal nesting: each `${` pushes a frame we must pop at its `}`.
   const templateDepths: number[] = [];
   let braceDepth = 0;
+  // Bracket frames, so a literal knows which calls enclose it. `(` carries its
+  // callee; `[` and `{` call nothing.
+  const brackets: Array<{ paren: boolean; callee: string | null }> = [];
+  const parens: ParenKind[] = [];
+  let lastCloseParen: ParenKind | "unbalanced" | null = null;
+
+  const enclosingCallees = (): ReadonlyArray<string | null> => brackets.filter((frame) => frame.paren).map((frame) => frame.callee);
 
   while (index < length) {
     const character = text[index]!;
     const next = text[index + 1];
 
+    // Comments are invisible to the `)`-then-`/` rule, so they do not clear
+    // `lastCloseParen`.
     if (character === "/" && next === "/") {
       let end = text.indexOf("\n", index);
       if (end === -1) end = length;
-      blank(chars, index, end);
+      tokens.push({ kind: "comment", start: index, end });
       index = end;
       continue;
     }
@@ -135,7 +242,7 @@ function maskCLike(text: string): string | null {
     if (character === "/" && next === "*") {
       const end = text.indexOf("*/", index + 2);
       if (end === -1) return null;
-      blank(chars, index, end + 2);
+      tokens.push({ kind: "comment", start: index, end: end + 2 });
       index = end + 2;
       continue;
     }
@@ -143,22 +250,27 @@ function maskCLike(text: string): string | null {
     if (character === '"' || character === "'") {
       const end = scanQuoted(text, index, character);
       if (end === null) return null;
+      tokens.push({ kind: "literal", start: index, end, callees: enclosingCallees() });
       index = end;
+      lastCloseParen = null;
       continue;
     }
 
     if (character === "`") {
       const chunk = scanTemplateChunk(text, index + 1);
       if (chunk === null) return null;
+      tokens.push({ kind: "literal", start: index, end: chunk.index, callees: enclosingCallees() });
       // A template that closes on the same chunk never opened a frame.
       if (!chunk.closed) templateDepths.push(braceDepth);
       index = chunk.index;
+      lastCloseParen = null;
       continue;
     }
 
     if (character === "$" && next === "{" && templateDepths.length > 0) {
       braceDepth += 1;
       index += 2;
+      lastCloseParen = null;
       continue;
     }
 
@@ -166,27 +278,79 @@ function maskCLike(text: string): string | null {
       braceDepth -= 1;
       const chunk = scanTemplateChunk(text, index + 1);
       if (chunk === null) return null;
+      tokens.push({ kind: "literal", start: index, end: chunk.index, callees: enclosingCallees(), interpolated: true });
       if (chunk.closed) templateDepths.pop();
       index = chunk.index;
+      lastCloseParen = null;
       continue;
     }
 
     if (character === "{") braceDepth += 1;
     if (character === "}" && braceDepth > 0) braceDepth -= 1;
 
-    if (character === "/" && regexCanStart(text.slice(Math.max(0, index - 64), index))) {
-      const end = scanRegex(text, index);
-      // An unrecognised slash is division, not a broken parse: keep going.
-      if (end !== null) {
-        index = end;
-        continue;
+    if (character === "(") {
+      // A control head calls nothing, so its `(` carries no callee: a condition
+      // cannot resolve a specifier, and reading `if` as a callee name would put
+      // every `if ("…" in pkg.dependencies)` on the wrong side of the audit.
+      const control = CONTROL_HEAD_KEYWORD.test(text.slice(Math.max(0, index - 32), index));
+      parens.push(control ? "control" : "value");
+      brackets.push({ paren: true, callee: control ? null : calleeBefore(text, index) });
+      lastCloseParen = null;
+      index += 1;
+      continue;
+    }
+
+    if (character === ")") {
+      lastCloseParen = parens.pop() ?? "unbalanced";
+      if (brackets[brackets.length - 1]?.paren) brackets.pop();
+      index += 1;
+      continue;
+    }
+
+    if (character === "[" || character === "{") {
+      brackets.push({ paren: false, callee: null });
+      lastCloseParen = null;
+      index += 1;
+      continue;
+    }
+
+    if (character === "]" || character === "}") {
+      if (brackets[brackets.length - 1]?.paren === false) brackets.pop();
+      lastCloseParen = null;
+      index += 1;
+      continue;
+    }
+
+    if (character === "/") {
+      const opensRegex = slashOpensRegex(text, index, lastCloseParen);
+      if (opensRegex === null) return null;
+      if (opensRegex) {
+        const end = scanRegex(text, index);
+        // An unrecognised slash is division, not a broken parse: keep going.
+        if (end !== null) {
+          index = end;
+          lastCloseParen = null;
+          continue;
+        }
       }
     }
 
+    if (!/\s/.test(character)) lastCloseParen = null;
     index += 1;
   }
 
   if (templateDepths.length > 0) return null;
+  return tokens;
+}
+
+/** Mask C-family comments, preserving length. `null` when the lexer lost the thread. */
+function maskCLike(text: string): string | null {
+  const tokens = lexCLike(text);
+  if (tokens === null) return null;
+  const chars = toUnits(text);
+  for (const token of tokens) {
+    if (token.kind === "comment") blank(chars, token.start, token.end);
+  }
   return chars.join("");
 }
 
@@ -301,6 +465,118 @@ export function maskComments(text: string, syntax: CommentSyntax): string {
 /** Convenience: mask by file path. */
 export function maskCommentsForPath(text: string, path: string): string {
   return maskComments(text, commentSyntaxForPath(path));
+}
+
+/**
+ * Callees that can only READ a string, never resolve it to a module.
+ *
+ * An ALLOWLIST, and that direction is the whole point. The first version of the
+ * guard-test exemption enumerated the two load shapes it knew about — `import(`
+ * and `require(` — and every other way of turning a specifier into a module
+ * walked straight past it: `createRequire(import.meta.url)("…")`,
+ * `Bun.resolveSync`, `require.resolve`, `new Worker(new URL("…"))`. All four
+ * were proved to load the package while the scan reported a clean tree. Listing
+ * the dangerous shapes is how you miss the next one, so this lists the safe
+ * ones and an unrecognised callee withdraws the exemption.
+ *
+ * Matched on the LAST member segment, so `require.resolve` is read as `resolve`
+ * and `Bun.resolveSync` as `resolveSync` — neither of which is here. That is
+ * also why plain `resolve` is absent even though `node:path` exports one: it
+ * cannot be told apart from a resolver's, and a guard test can use `join`.
+ */
+const INERT_CALLEES: ReadonlySet<string> = new Set([
+  // Assertions. A guard test's whole job.
+  "expect",
+  "not",
+  "toBe",
+  "toEqual",
+  "toStrictEqual",
+  "toContain",
+  "toContainEqual",
+  "toMatch",
+  "toMatchObject",
+  "toHaveProperty",
+  "toBeUndefined",
+  "toBeDefined",
+  // Test scaffolding, because the package name is a natural test title.
+  "describe",
+  "it",
+  "test",
+  // String and collection inspection.
+  "includes",
+  "indexOf",
+  "lastIndexOf",
+  "startsWith",
+  "endsWith",
+  "has",
+  "match",
+  "search",
+  "split",
+  "concat",
+  // Reads bytes off disk, or composes a path string. Neither resolves a
+  // specifier nor executes a module, and a guard test asserting the package is
+  // absent from `node_modules` needs both. `resolve` is NOT here: `node:path`
+  // exports one and so does every module resolver, and the last member segment
+  // is all we match on.
+  "existsSync",
+  "statSync",
+  "lstatSync",
+  "readFileSync",
+  "readdirSync",
+  "join",
+  "basename",
+  "dirname",
+  "extname",
+  "relative",
+  "normalize",
+  "push",
+  "add",
+  "filter",
+  "some",
+  "every",
+  "find",
+  "map",
+  // Pattern building: `new RegExp(String.raw`…`)` is the mandated guard shape.
+  "RegExp",
+  "raw"
+]);
+
+/**
+ * Can this source only MENTION `moduleName`, never load it?
+ *
+ * Answers the one question the guard-test exemption rests on. The exemption
+ * exists because the mandated guard test must name the retired runtime in order
+ * to assert its absence; it must not become a way to load it. So every literal
+ * occurrence has to sit somewhere that provably cannot resolve a specifier:
+ * bound to a variable, an element of an array, a property value, or an argument
+ * to one of `INERT_CALLEES`.
+ *
+ * Fails CLOSED — `false` — on anything it cannot read: a JSX file, a lexer that
+ * lost the thread, an interpolated template chunk, an occurrence outside every
+ * literal. A false positive costs a repo one line; a false negative costs the
+ * gate its meaning.
+ */
+export function mentionsCannotLoad(text: string, path: string, moduleName: string): boolean {
+  // Proving a mention inert needs the token stream, and JSX is not lexable
+  // without a real parser — see `commentSyntaxForPath`. So a JSX guard test
+  // cannot claim the exemption at all.
+  if (commentSyntaxForPath(path) !== "c-like") return false;
+  const tokens = lexCLike(text);
+  if (tokens === null) return false;
+
+  for (let at = text.indexOf(moduleName); at !== -1; at = text.indexOf(moduleName, at + 1)) {
+    const end = at + moduleName.length;
+    const token = tokens.find((candidate) => at >= candidate.start && end <= candidate.end);
+    // Prose. The caller already masked it; this loop reads raw text so the
+    // offsets line up with the lexer.
+    if (token?.kind === "comment") continue;
+    // Bare in code, or straddling a token boundary: not something we can read.
+    if (token === undefined || token.kind !== "literal") return false;
+    // A chunk spliced with computed values is a specifier under construction.
+    if (token.interpolated) return false;
+    if (!(token.callees ?? []).every((callee) => callee === null || INERT_CALLEES.has(callee))) return false;
+  }
+  return true;
 }
 
 function escapeRegex(value: string): string {

@@ -90,11 +90,61 @@ export function parseLooseJson(text: string): unknown | null {
   }
 }
 
+/**
+ * How deep a nested `overrides` block is followed. npm allows arbitrary
+ * nesting; four levels is past anything observed and keeps a hostile lockfile
+ * from turning the walk into a recursion.
+ */
+const MAX_PIN_DEPTH = 4;
+
+/**
+ * Package names named by an `overrides`/`resolutions` KEY.
+ *
+ * A pin is not always a flat name-to-version map, and reading it as one is what
+ * made two real pins invisible:
+ *
+ *   `"overrides":   { "left-pad": { "@hasna/cloud": "0.1.41" } }`   npm nesting
+ *   `"resolutions": { "left-pad/@hasna/cloud": "0.1.41" }`          yarn path key
+ *
+ * `Object.keys` one level deep returns `left-pad` for both, so the pinned
+ * package was never compared against anything. Both forms install it.
+ *
+ * Path keys may also carry a range (`left-pad@^1.3.0/@hasna/cloud`) and a glob
+ * (`**\/@hasna/cloud`), and a scoped name is spelled with the same `/` that
+ * separates the path — so segments beginning with `@` re-join with the segment
+ * after them rather than being split at the scope sigil.
+ */
+function pinKeyNames(key: string): string[] {
+  const segments = key.split("/").filter((segment) => segment !== "" && segment !== "*" && segment !== "**");
+  const names: string[] = [];
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index]!;
+    const next = segments[index + 1];
+    if (segment.startsWith("@") && next !== undefined) {
+      names.push(`${segment}/${next}`);
+      index += 1;
+      continue;
+    }
+    names.push(segment);
+  }
+  // `nameFromResolutionId` drops a trailing `@range` and keeps the scope sigil.
+  return names.map((name) => nameFromResolutionId(name) ?? name);
+}
+
+function pinNames(pins: Record<string, unknown>, depth: number): string[] {
+  const names: string[] = [];
+  for (const [key, value] of Object.entries(pins)) {
+    names.push(...pinKeyNames(key));
+    if (isRecord(value) && depth < MAX_PIN_DEPTH) names.push(...pinNames(value, depth + 1));
+  }
+  return names;
+}
+
 function namesInSection(container: Record<string, unknown>, section: string): string[] {
   const value = container[section];
   if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === "string");
-  if (isRecord(value)) return Object.keys(value);
-  return [];
+  if (!isRecord(value)) return [];
+  return (PIN_SECTIONS as readonly string[]).includes(section) ? pinNames(value, 0) : Object.keys(value);
 }
 
 /** Direct edges declared by the scanned package's own manifest. */
@@ -336,16 +386,21 @@ function isHoistedInstall(lock: Record<string, unknown>): boolean {
  * target counts too. A SUBSTRING still does not — `@hasna/cloudflare` is not
  * `@hasna/cloud`, and confusing the two is what this module exists to stop.
  */
-function forbiddenIdentity(name: string, nodes: readonly LockNode[], forbidden: readonly string[]): string | null {
-  if (forbidden.includes(name)) return name;
+function forbiddenIdentities(name: string, nodes: readonly LockNode[], forbidden: readonly string[]): string[] {
+  const found = new Set<string>();
+  if (forbidden.includes(name)) found.add(name);
   for (const node of nodes) {
     // The resolution's own name, for the mirror case where the KEY is the
     // alias: `"mycloud": ["@hasna/cloud@0.1.41", ...]`. Checking only
     // `node.alias` reads that entry as an unrelated package called `mycloud`.
-    if (forbidden.includes(node.name)) return node.name;
-    if (node.alias !== null && forbidden.includes(node.alias)) return node.alias;
+    if (forbidden.includes(node.name)) found.add(node.name);
+    if (node.alias !== null && forbidden.includes(node.alias)) found.add(node.alias);
   }
-  return null;
+  return [...found];
+}
+
+function forbiddenIdentity(name: string, nodes: readonly LockNode[], forbidden: readonly string[]): string | null {
+  return forbiddenIdentities(name, nodes, forbidden)[0] ?? null;
 }
 
 /**
@@ -371,12 +426,38 @@ function forbiddenIdentity(name: string, nodes: readonly LockNode[], forbidden: 
  * back to the text scan rather than silently reporting a clean tree.
  */
 export function lockfileEdges(lockText: string, forbidden: readonly string[]): DependencyEdge[] | null {
+  return lockfileWalk(lockText, forbidden)?.edges ?? null;
+}
+
+/**
+ * The walk's full result: the edges it found, and the forbidden names it
+ * deliberately DECIDED were not installed.
+ *
+ * The second half is what lets the caller keep a text fallback for package
+ * names without reintroducing the false positive this module exists to remove.
+ * `hasna/logs` names the retired runtime in its lockfile and does not install
+ * it; a stale or hand-edited `packages` entry names it and the walk never
+ * reaches it at all. Those look identical to a substring and are opposite
+ * answers, so the walk has to say which one it made.
+ *
+ * `clearedByLayout` is populated ONLY where the hoisted-layout filter dropped a
+ * node — the one shape measured on bun 1.3.14 (see `isHoistedInstall`). Silence
+ * about a name the walk never examined is not a clearance.
+ */
+export interface LockfileWalk {
+  edges: DependencyEdge[];
+  /** Forbidden names proved unreachable by the install layout, not merely unvisited. */
+  clearedByLayout: string[];
+}
+
+export function lockfileWalk(lockText: string, forbidden: readonly string[]): LockfileWalk | null {
   const lock = parseLooseJson(lockText);
   if (!isRecord(lock)) return null;
   const hoisted = isHoistedInstall(lock);
   const roots = installRoots(lock);
   if (roots.length === 0) return null;
   const nodes = nodesByName(lock);
+  const clearedByLayout = new Set<string>();
 
   interface Visit {
     name: string;
@@ -414,7 +495,16 @@ export function lockfileEdges(lockText: string, forbidden: readonly string[]): D
     // for the measurement. In an isolated install it IS on disk, so the filter
     // does not apply and the walk over-approximates instead.
     const reachable = hoisted ? known.filter((node) => current.root || !node.linked) : known;
-    if (known.length > 0 && reachable.length === 0) continue;
+    if (known.length > 0 && reachable.length === 0) {
+      // A MEASURED clearance, recorded so the caller's text fallback can stay
+      // quiet about it. Every identity the dropped nodes could stand for, not
+      // just the first: the entry that clears `@hasna/cloud@file:../open-cloud`
+      // clears the name `open-cloud` it resolves to as well, and reporting one
+      // while suppressing the other reads as a finding on a package the walk
+      // just proved absent.
+      for (const dropped of forbiddenIdentities(current.name, known, forbidden)) clearedByLayout.add(dropped);
+      continue;
+    }
     const identity = forbiddenIdentity(current.name, reachable, forbidden);
     if (identity !== null) {
       const existing = best.get(identity);
@@ -445,5 +535,5 @@ export function lockfileEdges(lockText: string, forbidden: readonly string[]): D
       }
     }
   }
-  return [...best.values()];
+  return { edges: [...best.values()], clearedByLayout: [...clearedByLayout] };
 }

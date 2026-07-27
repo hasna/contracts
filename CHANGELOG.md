@@ -2,6 +2,62 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.8.2] - 2026-07-27
+
+### `no-cloud-scan` closes three blind spots that 0.8.1 opened
+
+0.8.1 regressed on twelve genuine, executable loads that the substring scanner
+it replaced had caught. Each of the three causes below was demonstrated on a
+running fixture, and every fix is pinned by a test that fails on 0.8.1.
+
+- **The guard-test allowlist suppressed real loads.** The withdrawal test
+  recognised `import(` and `require(`; any other way of turning a specifier into
+  a module was scored as a mention and erased. `createRequire(import.meta.url)`,
+  `Bun.resolveSync`, `require.resolve` and `new Worker(new URL(…))` all loaded
+  the package against a clean scan. The exemption was also claimed by FILENAME at
+  any depth — from `dist/`, from the repo root, from `config/` — so shipped build
+  output could carry the suppressed name. Now: the path is anchored to exactly
+  `src/no-cloud-boundary.test.<ext>`, and the exemption survives only if the file
+  cannot resolve a module at all and every literal mention sits in a position on
+  an ALLOWLIST of inert ones. An unrecognised callee withdraws it, so the next
+  spelling fails closed rather than through.
+- **Comment masking blanked live code and did not notice.** After `)` the masker
+  read a `/` as division, but in JS `if (s) /a[//]b/` opens a REGEX — so the
+  lexer walked into the regex body, took the `//` inside the character class for
+  a line comment, and blanked the rest of the line including a live `require()`
+  of the retired runtime. Because the masker believed it had succeeded, the
+  fail-open guarantee never fired. Now the provenance of the `(` decides: a
+  control head is followed by statement position where `/` opens a regex, a call
+  or grouping by operator position where it is division. The two cases that
+  remain undecidable — an unbalanced `)`, and a call whose slash could swallow a
+  comment opener — discard the whole mask and fall back to raw text.
+- **`bun.lock` module patterns lost their text fallback.** When the graph walk
+  took over `bun.lock`, config patterns kept a text scan and module names did
+  not. A nested npm `overrides` pin and a path-keyed yarn `resolutions` pin both
+  name the package in plain text and both scanned clean. Now `overrides` and
+  `resolutions` are read recursively and path keys are split (ranges and globs
+  included, never at the scope sigil), and any module name the lockfile spells
+  out that the walk neither reported nor actively cleared is reported. The
+  fallback is bounded to a lockfile token, so `@hasna/cloudflare-adapter` and
+  `../open-cloud-shim` stay clean.
+- **Unchanged, deliberately:** a transitive `file:`/`link:` resolution in a
+  single-workspace lockfile still reports nothing. That was probed on bun 1.3.14
+  — the package lands nowhere on disk and `require()` of it fails — and it is
+  what clears `hasna/logs`. `lockfileWalk` now returns the names it cleared that
+  way so the new text fallback can stay quiet about exactly those and nothing
+  else.
+- **Scope of a `passed` verdict, now asserted rather than assumed.** The scan
+  reads an allowlist of directories and extensions, so `passed` does not mean "no
+  reference anywhere". Paths with no source-directory segment (`app/api/…`),
+  `tests/` and `test/`, an on-disk `node_modules` copy with no manifest entry,
+  `Dockerfile`/`.tf`/extensionless `bin` scripts, assembled (`"@hasna/" +
+  "cloud"`) and escaped (`"\x40hasna/cloud"`) specifiers, and a `git+ssh:`
+  dependency installing under the package name are all out of scope. Each is
+  pinned by a test so closing one cannot happen silently.
+- Schemas, verdict vocabulary and exit-code semantics are unchanged. Repos whose
+  `bun.lock` names a forbidden runtime outside any edge the walk can read, and
+  repos whose guard test lives outside `src/`, will newly report `failed`.
+
 ## [0.8.1] - 2026-07-27
 
 ### `no-cloud-scan` matches dependency edges and real imports, not substrings

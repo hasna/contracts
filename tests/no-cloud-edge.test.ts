@@ -17,8 +17,16 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanNoCloudTarget } from "../src/no-cloud";
-import { isLinkedResolution, lockfileEdges, manifestEdges, nameFromResolutionId, parseLooseJson, resolutionTarget } from "../src/dependency-edge";
-import { importedBindings, importsModule, maskComments, maskCommentsForPath } from "../src/source-text";
+import {
+  isLinkedResolution,
+  lockfileEdges,
+  lockfileWalk,
+  manifestEdges,
+  nameFromResolutionId,
+  parseLooseJson,
+  resolutionTarget
+} from "../src/dependency-edge";
+import { importedBindings, importsModule, maskComments, maskCommentsForPath, mentionsCannotLoad } from "../src/source-text";
 
 /** The retired runtime, spelled in pieces so this file does not trip its own gate. */
 const RETIRED = ["@hasna/", "cloud"].join("");
@@ -203,6 +211,48 @@ describe("no-cloud gate: the masker cannot blank live code", () => {
       expect(report.verdict).toBe("failed");
     });
   });
+
+  test("a `/` after `if (…)` opens a regex, so a `//` inside its character class is not a comment", () => {
+    // The third false negative of this kind. `regexCanStart` said "after `)`,
+    // division", the lexer walked into the regex body, met the `//` inside
+    // `[//]`, and blanked the rest of the line — taking a live require() of the
+    // retired runtime with it. Executable code, `exit 0` under 0.8.1.
+    const source = `const s = "q";\nif (s) /a[//]b/.test(s); const m = require("${RETIRED}");\nexport { m };\n`;
+    withRepo({ files: { "src/index.ts": source } }, (report) => {
+      expect(report.verdict).toBe("failed");
+      expect(patterns(report)).toContain(`src/index.ts:${RETIRED}`);
+    });
+    // At the masker, so the rule is pinned and not just its consequence.
+    expect(maskCommentsForPath(source, "src/index.ts")).toContain(`require("${RETIRED}")`);
+    for (const head of ["if (s)", "while (s)", "for (const x of [s])", "switch (s)", "catch (s)"]) {
+      const text = `${head} /a[//]b/.test(s); const m = require("${RETIRED}");\n`;
+      expect(maskCommentsForPath(text, "src/a.ts"), head).toContain(`require("${RETIRED}")`);
+    }
+    // ...and a `/` after a CALL is still division, so a real line comment after
+    // one is still masked. The fix must not buy the false negative back as a
+    // blanket "always a regex".
+    expect(maskCommentsForPath(`const n = f(1) / 2; // gone ${RETIRED}\n`, "src/a.ts")).not.toContain(`gone ${RETIRED}`);
+  });
+
+  test("a slash the lexer cannot classify discards the mask instead of blanking live code", () => {
+    // The fail-open guarantee, at the one place it was not firing. Where the
+    // two readings of a `/` mask DIFFERENT characters and nothing in the token
+    // stream settles which is right, the mask is discarded and the caller scans
+    // raw text — noisy, never blind.
+    for (const source of [
+      // A `)` with no `(` behind it: a parse we do not have.
+      `foo) /a[//]b/; const m = require("${RETIRED}");\n`,
+      // A `)` that closed a CALL, where reading the slash as a regex would
+      // swallow a comment opener. Division is the better guess and still not
+      // good enough to blank on.
+      `const n = f(1) /a[//]b/; const m = require("${RETIRED}");\n`,
+    ]) {
+      expect(maskCommentsForPath(source, "src/a.ts"), source).toContain(RETIRED);
+      withRepo({ files: { "src/a.ts": source } }, (report) => {
+        expect(report.verdict, source).toBe("failed");
+      });
+    }
+  });
 });
 
 describe("no-cloud gate: the mandated guard test", () => {
@@ -340,6 +390,145 @@ describe("no-cloud gate: the mandated guard test", () => {
         expect(patterns(report)).toContain("src/no-cloud-boundary.test.ts:HASNA_CLOUD_");
         expect(patterns(report)).toContain("src/no-cloud-boundary.test.ts:.hasna/cloud");
         expect(patterns(report)).toContain("src/no-cloud-boundary.test.ts:HASNA_RDS_PASSWORD");
+      },
+    );
+  });
+
+  // Every case below was proved to LOAD the package and to scan `exit 0`
+  // under 0.8.1. The withdrawal test recognised `import(` and `require(` and
+  // nothing else, so a resolver API was read as a mention and erased. Tests for
+  // two shapes are what let the other five through, which is why these assert
+  // the shapes AND the rule that generalises them.
+
+  test("a resolver API in the guard test is a load, not a mention", () => {
+    for (const load of [
+      'import { createRequire } from "node:module";\nconst load = createRequire(import.meta.url);\n' +
+        `export const live = load("${RETIRED}");`,
+      `export const resolved = Bun.resolveSync("${RETIRED}", import.meta.dir);`,
+      `export const p = require.resolve("${RETIRED}");`,
+      `export const w = new Worker(new URL("${RETIRED}/worker.js", import.meta.url).href);`,
+      `export const r = import.meta.resolve("${RETIRED}");`,
+    ]) {
+      withRepo({ files: { "src/no-cloud-boundary.test.ts": `${load}\n` } }, (report) => {
+        expect(report.verdict, load).toBe("failed");
+        expect(patterns(report), load).toContain(`src/no-cloud-boundary.test.ts:${RETIRED}`);
+      });
+    }
+  });
+
+  test("an unrecognised callee withdraws the exemption, so the next spelling fails closed", () => {
+    // The property, not the enumeration. `smuggle` is on no denylist anywhere;
+    // it is a call, its argument is the package name, and that is enough.
+    withRepo({ files: { "src/no-cloud-boundary.test.ts": `export const m = smuggle("${RETIRED}");\n` } }, (report) => {
+      expect(report.verdict).toBe("failed");
+    });
+  });
+
+  test("mentionsCannotLoad reads the position, and fails closed on anything it cannot", () => {
+    const path = "src/no-cloud-boundary.test.ts";
+    // Inert: the shapes the mandated guard test actually writes.
+    for (const source of [
+      `const FORBIDDEN = "${RETIRED}";`,
+      `const FORBIDDEN = ["${RETIRED}", "open-cloud"];`,
+      `const map = { retired: "${RETIRED}" };`,
+      `expect(pkg.dependencies).not.toContain("${RETIRED}");`,
+      `test("${RETIRED} is absent", () => {});`,
+      `const RE = new RegExp(String.raw\`["']${RETIRED}["']\`);`,
+      // Path building. Turning a path into a module needs a resolver, and the
+      // capability check answers for that independently.
+      `existsSync(join(root, "node_modules", "${RETIRED}"));`,
+      `if ("${RETIRED}" in pkg.dependencies) fail();`,
+    ]) {
+      expect(mentionsCannotLoad(source, path, RETIRED), source).toBe(true);
+    }
+    // Not inert: every one of these resolves the argument.
+    for (const source of [
+      `load("${RETIRED}");`,
+      `Bun.resolveSync("${RETIRED}", dir);`,
+      `require.resolve("${RETIRED}");`,
+      `new URL("${RETIRED}/worker.js", import.meta.url);`,
+      `const m = await import("${RETIRED}");`,
+      // Immediately invoked, and indexed: the callee has no name to allowlist,
+      // which is exactly why an unnameable one can never be inert.
+      `createRequire(import.meta.url)("${RETIRED}");`,
+      `loaders["cjs"]("${RETIRED}");`,
+    ]) {
+      expect(mentionsCannotLoad(source, path, RETIRED), source).toBe(false);
+    }
+    // A comment is prose either way.
+    expect(mentionsCannotLoad(`// dropped ${RETIRED} in 1.4.0\nexport const ok = true;\n`, path, RETIRED)).toBe(true);
+    // An interpolated template chunk is a specifier under construction.
+    expect(mentionsCannotLoad("const s = `${prefix}" + RETIRED + "`;", path, RETIRED)).toBe(false);
+    // JSX is not lexable without a real parser, so it cannot prove anything.
+    expect(mentionsCannotLoad(`const F = "${RETIRED}";`, "src/no-cloud-boundary.test.tsx", RETIRED)).toBe(false);
+  });
+
+  test("module-resolution capability withdraws the exemption on its own", () => {
+    // The audit reads where the NAME sits. This reads whether the file can
+    // resolve at all, because the name can be assembled or escaped and never
+    // reach the audit — `"@hasna/" + "cloud"` is exactly that.
+    withRepo(
+      {
+        files: {
+          "src/no-cloud-boundary.test.ts":
+            `const FORBIDDEN = "${RETIRED}";\n` +
+            'import { createRequire } from "node:module";\n' +
+            'export const live = createRequire(import.meta.url)("@hasna/" + "cloud");\n',
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+      },
+    );
+  });
+
+  test("the exemption is claimable at ONE path, not at the filename anywhere", () => {
+    // 0.8.1 honoured this filename at any depth, which handed the exemption to
+    // `dist/` — shipped build output — to the repo root, and to `config/`. All
+    // four of these carry a real `createRequire` load.
+    const load =
+      'import { createRequire } from "node:module";\n' +
+      `const load = createRequire(import.meta.url);\nexport const live = load("${RETIRED}");\n`;
+    for (const path of [
+      "src/deep/nested/no-cloud-boundary.test.ts",
+      "dist/no-cloud-boundary.test.js",
+      "no-cloud-boundary.test.ts",
+      "config/no-cloud-boundary.test.ts",
+    ]) {
+      withRepo({ files: { [path]: load } }, (report) => {
+        expect(report.verdict, path).toBe("failed");
+      });
+    }
+    // And a plain MENTION at those paths is a finding too, because the file has
+    // no standing there at all.
+    for (const path of ["dist/no-cloud-boundary.test.js", "no-cloud-boundary.test.ts"]) {
+      withRepo({ files: { [path]: `const FORBIDDEN = "${RETIRED}";\nexport { FORBIDDEN };\n` } }, (report) => {
+        expect(report.verdict, path).toBe("failed");
+      });
+    }
+  });
+
+  test("the mutation control: one appended load turns a passing tree into a failing one", () => {
+    // The pair that IS the gate. A negative control that fails on a
+    // `package.json` dependency exercises none of the source-level logic, so it
+    // reads two-sided while being one-sided. This mutates the guard test of an
+    // otherwise clean tree and nothing else.
+    const clean = `const FORBIDDEN_PACKAGE = "${RETIRED}";\nexport { FORBIDDEN_PACKAGE };\n`;
+    withRepo({ files: { "src/no-cloud-boundary.test.ts": clean } }, (report) => {
+      expect(patterns(report)).toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+    withRepo(
+      {
+        files: {
+          "src/no-cloud-boundary.test.ts":
+            `${clean}import { createRequire } from "node:module";\n` +
+            `export const live = createRequire(import.meta.url)("${RETIRED}");\n`,
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+        expect(patterns(report)).toContain(`src/no-cloud-boundary.test.ts:${RETIRED}`);
       },
     );
   });
@@ -879,6 +1068,190 @@ describe("no-cloud gate: dependency edges from bun.lock", () => {
   test("nameFromResolutionId keeps the scope sigil", () => {
     expect(nameFromResolutionId(`${RETIRED}@file:../open-cloud`)).toBe(RETIRED);
     expect(nameFromResolutionId("pg@8.22.0")).toBe("pg");
+  });
+
+  // The bun.lock text fallback, which module patterns lost when the graph walk
+  // took over and config patterns kept. Both pins below are real installs that
+  // name the package in plain text and scanned clean under 0.8.1.
+
+  test("a NESTED overrides pin in bun.lock is an edge", () => {
+    // npm nests one level per parent: `{ "left-pad": { "@hasna/cloud": "…" } }`.
+    // `Object.keys` one level deep returns `left-pad` and compares it to
+    // nothing.
+    const text = lock({
+      workspaces: { "": { name: "@hasna/subject", dependencies: { "left-pad": "^1.3.0" } } },
+      overrides: { "left-pad": { [RETIRED]: "0.1.41" } },
+      packages: { "left-pad": ["left-pad@1.3.0", {}], [RETIRED]: [`${RETIRED}@0.1.41`, {}] },
+    });
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])?.map((edge) => edge.packageName)).toEqual([RETIRED]);
+    withRepo({ files: { "bun.lock": text } }, (report) => {
+      expect(report.verdict).toBe("failed");
+      expect(patterns(report)).toContain(`bun.lock:${RETIRED}`);
+    });
+  });
+
+  test("a PATH-KEYED resolutions pin in bun.lock is an edge", () => {
+    // yarn writes the whole path as one key, and a scoped name is spelled with
+    // the same `/` that separates it.
+    const text = lock({
+      workspaces: { "": { name: "@hasna/subject", dependencies: { "left-pad": "^1.3.0" } } },
+      resolutions: { [`left-pad/${RETIRED}`]: "0.1.41" },
+      packages: { "left-pad": ["left-pad@1.3.0", {}], [RETIRED]: [`${RETIRED}@0.1.41`, {}] },
+    });
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])?.map((edge) => edge.packageName)).toEqual([RETIRED]);
+    withRepo({ files: { "bun.lock": text } }, (report) => {
+      expect(report.verdict).toBe("failed");
+    });
+  });
+
+  test("pin keys are split on the path, the range and the glob, but not at the scope sigil", () => {
+    const cases: Array<[string, string[]]> = [
+      [RETIRED, [RETIRED]],
+      [`left-pad/${RETIRED}`, ["left-pad", RETIRED]],
+      [`left-pad@^1.3.0/${RETIRED}`, ["left-pad", RETIRED]],
+      [`**/${RETIRED}`, [RETIRED]],
+      [`${RETIRED}@0.1.41`, [RETIRED]],
+    ];
+    for (const [key, expected] of cases) {
+      const edges = manifestEdges({ resolutions: { [key]: "1" } }, expected).map((edge) => edge.packageName);
+      expect(new Set(edges), key).toEqual(new Set(expected));
+    }
+  });
+
+  test("a module name bun.lock spells out that the walk never reached is still reported", () => {
+    // The graph is authoritative for what it DECIDED, not for what it never
+    // looked at. A stale `packages` entry names the retired runtime in plain
+    // text; the walk returns a list, and a list read as a clean tree.
+    const text = lock({
+      workspaces: { "": { name: "@hasna/subject", dependencies: { "left-pad": "^1.3.0" } } },
+      packages: { "left-pad": ["left-pad@1.3.0", {}], [RETIRED]: [`${RETIRED}@0.1.41`, {}] },
+    });
+    // The walk itself still reports no EDGE — that part is correct and unchanged.
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])).toEqual([]);
+    withRepo({ files: { "bun.lock": text } }, (report) => {
+      expect(report.verdict).toBe("failed");
+      expect(patterns(report)).toContain(`bun.lock:${RETIRED}`);
+    });
+  });
+
+  test("the MEASURED hoisted-layout clearance survives the text fallback", () => {
+    // `hasna/logs`, and the one thing the fallback must not undo. A transitive
+    // `file:` resolution in a single-workspace lockfile lands nowhere on disk —
+    // probed on bun 1.3.14, `require()` of it fails. The name is in the text
+    // twice, and the walk says it decided rather than skipped, so the fallback
+    // stays quiet. Both spellings: the key's name AND the name it resolves to.
+    const text = lock({
+      workspaces: { "": { name: "@hasna/subject", dependencies: { "pkg-a": "file:../pkg-a" } } },
+      packages: {
+        "pkg-a": ["pkg-a@file:../pkg-a", { dependencies: { [RETIRED]: "file:../open-cloud" } }],
+        [RETIRED]: [`${RETIRED}@file:../open-cloud`, {}],
+      },
+    });
+    const walk = lockfileWalk(text, [RETIRED, "open-cloud"]);
+    expect(walk?.edges).toEqual([]);
+    expect(new Set(walk?.clearedByLayout)).toEqual(new Set([RETIRED, "open-cloud"]));
+    withRepo({ files: { "bun.lock": text } }, (report) => {
+      expect(patterns(report)).toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+  });
+
+  test("the text fallback is a lockfile TOKEN, not the substring the walk replaced", () => {
+    // The one way this fallback could reintroduce the bug this module exists to
+    // remove. `@hasna/cloudflare-adapter` and `../open-cloud-shim` are different
+    // packages and must stay clean.
+    const text = lock({
+      workspaces: { "": { name: "@hasna/subject", dependencies: { "@hasna/cloudflare-adapter": "^1", shim: "file:../open-cloud-shim" } } },
+      packages: {
+        "@hasna/cloudflare-adapter": ["@hasna/cloudflare-adapter@1.0.0", {}],
+        shim: ["shim@file:../open-cloud-shim", {}],
+      },
+    });
+    withRepo({ files: { "bun.lock": text } }, (report) => {
+      expect(patterns(report)).toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+  });
+});
+
+describe("no-cloud gate: what a passed verdict does NOT claim", () => {
+  // Pinned, not merely documented. A `verdict: passed` is a statement about the
+  // shapes this scan reads, and it is used to certify a twelve-repo remediation
+  // — so the boundary of the claim has to be asserted somewhere that breaks when
+  // it moves. Every case below is a REAL reference the scan does not report.
+  // None of them is a defect introduced by the guard-test, masking or lockfile
+  // fixes; all of them bound what those fixes prove.
+
+  test("a path with no SOURCE_DIRS segment is not read at all", () => {
+    for (const path of ["app/api/route.ts", "packages/core/index.ts", "apps/web/main.ts"]) {
+      withRepo({ files: { [path]: `import { a } from "${RETIRED}";\n` } }, (report) => {
+        expect(report.verdict, path).toBe("passed");
+      });
+    }
+  });
+
+  test("`tests/` is skipped, and `test/` singular is unscanned for a different reason", () => {
+    // `tests` is in SKIP_DIRS. `test` is in NEITHER set, so it fails the
+    // SOURCE_DIRS requirement instead — two routes to the same blind spot, and
+    // two real guard tests on this fleet live at `test/no-cloud-boundary.test.ts`.
+    for (const path of ["tests/a.ts", "test/a.ts"]) {
+      withRepo({ files: { [path]: `import { a } from "${RETIRED}";\n` } }, (report) => {
+        expect(report.verdict, path).toBe("passed");
+      });
+    }
+  });
+
+  test("an on-disk node_modules copy with no manifest entry is not seen", () => {
+    withRepo(
+      { files: { "node_modules/@hasna/cloud/package.json": JSON.stringify({ name: RETIRED, version: "0.1.41" }) } },
+      (report) => {
+        expect(report.verdict).toBe("passed");
+      },
+    );
+  });
+
+  test("Dockerfile, terraform and an extensionless bin script are outside the extension filter", () => {
+    withRepo(
+      {
+        files: {
+          Dockerfile: `RUN bun add ${RETIRED}\n`,
+          "infra/main.tf": `variable "pkg" { default = "${RETIRED}" }\n`,
+          "bin/deploy": `#!/bin/sh\nbun add ${RETIRED}\n`,
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("passed");
+      },
+    );
+  });
+
+  test("an assembled or escaped specifier is not text-matchable", () => {
+    for (const source of [
+      `export const m = require("@hasna/" + "cloud");`,
+      'export const m = require("\\u0040hasna/cloud");',
+      'export const m = require("\\x40hasna/cloud");',
+    ]) {
+      withRepo({ files: { "src/a.ts": `${source}\n` } }, (report) => {
+        expect(report.verdict, source).toBe("passed");
+      });
+    }
+  });
+
+  test("a git+ssh dependency installing under the package name is not matchable either", () => {
+    withRepo(
+      {
+        files: {
+          "package.json": JSON.stringify({
+            name: "@hasna/subject",
+            version: "1.0.0",
+            dependencies: { retired: "git+ssh://git@example.invalid/legacy.git" },
+          }),
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("passed");
+      },
+    );
   });
 });
 
