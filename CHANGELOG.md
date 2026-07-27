@@ -2,6 +2,37 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.8.1] - 2026-07-27
+
+### `no-cloud-scan` matches dependency edges and real imports, not substrings
+
+- `no-cloud-scan` previously matched its runtime patterns as bare substrings of
+  raw file text, so a dependency edge, a string naming a package, and a comment
+  saying the package had been *removed* all scored the same. Already-remediated
+  repos therefore failed the gate: `@hasna/connectors@1.4.0` reported on a JSDoc
+  line recording a removed import and on the boundary guard test that the
+  remediation pattern itself mandates.
+- Comments are masked before matching, string-, template- and regex-aware and
+  UTF-16 aligned, failing open to the raw text when the parse is detectably
+  lost. `.json`, `.jsx` and `.tsx` are never masked, because guessing their
+  comment syntax would cost a false negative.
+- The mandated boundary guard test is allowlisted once, for module *mentions*
+  only. Config patterns are never exempt, and any computed `import`/`require` —
+  identifier, backtick, template, or concatenation — withdraws the exemption.
+- `registerCloudTools`/`registerCloudCommands` are scoped to bindings imported
+  from a forbidden module, with name matching retained in files that have no
+  imports to read.
+- `package.json` and `bun.lock` are read for the actual dependency edge: every
+  install-bearing section on both sides, every workspace seeded, `npm:` aliases
+  followed in both directions, and specifiers matched by path segment.
+- Finding messages gained a reason suffix (`(module import)`,
+  `(source reference)`), which `src/conformance.ts` splices into the
+  `no_cloud_guard` detail — so conformance report text changes, while the
+  schema, the verdicts and the exit-code semantics do not.
+- Known residual gap: a specifier split across a concatenation, such as
+  `import("@hasna/" + "cloud")`, is not detected, because the module name never
+  appears contiguously. Substring matching did not catch this either.
+
 ## [0.8.0] - 2026-07-26
 
 ### Explicit storage-engine waivers (additive, v1)
