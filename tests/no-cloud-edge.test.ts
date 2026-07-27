@@ -1978,6 +1978,48 @@ describe("no-cloud gate: a blanked span may carry nothing but the row this table
       });
     });
 
+    test("the shadowing is read through every spelling the parser accepts", () => {
+      // The duplicate-key forges above use the one spelling a bundler emits.
+      // These are the OTHER accepted spellings of the same record, because the
+      // rule must not depend on which of them the parse happens to be reading —
+      // that dependence is what the four evasions had in common. Each is a
+      // distinct path through `readStringLiteral`, `skipSpace` or the key reader.
+      const MSG = `Shared ${RETIRED_ROW} runtime reference is forbidden`;
+      const spellings: Array<[string, string]> = [
+        ["quoted keys", `{ "pattern": "${PAYLOAD}", "pattern": "${RETIRED_ROW}", "kind": "module", "message": "${MSG}" }`],
+        ["backtick values", `{ pattern: \`${PAYLOAD}\`, pattern: \`${RETIRED_ROW}\`, kind: \`module\`, message: \`${MSG}\` }`],
+        ["mixed quote styles", `{ pattern: '${PAYLOAD}', pattern: "${RETIRED_ROW}", kind: "module", message: "${MSG}" }`],
+        ["a comment inside the record", `{ /* filler */ pattern: "${PAYLOAD}", pattern: "${RETIRED_ROW}", kind: "module", message: "${MSG}" }`],
+        ["CRLF line endings", `{\r\n pattern: "${PAYLOAD}",\r\n pattern: "${RETIRED_ROW}",\r\n kind: "module",\r\n message: "${MSG}"\r\n}`],
+        // An astral character is the known UTF-16-vs-code-point hazard in
+        // `toUnits`; it belongs in the shadowed value, where a shifted offset
+        // would blank the wrong bytes.
+        ["an astral character in the shadowed value", `{ pattern: "\u{1F600}${PAYLOAD}", pattern: "${RETIRED_ROW}", kind: "module", message: "${MSG}" }`],
+      ];
+      for (const [label, forged] of spellings) {
+        scanBundle(forged, (report) => {
+          expect(patterns(report), label).toContain(`dist/bundle.js:${CREDENTIAL}`);
+          expect(report.verdict, label).toBe("failed");
+        });
+      }
+    });
+
+    test("an array cannot carry a payload past the element-for-element rule", () => {
+      // The array analogue. An array has no duplicate-key trick available, so the
+      // reachable shapes are a SUPERSET and a SUBSET of the denylist — both must
+      // fail the length or member rule and leave every element readable.
+      const OTHER_NAME = ["open-", "cloud"].join("");
+      for (const [label, forged] of [
+        ["superset", `["${RETIRED_ROW}", "${OTHER_NAME}", "${PAYLOAD}"]`],
+        ["subset plus a payload sibling", `["${RETIRED_ROW}", "${PAYLOAD}"]`],
+      ] as Array<[string, string]>) {
+        scanBundle(forged, (report) => {
+          expect(patterns(report), label).toContain(`dist/bundle.js:${CREDENTIAL}`);
+          expect(report.verdict, label).toBe("failed");
+        });
+      }
+    });
+
     test("the PARSE is still lossy — that is the point, and it is why the action moved", () => {
       // This asserts the defect is still present in the representation, because
       // the fix deliberately does NOT patch the parser. Patching `parseInlineData`
