@@ -6,21 +6,38 @@ All notable changes to `@hasna/contracts` are documented here.
 
 ### `no-cloud-scan` closes three blind spots that 0.8.1 opened
 
-0.8.1 regressed on twelve genuine, executable loads that the substring scanner
-it replaced had caught. Each of the three causes below was demonstrated on a
-running fixture, and every fix is pinned by a test that fails on 0.8.1.
+0.8.1 went quiet on references the substring scanner it replaced had caught.
+Fourteen fixtures in an 81-fixture review corpus flip from `exit 0` to `exit 1`
+here, and none flips the other way. Each of the three causes below was
+demonstrated on a running fixture, and every fix is pinned by a test that fails
+on 0.8.1.
 
-- **The guard-test allowlist suppressed real loads.** The withdrawal test
-  recognised `import(` and `require(`; any other way of turning a specifier into
-  a module was scored as a mention and erased. `createRequire(import.meta.url)`,
-  `Bun.resolveSync`, `require.resolve` and `new Worker(new URL(…))` all loaded
-  the package against a clean scan. The exemption was also claimed by FILENAME at
-  any depth — from `dist/`, from the repo root, from `config/` — so shipped build
-  output could carry the suppressed name. Now: the path is anchored to exactly
+Not all fourteen are *executable loads*, and the distinction is recorded rather
+than smoothed over: some are package resolution without execution, one is a
+capability withdrawal on a shape that does no package resolution at all, and two
+are lockfile text naming the package outside any edge the graph walk can read.
+One — a regex misread as a comment — was confirmed a true positive by executing
+a planted stub, so 0.8.1's `exit 0` there was a genuine miss.
+
+- **The guard-test allowlist suppressed real access to the package.** The
+  withdrawal test recognised `import(` and `require(`; any other way of reaching
+  the package was scored as a mention and erased, against a clean scan. What each
+  shape does differs, and the difference matters:
+  `createRequire(import.meta.url)("…")` loads and executes;
+  `Bun.resolveSync` and `require.resolve` perform package resolution and return a
+  path without executing (and throw when the package is absent, so either way
+  they are a working presence probe); `new Worker(new URL("…", import.meta.url))`
+  does *not* do package resolution at all — measured, it resolves relative to the
+  importing file. The exemption was also claimed by FILENAME at any depth — from
+  `dist/`, from the repo root, from `config/` — so shipped build output could
+  carry the suppressed name. Now: the path is anchored to exactly
   `src/no-cloud-boundary.test.<ext>`, and the exemption survives only if the file
   cannot resolve a module at all and every literal mention sits in a position on
   an ALLOWLIST of inert ones. An unrecognised callee withdraws it, so the next
-  spelling fails closed rather than through.
+  spelling fails closed rather than through. The rule is deliberately a
+  CAPABILITY check — "a file that only asserts absence should not be able to
+  reach modules" — which is weaker and more defensible than "this shape loads the
+  package".
 - **Comment masking blanked live code and did not notice.** After `)` the masker
   read a `/` as division, but in JS `if (s) /a[//]b/` opens a REGEX — so the
   lexer walked into the regex body, took the `//` inside the character class for

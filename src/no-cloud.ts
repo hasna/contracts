@@ -136,15 +136,21 @@ function lockfileNamesPackage(text: string, packageName: string): boolean {
  * naming it. Scoring those assertions as breaches meant the sanctioned fix
  * tripped the gate meant to certify it — `@hasna/connectors@1.4.0` failed on
  * its own guard test three times over. Allowlisting it here, once, is what
- * stops twelve repos from each inventing a local exemption.
+ * stops every repo in the remediation wave from inventing a local exemption.
  *
  * ONE path, anchored. The previous spelling matched the filename at ANY depth,
  * which meant the exemption was claimable from `dist/no-cloud-boundary.test.js`
  * — shipped build output — from the repo root, from `config/`, and from
  * `src/deep/nested/`. A file that only asserts absence has no reason to live
  * anywhere but next to the source it guards, and every extra location was a
- * place to put a real load and have it erased. All twelve repos in the
- * remediation wave already ship it at exactly this path.
+ * place to put a real load and have it erased.
+ *
+ * Measured on this fleet at the time of the change: fourteen
+ * `no-cloud-boundary.test.*` files exist, TEN at this exact path, two under
+ * `test/` singular — which is unscanned for an unrelated reason, see the scope
+ * block above `SKIP_DIRS` — and two `dist/*.d.ts` stubs containing `export {};`
+ * whose extension does not match this pattern at all. So anchoring here costs
+ * nothing that is live today, which is the only claim worth making.
  *
  * Deliberately NOT read from the scanned repo's own manifest: the repo under
  * audit writes that manifest, so a declared path is a path the subject chooses,

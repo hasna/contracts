@@ -472,12 +472,29 @@ export function maskCommentsForPath(text: string, path: string): string {
  *
  * An ALLOWLIST, and that direction is the whole point. The first version of the
  * guard-test exemption enumerated the two load shapes it knew about — `import(`
- * and `require(` — and every other way of turning a specifier into a module
- * walked straight past it: `createRequire(import.meta.url)("…")`,
- * `Bun.resolveSync`, `require.resolve`, `new Worker(new URL("…"))`. All four
- * were proved to load the package while the scan reported a clean tree. Listing
- * the dangerous shapes is how you miss the next one, so this lists the safe
- * ones and an unrecognised callee withdraws the exemption.
+ * and `require(` — and every other way of reaching the package walked straight
+ * past it while the scan reported a clean tree.
+ *
+ * What each of those shapes actually does, measured rather than asserted,
+ * because the distinction is the reason this is a CAPABILITY check and not a
+ * load check:
+ *
+ *   - `createRequire(import.meta.url)("…")` — loads and EXECUTES the module.
+ *   - `Bun.resolveSync("…", dir)` — performs package resolution and returns a
+ *     path. No execution, and it throws when the package is absent, so it is a
+ *     working probe for presence either way.
+ *   - `require.resolve("…")` — the same: resolves without executing.
+ *   - `new Worker(new URL("…", import.meta.url))` — does NOT do package
+ *     resolution. `new URL("@hasna/cloud/worker.js", "file:///repo/src/x.ts")`
+ *     resolves RELATIVE, to `file:///repo/src/@hasna/cloud/worker.js`. It is
+ *     here because a guard test asserting absence has no reason to construct a
+ *     module URL at all, not because this particular spelling loads anything.
+ *
+ * So the rule is "this file can reach modules, and a file that only asserts
+ * absence should not be able to", which is weaker than "this file loads the
+ * package" and is the claim the code can actually support. Listing the dangerous
+ * shapes is how you miss the next one, so this lists the safe ones and an
+ * unrecognised callee withdraws the exemption.
  *
  * Matched on the LAST member segment, so `require.resolve` is read as `resolve`
  * and `Bun.resolveSync` as `resolveSync` — neither of which is here. That is
