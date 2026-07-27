@@ -77,10 +77,18 @@ interface ScanFile {
  *         another. Single-file text matching cannot follow it, by construction.
  *     `Module._load(DENY[0])` was a fourth and is now closed — see `LOAD_CALLEE`.
  *     All three need a hand-built fake denylist; the assembled-name case above
- *     needs nothing. Note the path-scoped predecessor did not close the two-file
- *     route either: it caught it in `lib/` only because it declined to attribute
- *     outside build output at all, and the same two files under `dist/` scanned
- *     clean there too. See `isOwnPatternDeclaration`.
+ *     needs nothing. All three are MODULE-class: the equality rules in
+ *     `isOwnPatternDeclaration` leave no slot for a `config` pattern or a
+ *     credential env key to ride along.
+ *
+ *     Two measurements about the alternatives, so this is not read as a
+ *     regression. The path-scoped predecessor on `main` did not close the
+ *     two-file route either — it caught it in `lib/` only because it declined to
+ *     attribute outside build output, and the same two files under `dist/`
+ *     scanned clean there too. Published 0.8.2 DOES catch it, because it
+ *     attributes nothing at all — which is the same property that makes it report
+ *     six unremovable findings against every consumer that bundles this package.
+ *     See `isOwnPatternDeclaration` for the trade.
  */
 const SKIP_DIRS = new Set([".git", "node_modules", ".cache", ".next", ".turbo", "coverage", "docs", "examples", "tests"]);
 const LOCKFILES = new Set(["bun.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"]);
@@ -131,19 +139,6 @@ const RUNTIME_PATTERNS = [
 const PATH_CONFIG_PATTERNS = RUNTIME_PATTERNS.filter(
   (entry): entry is typeof entry & { checkKind: NoCloudCheckKind } => "checkKind" in entry
 );
-
-/**
- * Every key this table emits, and therefore every key an inlined copy of one of
- * its rows may carry — `pattern`, `kind`, `message`, plus `checkKind` on the one
- * row that declares it.
- *
- * Derived rather than written out. A literal list is a second copy that drifts:
- * add a field to `RUNTIME_PATTERNS` and a written-out list silently stops
- * recognising the rows this package emits, which shows up as the false positive
- * coming back. Deriving it also means the bound can only ever describe shapes
- * this package really produces.
- */
-const RUNTIME_PATTERN_KEYS: ReadonlySet<string> = new Set(RUNTIME_PATTERNS.flatMap((entry) => Object.keys(entry)));
 
 const MODULE_PATTERNS = RUNTIME_PATTERNS.filter((entry) => entry.kind === "module");
 
@@ -330,27 +325,38 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
  *
  *   - the array must equal `FORBIDDEN_SHARED_CLOUD_RUNTIMES` element for
  *     element, so an array holding anything else is not it;
- *   - a row must match one `RUNTIME_PATTERNS` entry on ALL THREE of `pattern`,
- *     `kind` and `message`, so a row cannot pair a name with a message that is
- *     not that name's own. Wrapping `HASNA_RDS_PASSWORD` in a three-key object
- *     does not buy an exemption, because the message would have to be the one
- *     this table already carries — and then the row holds no value, only the
- *     name of a variable, which is what a denylist is;
+ *   - a row must equal one `RUNTIME_PATTERNS` row ENTRY FOR ENTRY — same key
+ *     count, every value equal — which is the record analogue of the array rule
+ *     above. Partial versions of this were tried twice and each left one free
+ *     slot: comparing three keys left the rest of the key set uncompared, and
+ *     bounding the key set to a union over all rows admitted `checkKind` on all
+ *     eight while only ever checking it was A string, never the RIGHT one. Full
+ *     equality removes the class rather than the instance;
  *   - the collection must sit where data sits and must not be read in place, and
  *     if it is bound to a name, no load call in the file may mention that name.
  *     That is what keeps `__require(DENY[0])` from becoming a way to launder a
  *     specifier through a copy of the denylist.
  *
- * The consequence that matters, stated as narrowly as it is true: no detector is
- * turned off for any occurrence OUTSIDE a blanked span, and a blanked span may
- * hold nothing but a row this table emits — see the key-set bound below, which is
- * what makes the two halves of that sentence add up. An earlier version of this
- * comment claimed "NO DETECTOR IS TURNED OFF ANYWHERE", and a review showed that
- * was inaccurate while the key set was unbounded: inside the span, the three
- * `config` patterns had nothing else watching them. Each occurrence is judged on
- * its own, so the same file keeps every check for every other occurrence in it — a consumer that bundles `@hasna/contracts` and also
- * reads `HASNA_CLOUD_*`, or also loads the retired runtime, is still reported.
- * No path is consulted, so nothing is exempt for living in `dist/`, and
+ * The consequence that matters, and the wording has been wrong twice so it is
+ * worth reading precisely: no detector is turned off for any occurrence OUTSIDE a
+ * blanked span, and a blanked span holds nothing but an exact copy of something
+ * this table declares — a record equal to a row entry for entry, or an array equal
+ * to the denylist element for element. There is no admitted-but-uncompared slot
+ * left for anything else to occupy, which is what finally makes the second half of
+ * that sentence true.
+ *
+ * It was not true before. The first version of this comment claimed "NO DETECTOR
+ * IS TURNED OFF ANYWHERE" while three keys were compared and the rest of the key
+ * set was not. The second claimed "nothing but a row this table emits" while
+ * `checkKind` was admitted on every row and never compared — a module row carrying
+ * a `checkKind` is a row this table never emits, and it was attributed. Both
+ * claims were caught by review rather than by a test, which is the argument for
+ * writing the guarantee as narrowly as the code earns it.
+ *
+ * Each occurrence is judged on its own, so the same file keeps every check for
+ * every other occurrence in it — a consumer that bundles `@hasna/contracts` and
+ * also reads `HASNA_CLOUD_*`, or also loads the retired runtime, is still
+ * reported. No path is consulted, so nothing is exempt for living in `dist/`, and
  * `git mv` cannot change a verdict.
  *
  * WHAT IT DOES NOT CLOSE, corrected after a review measured it: not one route
@@ -360,11 +366,25 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
  * re-export. `Module._load` was a fourth and is closed. The scope block at the top
  * of this file enumerates them with the controls that fail.
  *
+ * They are MODULE-CLASS ONLY, and that bound comes from the two equality rules
+ * rather than from an argument: the only array ever attributed equals the
+ * denylist, which holds package names and nothing else, and the only record ever
+ * attributed equals a table row entry for entry, so it has no slot to carry a
+ * value in. No `config` pattern and no credential env key can ride any of the
+ * three.
+ *
  * The earlier wording here said "bound to one name, rebound to a second", which
- * made the residual sound narrower and harder to reach than it is. It is inside
- * the module class that scope block already concedes alongside
- * `"@hasna/" + "cloud"` — which needs no fake denylist at all — but understating
- * it was wrong.
+ * made the residual sound narrower and harder to reach than it is. Understating it
+ * was wrong.
+ *
+ * THE TRADE, stated plainly, because "attribution is strictly better" would be the
+ * comfortable version and it is not accurate. Published 0.8.2 attributes NOTHING,
+ * so it catches the two-file re-export route that this concedes — and that same
+ * property is why it reports six unremovable findings against every consumer that
+ * bundles this package. 0.8.2 catches more and cries wolf; this cries less and
+ * concedes three aliasing routes, all module-class. That is the exchange being
+ * made, deliberately, and it is reversible: the array and record equality rules are
+ * where to tighten if the exchange ever looks wrong.
  */
 function isOwnPatternDeclaration(node: InlineDataNode): boolean {
   if (node.kind === "array") {
@@ -374,37 +394,51 @@ function isOwnPatternDeclaration(node: InlineDataNode): boolean {
     );
   }
   if (node.kind !== "record") return false;
-  // THE KEY SET IS BOUNDED, AND THAT IS THE WHOLE SAFETY OF BLANKING A SPAN.
+  // A ROW MUST EQUAL ONE TABLE ROW ENTRY FOR ENTRY. Same key count, every value
+  // equal. Nothing about the record is left uncompared.
   //
-  // Checking three keys and ignoring the rest was a hole of exactly the shape
-  // that got the first attempt at this rejected. `withoutInlinedDeclarations`
-  // blanks `node.start..node.end` — the WHOLE record — so a verbatim
-  // `{pattern, kind, message}` triple plus one more key carried anything at all
-  // inside the blanked span, and the three `config` patterns have no second
-  // detector to fall back on. Measured before this bound existed, as a tarball
-  // under a third-party package name:
+  // This is the record analogue of the array branch above, and it belongs beside
+  // it: an array is attributed only when it matches ELEMENT FOR ELEMENT, and a
+  // record only when it matches ENTRY FOR ENTRY. Two rounds of review were spent
+  // arriving back at that symmetry, by two different partial versions of it:
   //
-  //   verbatim module row + 4th key holding a credential assignment  -> EXIT=0, 0 findings
-  //   the same string with no triple around it (control)              -> EXIT=1, 1 critical
-  //   verbatim config row + 4th key holding a NESTED object of four
-  //     more patterns                                                 -> EXIT=0, 0 findings
-  //   both forges in hand-authored `src/table.ts`, not build output    -> EXIT=0, 0 findings
+  //   1. compare three keys, ignore the rest of the key set. A verbatim
+  //      `{pattern, kind, message}` triple plus one more key carried anything at
+  //      all through the blanked span.
+  //   2. bound the key set to the union of keys the table emits, and require
+  //      every value to be a string. `checkKind` is declared on exactly ONE row,
+  //      but a union admitted it on all eight — and being a string was all it had
+  //      to be, never the right string. A backtick literal then made the span
+  //      multi-line and arbitrarily long.
   //
-  // So: every key must be one this table actually emits, and every value must be
-  // a plain string, which is what stops a nested collection hiding under an
-  // accepted key. Read off the table rather than written out, so adding a field
-  // to `RUNTIME_PATTERNS` widens the bound with it and cannot drift.
-  for (const [key, value] of node.entries) {
-    if (!RUNTIME_PATTERN_KEYS.has(key)) return false;
-    if (value.kind !== "string") return false;
-  }
-  const pattern = node.entries.get("pattern");
-  const kind = node.entries.get("kind");
-  const message = node.entries.get("message");
-  if (pattern?.kind !== "string" || kind?.kind !== "string" || message?.kind !== "string") return false;
-  return RUNTIME_PATTERNS.some(
-    (entry) => entry.pattern === pattern.value && entry.kind === kind.value && entry.message === message.value
-  );
+  // Measured at the second version, as tarballs under a third-party package name,
+  // each against a control that fails:
+  //
+  //   verbatim module row + `checkKind` holding a credential env key -> EXIT=0, 0 findings
+  //     control: the same string with no triple around it            -> EXIT=1, 1 critical
+  //   verbatim config row + backtick `checkKind`, four patterns
+  //     spread over five lines                                      -> EXIT=0, 0 findings
+  //     control: the same payload with no triple                    -> EXIT=1, 3 critical
+  //   the same slot in hand-authored `src/table.ts`                  -> EXIT=0, 0 findings
+  //
+  // Each narrowing removed one free slot and left the next. Full equality removes
+  // the CLASS: there is no slot left that is admitted but uncompared, so a future
+  // field cannot become the next one. That is the property to preserve — if this
+  // ever needs loosening, loosen the SHAPES matched, never the completeness of the
+  // comparison.
+  //
+  // It costs nothing real: the build emits `{pattern, kind, message}` seven times
+  // and `{pattern, kind, checkKind, message}` once, and full equality accepts
+  // every one of them. The keys come from the MATCHED ROW rather than from a union
+  // over all rows, so `checkKind` is admitted only on the row that declares it.
+  return RUNTIME_PATTERNS.some((row) => {
+    const keys = Object.keys(row) as ReadonlyArray<keyof typeof row>;
+    if (keys.length !== node.entries.size) return false;
+    return keys.every((key) => {
+      const value = node.entries.get(key);
+      return value?.kind === "string" && value.value === row[key];
+    });
+  });
 }
 
 /**

@@ -1862,21 +1862,57 @@ describe("no-cloud gate: a blanked span may carry nothing but the row this table
     });
   });
 
+  test("checkKind is a FREE SLOT unless its value is compared too", () => {
+    // F1b, the second review blocker, and the reason the record rule is now full
+    // equality rather than another narrowing. `checkKind` is declared on exactly
+    // one table row, but bounding the key set to a union over ALL rows admitted it
+    // on all eight — and the check was that it held A string, never the RIGHT one.
+    // A backtick literal then made the blanked span multi-line and arbitrarily
+    // long. Measured before entry-for-entry equality, as tarballs under a
+    // third-party package name:
+    //
+    //   verbatim module row + checkKind holding a credential  EXIT=0, 0 findings
+    //     control: the same string with no triple             EXIT=1, 1 critical
+    //   verbatim config row + backtick checkKind, four
+    //     patterns over five lines                            EXIT=0, 0 findings
+    //   the same slot in hand-authored src/table.ts           EXIT=0, 0 findings
+    const forged =
+      `{ pattern: "${RETIRED_ROW}", kind: "module", checkKind: "${CREDENTIAL}=placeholder", ` +
+      `message: "Shared ${RETIRED_ROW} runtime reference is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${forged}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "a module row never carries checkKind, so this is not that row").toContain(
+        `dist/bundle.js:${CREDENTIAL}`,
+      );
+      expect(report.verdict).toBe("failed");
+    });
+    // A backtick value, so the span it would have blanked runs over five lines.
+    const multiline =
+      `{ pattern: "${CONFIG_ROW}", kind: "config", checkKind: \`\n  ${CREDENTIAL}\n  ${DOTDIR_ROW}\n\`, ` +
+      `message: "Shared ${CONFIG_ROW}* runtime config is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${multiline}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toContain(`dist/bundle.js:${CREDENTIAL}`);
+    });
+    // THE PAIR: the genuine `.hasna/cloud` row, which really does carry
+    // `checkKind`, with its own value. Four keys, all equal — attributed.
+    const genuine =
+      `{ pattern: "${DOTDIR_ROW}", kind: "config", checkKind: "runtime_config", ` +
+      `message: "Legacy ${DOTDIR_ROW} runtime config is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${genuine}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the one row that really carries checkKind must still be attributed").toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+    // And that same row with checkKind holding somebody else's string is not it.
+    const wrongValue = genuine.replace('"runtime_config"', `"${CREDENTIAL}"`);
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${wrongValue}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toContain(`dist/bundle.js:${CREDENTIAL}`);
+    });
+  });
+
   test("an accepted key cannot hold a nested collection", () => {
-    // The second half of the same hole: bounding the KEYS is not enough on its
-    // own, because one accepted key holding an object hides a whole table inside
-    // the blanked span.
-    //
-    // THE NESTED VALUE HAS TO SIT UNDER `checkKind`, and getting that wrong is how
-    // this test first shipped useless. An earlier version put it under a duplicate
-    // `message` key, so the object won the Map and the existing
-    // `message?.kind !== "string"` check rejected the row before the key-set loop
-    // was consulted at all — the test passed while proving nothing about the rule
-    // it was named for. The mutation audit's full-failing-set output is what
-    // exposed it: M89 was caught only by two repo-wide self-scan tests.
-    //
-    // `checkKind` is accepted BY NAME and is not one of the three the row must
-    // match, so only the value-kind check can reject this.
+    // Bounding the keys is not enough on its own: one key holding an object hides
+    // a whole table inside the blanked span. Entry-for-entry equality covers this
+    // as a side effect — a nested value is not equal to a string — but it is
+    // tested separately because the two rules can be broken independently.
     const nested =
       `{ pattern: "${DOTDIR_ROW}", kind: "config", checkKind: { a: "${CREDENTIAL}", b: "registerCloudTools" }, ` +
       `message: "Legacy ${DOTDIR_ROW} runtime config is forbidden" }`;
@@ -1885,13 +1921,6 @@ describe("no-cloud gate: a blanked span may carry nothing but the row this table
         `dist/bundle.js:${CREDENTIAL}`,
       );
       expect(report.verdict).toBe("failed");
-    });
-    // The pair: the same row with `checkKind` holding the string it really holds.
-    const real =
-      `{ pattern: "${DOTDIR_ROW}", kind: "config", checkKind: "runtime_config", ` +
-      `message: "Legacy ${DOTDIR_ROW} runtime config is forbidden" }`;
-    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${real}];\nexport { t };\n` } }, (report) => {
-      expect(patterns(report)).toEqual([]);
     });
   });
 
@@ -1910,18 +1939,21 @@ describe("no-cloud gate: a blanked span may carry nothing but the row this table
     }
   });
 
-  test("the accepted key set is derived from the table, so it cannot drift", () => {
-    // A written-out list would be a second copy: add a field to RUNTIME_PATTERNS
-    // and the list silently stops recognising the rows this package emits, which
-    // surfaces as the false positive coming back rather than as an error. The
-    // `.hasna/cloud` row is the one that carries a fourth key today.
-    const withCheckKind =
-      `{ pattern: "${DOTDIR_ROW}", kind: "config", checkKind: "runtime_config", message: "Legacy ${DOTDIR_ROW} runtime config is forbidden" }`;
-    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${withCheckKind}];\nexport { t };\n` } }, (report) => {
-      expect(patterns(report)).toEqual([]);
+  test("the compared key set is the MATCHED row's, not a union over all rows", () => {
+    // The union was cause #1 of F1b: `checkKind` is declared on one row and the
+    // union admitted it on eight. Keys now come from the row being compared, so a
+    // module row carrying `checkKind` matches nothing — and the config row that
+    // really carries it still matches.
+    const moduleRowWithCheckKind =
+      `{ pattern: "${RETIRED_ROW}", kind: "module", checkKind: "runtime_config", ` +
+      `message: "Shared ${RETIRED_ROW} runtime reference is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${moduleRowWithCheckKind}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toContain(`dist/bundle.js:${RETIRED_ROW}`);
     });
-    // And a key that is NOT in the table is rejected even when its value is inert.
-    const strangeKey = withCheckKind.replace(" }", ', severity: "high" }');
+    // A key that is in no row at all is rejected even holding an inert value.
+    const strangeKey =
+      `{ pattern: "${DOTDIR_ROW}", kind: "config", checkKind: "runtime_config", severity: "high", ` +
+      `message: "Legacy ${DOTDIR_ROW} runtime config is forbidden" }`;
     withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${strangeKey}];\nexport { t };\n` } }, (report) => {
       expect(patterns(report)).toContain(`dist/bundle.js:${DOTDIR_ROW}`);
     });
