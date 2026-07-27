@@ -384,6 +384,134 @@ describe("contracts CLI", () => {
     }
   });
 
+  test("allows vendored contracts denylist declarations in built and packed consumer output", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    const packParent = mkdtempSync(join(tmpdir(), "contracts-pack-parent-"));
+    const packageDir = join(packParent, "package");
+    const outDir = mkdtempSync(join(tmpdir(), "contracts-pack-out-"));
+    const tarball = join(outDir, "hasna-example-0.1.0.tgz");
+    const bundledDeclaration = 'var FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud","open-cloud"];\n';
+    try {
+      for (const root of [dir, packageDir]) {
+        mkdirSync(join(root, "dist"), { recursive: true });
+        writeFileSync(join(root, "package.json"), JSON.stringify({ name: "@hasna/example", version: "0.1.0" }));
+        writeFileSync(join(root, "dist", "index.js"), bundledDeclaration);
+      }
+
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(0);
+      const payload = parseStdoutJson(result);
+      expect(payload.verdict).toBe("passed");
+      expect(payload.checks.find((check: { id: string }) => check.id === "source_runtime")).toMatchObject({
+        kind: "source_import",
+        status: "succeeded"
+      });
+
+      execFileSync("tar", ["-czf", tarball, "-C", packParent, "package"]);
+      const packedResult = runContracts(["no-cloud-scan", "--json", tarball]);
+      expect(packedResult.exitCode).toBe(0);
+      const packedPayload = parseStdoutJson(packedResult);
+      expect(packedPayload.verdict).toBe("passed");
+      expect(packedPayload.checks.find((check: { id: string }) => check.id === "source_runtime")).toMatchObject({
+        kind: "packed_artifact",
+        status: "succeeded"
+      });
+
+      writeFileSync(
+        join(dir, "dist", "index.js"),
+        'var FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud","consumer-runtime"];\n'
+      );
+      const nearMatchResult = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(nearMatchResult.exitCode).toBe(1);
+      expect(
+        parseStdoutJson(nearMatchResult).findings.some(
+          (finding: { path: string; kind: string; severity: string; pattern: string }) =>
+            finding.path === "dist/index.js" &&
+            finding.kind === "source_import" &&
+            finding.severity === "high" &&
+            finding.pattern === "@hasna/cloud"
+        )
+      ).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(packParent, { recursive: true, force: true });
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
+  test("still rejects bundled imports beside vendored contracts denylist declarations", () => {
+    const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
+    const packParent = mkdtempSync(join(tmpdir(), "contracts-pack-parent-"));
+    const packageDir = join(packParent, "package");
+    const outDir = mkdtempSync(join(tmpdir(), "contracts-pack-out-"));
+    const tarball = join(outDir, "hasna-example-0.1.0.tgz");
+    const bundledImport =
+      'var FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud","open-cloud"];var cloud = require("@hasna/cloud");\n' +
+      "cloud.registerCloudTools();\n";
+    try {
+      for (const root of [dir, packageDir]) {
+        mkdirSync(join(root, "dist"), { recursive: true });
+        writeFileSync(join(root, "package.json"), JSON.stringify({ name: "@hasna/example", version: "0.1.0" }));
+        writeFileSync(join(root, "dist", "index.js"), bundledImport);
+        writeFileSync(
+          join(root, "dist", "chained.js"),
+          'var FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud","open-cloud"].map((name) => require(name));\n'
+        );
+      }
+
+      const result = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(result.exitCode).toBe(1);
+      const findings = parseStdoutJson(result).findings;
+      expect(
+        findings.some(
+          (finding: { path: string; kind: string; severity: string; pattern: string; message: string }) =>
+            finding.path === "dist/index.js" &&
+            finding.kind === "source_import" &&
+            finding.severity === "high" &&
+            finding.pattern === "@hasna/cloud" &&
+            finding.message.includes("module import")
+          )
+      ).toBe(true);
+      expect(
+        findings.some(
+          (finding: { path: string; kind: string; severity: string; pattern: string }) =>
+            finding.path === "dist/chained.js" &&
+            finding.kind === "source_import" &&
+            finding.severity === "high" &&
+            finding.pattern === "@hasna/cloud"
+        )
+      ).toBe(true);
+
+      execFileSync("tar", ["-czf", tarball, "-C", packParent, "package"]);
+      const packedResult = runContracts(["no-cloud-scan", "--json", tarball]);
+      expect(packedResult.exitCode).toBe(1);
+      const packedFindings = parseStdoutJson(packedResult).findings;
+      expect(
+        packedFindings.some(
+          (finding: { path: string; kind: string; severity: string; pattern: string; message: string }) =>
+            finding.path === "dist/index.js" &&
+            finding.kind === "packed_artifact" &&
+            finding.severity === "critical" &&
+            finding.pattern === "@hasna/cloud" &&
+            finding.message.includes("module import")
+          )
+      ).toBe(true);
+      expect(
+        packedFindings.some(
+          (finding: { path: string; kind: string; severity: string; pattern: string }) =>
+            finding.path === "dist/chained.js" &&
+            finding.kind === "packed_artifact" &&
+            finding.severity === "critical" &&
+            finding.pattern === "@hasna/cloud"
+        )
+      ).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(packParent, { recursive: true, force: true });
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
   test("fails no-cloud scan on malformed package manifests", () => {
     const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
     try {

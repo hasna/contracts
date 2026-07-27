@@ -369,6 +369,32 @@ function isNoCloudDeclarationFile(file: ScanFile, packageName?: string): boolean
   return markerCount >= 2;
 }
 
+/**
+ * Remove the package's exact denylist declaration from consumer bundles.
+ *
+ * Bundling `@hasna/contracts` inlines this array into the consumer's output.
+ * The strings declare what the scanner forbids; they are not module edges.
+ * Only this single-line array literal is masked, so another mention or import
+ * in the same minified line remains visible to the scanner.
+ */
+const VENDORED_DENYLIST_DECLARATION =
+  /\b(?:const|let|var)[^\S\r\n]+FORBIDDEN_SHARED_CLOUD_RUNTIMES[^\S\r\n]*=[^\S\r\n]*\[([^\]\r\n]*)\](?=[^\S\r\n]*(?:;|$))/gm;
+
+function maskVendoredDenylistDeclarations(text: string): string {
+  return text.replace(VENDORED_DENYLIST_DECLARATION, (declaration, elements: string) => {
+    const values = elements.split(",").map((element) => {
+      const literal = element.trim();
+      const quote = literal[0];
+      if ((quote !== '"' && quote !== "'") || literal.at(-1) !== quote) return null;
+      return literal.slice(1, -1);
+    });
+    const isVendoredDenylist =
+      values.length === FORBIDDEN_SHARED_CLOUD_RUNTIMES.length &&
+      values.every((value, index) => value === FORBIDDEN_SHARED_CLOUD_RUNTIMES[index]);
+    return isVendoredDenylist ? declaration.replace(/[^\r\n]/g, " ") : declaration;
+  });
+}
+
 function pathFindings(file: ScanFile, severity: NoCloudFindingSeverity): NoCloudFinding[] {
   const findings: NoCloudFinding[] = [];
   for (const { pattern, message } of RUNTIME_PATTERNS) {
@@ -410,6 +436,7 @@ function textFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageN
   // or a dotenv file has no import statements, so requiring a binding there
   // drops the check rather than scoping it.
   const codeLike = file.kind === "source_import" || file.kind === "packed_artifact";
+  const maskedWithoutVendoredDenylist = codeLike ? maskVendoredDenylistDeclarations(masked) : masked;
   const findings: NoCloudFinding[] = [];
 
   for (const { pattern, kind, message } of RUNTIME_PATTERNS) {
@@ -420,7 +447,10 @@ function textFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageN
       if (bound) reason = "imported binding";
     } else if (kind === "module" && importsModule(masked, pattern)) {
       reason = "module import";
-    } else if (!(guardTest && kind === "module") && masked.includes(pattern)) {
+    } else if (
+      !(guardTest && kind === "module") &&
+      (kind === "module" ? maskedWithoutVendoredDenylist : masked).includes(pattern)
+    ) {
       reason = "source reference";
     }
     if (!reason) continue;
