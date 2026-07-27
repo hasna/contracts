@@ -4,17 +4,17 @@
 // retired shared cloud runtime". It was checking that claim by looking for the
 // package name as a substring of `bun.lock`. That is not the same question.
 //
-// `hasna/logs` is the case that decides how this module has to work, and the
-// obvious reading of it is wrong. Its `bun.lock` names the retired runtime
+// `hasna/logs` is the case that decides how this module has to work, and it
+// has now been read wrong twice. Its `bun.lock` names the retired runtime
 // twice, so the substring check fails it, and the repo's own guard test
 // dismisses those hits as "a dev-only lockfile that is never shipped". Both
 // the check and the dismissal are guesses about what gets installed.
 //
-// It was measured instead. bun 1.3.14, isolated probe repos, both directions:
-// a registry dependency's devDependencies are NOT installed, but a
-// `file:`-linked dependency's ARE. `logs` reaches the retired runtime through
-// a `file:`-linked devDependency, so the package really does land in the
-// tree — it is a true positive that the old check found for the wrong reason.
+// It was measured instead, and the first measurement was generalised past
+// what it covered. See `isLinkedResolution` for all four shapes. The one that
+// settles `logs`: bun 1.3.14 does not materialise a TRANSITIVE linked
+// resolution at all. A clean-room install of logs' own lockfile puts no
+// `@hasna/cloud` on disk, so `logs` is a FALSE POSITIVE.
 //
 // So walk the graph with the install semantics that were observed, not the
 // ones npm documents. That catches the edges a substring only ever found by
@@ -129,21 +129,33 @@ interface LockNode {
 /**
  * Is this resolution a local path link rather than a registry download?
  *
- * It decides whether the package's devDependencies get installed, and the
- * answer is NOT the one you would guess from npm semantics. Measured on bun
- * 1.3.14, both directions:
+ * This decides whether the package's devDependencies get installed, and npm
+ * semantics do not predict it. Measured on bun 1.3.14, isolated probe repos:
  *
- *   - a registry dependency's devDependencies are NOT installed. A root
- *     depending on `commander@13.1.0` gets `commander` and none of its six
- *     devDependencies.
- *   - a `file:` dependency's devDependencies ARE installed, hoisted to the
- *     root. A root depending on `file:../pkg-a` gets `pkg-a` AND `pkg-a`'s
- *     dev-only `commander`.
+ *   1. root -> `commander@13.1.0` (registry): commander lands, none of its six
+ *      devDependencies do. Registry dev edges are not installed.
+ *   2. root -> `file:../pkg-a`, pkg-a devDepends on registry `commander`:
+ *      commander LANDS, hoisted to the root. A linked package is built from
+ *      source, so its dev edges are installed.
  *
- * That second case is why `hasna/logs` is not the false positive it looks
- * like: `@hasna/agent-registry` is a `file:` dependency, so its dev-only edge
- * to the retired runtime is a package that really does land in the tree.
- */
+ * WHAT IS NOT DECIDABLE HERE. Whether a package reached through a linked
+ * package is materialised depends on the install TOPOLOGY, which a lockfile
+ * does not determine. Measured, same bun version, contradicting each other:
+ *
+ *   - flat layout, root -> `file:../pkg-a` -> `file:../pkg-b`: pkg-b lands
+ *     nowhere. `hasna/logs` is this shape and a clean-room install of its
+ *     lockfile puts no `@hasna/cloud` on disk.
+ *   - workspace layout, member -> `file:` wrapper -> `file:` retired: the
+ *     transitive package IS installed, under `node_modules/.bun/`.
+ *
+ * An earlier version of this module picked the first reading and skipped
+ * transitive linked resolutions, which turned a monorepo's real edge into a
+ * signed clean verdict. Absence cannot be proven from the lockfile, so it is
+ * not claimed: a transitive linked resolution counts as an edge. That fails
+ * `hasna/logs` on an edge its own install does not materialise — a false
+ * positive we keep deliberately, because the alternative is a false negative
+ * on every monorepo, and a gate that goes quiet is worse than one that shouts.
+  */
 export function isLinkedResolution(id: string): boolean {
   const name = nameFromResolutionId(id);
   if (name === null) return false;
@@ -192,10 +204,36 @@ export function resolutionTarget(id: string): string | null {
   return target === undefined || target === name ? null : target;
 }
 
+/**
+ * The name a DEPENDENT writes when it refers to this entry.
+ *
+ * `resolutionTarget` reads the other direction — the key is the declared name
+ * and the id points elsewhere. This is the mirror case, and bun writes both:
+ * for `"mycloud": "npm:@hasna/cloud@0.1.41"` the KEY is the alias and the id
+ * carries the real package. Keying the graph only by the resolved name leaves
+ * every dependent looking up a name no node is filed under, and the traversal
+ * reports a clean tree.
+ *
+ * The alias is the key minus the longest prefix that is itself a package key,
+ * which is how the lockfile spells nesting and handles scoped names on both
+ * sides (`@a/b/@c/d` -> `@c/d`) without guessing at slashes.
+ */
+function aliasFromKey(key: string, keys: ReadonlySet<string>): string {
+  let best = key;
+  for (const candidate of keys) {
+    if (candidate.length >= key.length) continue;
+    if (!key.startsWith(`${candidate}/`)) continue;
+    const remainder = key.slice(candidate.length + 1);
+    if (best === key || remainder.length < best.length) best = remainder;
+  }
+  return best;
+}
+
 function nodesByName(lock: Record<string, unknown>): Map<string, LockNode[]> {
   const byName = new Map<string, LockNode[]>();
   const packages = lock.packages;
   if (!isRecord(packages)) return byName;
+  const keys = new Set(Object.keys(packages));
   for (const [key, entry] of Object.entries(packages)) {
     if (!Array.isArray(entry)) continue;
     const id = typeof entry[0] === "string" ? entry[0] : null;
@@ -209,9 +247,13 @@ function nodesByName(lock: Record<string, unknown>): Map<string, LockNode[]> {
       development: meta ? [...DEVELOPMENT_SECTIONS].flatMap((section) => namesInSection(meta, section)) : [],
       linked: id !== null && isLinkedResolution(id),
     };
-    const existing = byName.get(name);
-    if (existing) existing.push(node);
-    else byName.set(name, [node]);
+    // Filed under BOTH spellings: dependents look the entry up by the name
+    // they wrote, and the forbidden check compares what it resolves to.
+    for (const lookup of new Set([name, aliasFromKey(key, keys)])) {
+      const existing = byName.get(lookup);
+      if (existing) existing.push(node);
+      else byName.set(lookup, [node]);
+    }
   }
   return byName;
 }
@@ -261,6 +303,10 @@ function installRoots(lock: Record<string, unknown>): InstallRoot[] {
 function forbiddenIdentity(name: string, nodes: readonly LockNode[], forbidden: readonly string[]): string | null {
   if (forbidden.includes(name)) return name;
   for (const node of nodes) {
+    // The resolution's own name, for the mirror case where the KEY is the
+    // alias: `"mycloud": ["@hasna/cloud@0.1.41", ...]`. Checking only
+    // `node.alias` reads that entry as an unrelated package called `mycloud`.
+    if (forbidden.includes(node.name)) return node.name;
     if (node.alias !== null && forbidden.includes(node.alias)) return node.alias;
   }
   return null;
@@ -331,7 +377,9 @@ export function lockfileEdges(lockText: string, forbidden: readonly string[]): D
         best.set(identity, {
           packageName: identity,
           scope: current.scope,
-          path: current.trail,
+          // Show what the name resolved TO when an alias hid it, so the
+          // finding reads `mycloud -> @hasna/cloud` rather than just `mycloud`.
+          path: current.trail[current.trail.length - 1] === identity ? current.trail : [...current.trail, identity],
           source: "bun.lock",
           section: current.section
         });

@@ -229,13 +229,6 @@ const MUTATIONS: Mutation[] = [
     to: "  return false;",
   },
   {
-    id: "M25d-nocloud-dev-hop-is-not-laundered",
-    rule: "a production hop after a dev hop is still a dev edge",
-    file: "src/dependency-edge.ts",
-    from: '        for (const name of node.development) next.push({ name, scope: "development" });',
-    to: "        for (const name of node.development) next.push({ name, scope: current.scope });",
-  },
-  {
     id: "M26-nocloud-transitive-production-edge",
     rule: "a transitive production dependency is still an edge",
     file: "src/dependency-edge.ts",
@@ -269,13 +262,6 @@ const MUTATIONS: Mutation[] = [
     file: "src/source-text.ts",
     from: "        if (previous === \"\" || /\\s/.test(previous)) {",
     to: "        if (true) {",
-  },
-  {
-    id: "M31-nocloud-json-has-no-comments",
-    rule: "JSON has no comments, so nothing in it is masked",
-    file: "src/source-text.ts",
-    from: 'const C_LIKE_EXTENSIONS = /\\.(?:[cm]?[jt]sx?|[cm]ts)$/i;',
-    to: "const C_LIKE_EXTENSIONS = /\\.(?:[cm]?[jt]sx?|[cm]ts|json)$/i;",
   },
   {
     id: "M32-nocloud-template-frame-closes",
@@ -370,6 +356,55 @@ const MUTATIONS: Mutation[] = [
     from: '  return [...edges.map((edge) => edgeFinding(edge, file.path, "lockfile", packageName)), ...lockfileTextFindings(file, severity)];',
     to: '  return edges.map((edge) => edgeFinding(edge, file.path, "lockfile", packageName));',
   },
+  {
+    id: "M50-nocloud-utf16-index-alignment",
+    rule: "the mask is addressed in UTF-16 units, the same as the offsets it uses",
+    file: "src/source-text.ts",
+    from: "  return text.split(\"\");\n}",
+    to: "  return [...text];\n}",
+  },
+  {
+    id: "M51-nocloud-json-and-jsx-are-not-masked",
+    rule: "JSON and JSX are scanned raw, because guessing their comments hides code",
+    file: "src/source-text.ts",
+    from: "const C_LIKE_EXTENSIONS = /\\.(?:[cm]?[jt]s)$/i;",
+    to: "const C_LIKE_EXTENSIONS = /\\.(?:[cm]?[jt]sx?|json)$/i;",
+  },
+  {
+    id: "M52-nocloud-dev-hop-is-not-laundered",
+    rule: "a production hop after a dev hop is still a dev edge",
+    file: "src/dependency-edge.ts",
+    from: '        for (const name of node.development) next.push({ name, scope: "development" });',
+    to: "        for (const name of node.development) next.push({ name, scope: current.scope });",
+  },
+  {
+    id: "M53-nocloud-key-alias-is-registered",
+    rule: "an entry is findable by the name a dependent wrote, not only by what it resolves to",
+    file: "src/dependency-edge.ts",
+    from: "    for (const lookup of new Set([name, aliasFromKey(key, keys)])) {",
+    to: "    for (const lookup of new Set([name])) {",
+  },
+  {
+    id: "M54-nocloud-identity-reads-the-resolved-name",
+    rule: "an aliased KEY is judged by the package its resolution names",
+    file: "src/dependency-edge.ts",
+    from: "    if (forbidden.includes(node.name)) return node.name;",
+    to: "    if (false) return node.name;",
+  },
+  {
+    id: "M55-nocloud-dynamic-load-withdraws-exemption",
+    rule: "a computed import in the guard test is a load, not a mention",
+    file: "src/no-cloud.ts",
+    from: "  const guardTest = isNoCloudGuardTest(file.path) && !DYNAMIC_MODULE_LOAD.test(masked);",
+    to: "  const guardTest = isNoCloudGuardTest(file.path);",
+  },
+  {
+    id: "M56-nocloud-symbols-need-code-to-read",
+    rule: "import analysis applies where there is code; elsewhere the name is the evidence",
+    file: "src/no-cloud.ts",
+    from: '  const codeLike = file.kind === "source_import" || file.kind === "packed_artifact";',
+    to: "  const codeLike = true;",
+  },
 ];
 
 const repoRoot = join(import.meta.dir, "..");
@@ -407,12 +442,19 @@ for (const mutation of selected) {
     continue;
   }
   writeFileSync(path, original.replace(mutation.from, mutation.to));
-  const result = runSuite();
+  let result = runSuite();
+  // A suite that reported NOTHING did not survive the mutation — it failed to
+  // run at all, which under load looks identical to a survivor and is why a
+  // review saw `M21 SURVIVED 0/0` that re-ran clean in isolation. Retry once,
+  // then say "no result" rather than blame the rule.
+  if (result.pass === 0 && result.fail === 0) result = runSuite();
   writeFileSync(path, original);
+  const ranAtAll = result.pass > 0 || result.fail > 0;
   const caught = result.fail > 0;
   if (!caught) survivors += 1;
+  const verdict = !ranAtAll ? "NO-RESULT" : caught ? "caught " : "SURVIVED";
   console.log(
-    `${mutation.id.padEnd(38)} ${caught ? "caught " : "SURVIVED"} ${result.pass}/${result.fail}` +
+    `${mutation.id.padEnd(38)} ${verdict} ${result.pass}/${result.fail}` +
       (caught ? `  -> ${result.failed[0]?.slice(0, 60) ?? ""}` : `  (rule: ${mutation.rule})`),
   );
 }

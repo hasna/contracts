@@ -8,22 +8,47 @@
 // which is retired" — prose describing the fix, scored as the defect.
 //
 // So: mask comments before matching, and know which identifiers actually came
-// from an import. Everything here is deliberately fail-closed. If the masker
-// cannot make sense of a file it masks nothing, and the caller sees the raw
-// text — a false positive, never a false negative. A gate that goes quiet on
-// input it did not understand is worse than one that shouts.
+// from an import.
+//
+// WHERE THE FAIL-OPEN GUARANTEE STOPS. When the masker DETECTS that it lost
+// the thread — an unterminated string, template or block comment — it discards
+// the whole mask and the caller scans raw text. That is a false positive, never
+// a false negative, and it is the behaviour to preserve.
+//
+// It is not a blanket guarantee, and an earlier version of this file claimed it
+// was. A masker that silently mis-parses believes it succeeded, so nothing
+// falls back. Two such bugs were found by review, both of them blanking live
+// code while leaving the comment intact:
+//
+//   - indexing the text as code points while addressing it in UTF-16 units, so
+//     a single emoji shifted every later mask (see `toUnits`);
+//   - lexing JSX text as code, where `<code>src/*</code>` opens a block comment
+//     that runs to the next close anywhere in the file (see
+//     `commentSyntaxForPath`).
+//
+// Anything added here needs the same question asked of it: not "does it mask
+// the comment" but "can it mask something that is not one".
 
 /** Families we can mask. Anything else is returned untouched. */
 export type CommentSyntax = "c-like" | "hash" | "none";
 
-const C_LIKE_EXTENSIONS = /\.(?:[cm]?[jt]sx?|[cm]ts)$/i;
+const C_LIKE_EXTENSIONS = /\.(?:[cm]?[jt]s)$/i;
 const HASH_EXTENSIONS = /\.(?:sh|bash|ya?ml|toml)$/i;
 
 /**
  * Which comment syntax a path uses.
  *
- * `.json` is "none" on purpose: JSON has no comments, and pretending otherwise
- * would let `//` inside a JSON string value hide the rest of the line.
+ * Two families are deliberately "none", and both are load-bearing:
+ *
+ * `.json` — JSON has no comments and JSONC does. Guessing wrong would hide a
+ * reference in the one format that actually carries dependency edges.
+ *
+ * `.jsx`/`.tsx` — JSX text is not lexable without a real parser, and guessing
+ * costs a FALSE NEGATIVE rather than a false positive. `<code>src/*</code>`
+ * opens what looks like a block comment, which then runs to the next `*&#47;`
+ * anywhere in the file and masks every import in between. A bare URL in a text
+ * node does the same to one line. So JSX is scanned exactly as it was before
+ * comment masking existed: noisier, never blind.
  */
 export function commentSyntaxForPath(path: string): CommentSyntax {
   const name = path.replaceAll("\\", "/").split("/").pop() ?? path;
@@ -31,6 +56,21 @@ export function commentSyntaxForPath(path: string): CommentSyntax {
   if (C_LIKE_EXTENSIONS.test(name)) return "c-like";
   if (HASH_EXTENSIONS.test(name)) return "hash";
   return "none";
+}
+
+/**
+ * Split into UTF-16 code units, NOT code points.
+ *
+ * This has to match how the rest of this module addresses the text. Every
+ * offset here comes from `String.prototype.indexOf` and `text[index]`, which
+ * are UTF-16 based. `[...text]` iterates CODE POINTS, so one astral character
+ * — an emoji in a CLI menu is enough — makes the array shorter than the string
+ * and shifts every later mask left of where it belongs. The comment survives
+ * and the code after it gets blanked instead, which is a false negative: the
+ * masker believes it succeeded, so nothing falls back to raw text.
+ */
+function toUnits(text: string): string[] {
+  return text.split("");
 }
 
 /** Replace a span with spaces, so every index in the masked text still lines up with the original. */
@@ -73,7 +113,7 @@ function regexCanStart(before: string): boolean {
  * apostrophe is the common cause — and the caller must fall back to raw text.
  */
 function maskCLike(text: string): string | null {
-  const chars = [...text];
+  const chars = toUnits(text);
   let index = 0;
   const length = text.length;
   // Template-literal nesting: each `${` pushes a frame we must pop at its `}`.
@@ -217,7 +257,7 @@ function scanRegex(text: string, start: number): number | null {
  * which is what shell and YAML flow scalars need.
  */
 function maskHash(text: string): string {
-  const chars = [...text];
+  const chars = toUnits(text);
   let lineStart = 0;
   while (lineStart <= text.length) {
     let lineEnd = text.indexOf("\n", lineStart);

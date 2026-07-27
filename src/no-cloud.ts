@@ -108,6 +108,15 @@ const LOCKFILE_TEXT_PATTERNS = RUNTIME_PATTERNS.filter((entry) => entry.kind ===
  */
 const NO_CLOUD_GUARD_TEST = /(?:^|\/)no-cloud-boundary\.test\.(?:[cm]?[jt]sx?|[cm]ts)$/;
 
+/**
+ * `import(` or `require(` applied to something that is not a string literal.
+ *
+ * Matching an identifier start rather than "not a quote" keeps this off the
+ * regex SOURCE a guard test builds to detect imports — `require\s*\(\s*` has
+ * a backslash there, not an identifier.
+ */
+const DYNAMIC_MODULE_LOAD = /\b(?:import|require)\s*\(\s*[A-Za-z_$]/;
+
 function isNoCloudGuardTest(path: string): boolean {
   return NO_CLOUD_GUARD_TEST.test(path.replaceAll("\\", "/"));
 }
@@ -285,12 +294,19 @@ function textFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageN
   if (isAppCloudManifestDocument(file)) return [];
   if (isNoCloudDeclarationFile(file, packageName)) return [];
   const masked = maskCommentsForPath(file.text, file.path);
-  const guardTest = isNoCloudGuardTest(file.path);
+  // The exemption is withdrawn from a "guard test" that dynamically loads a
+  // computed specifier — the one move that turns a mention into a real load,
+  // and the one thing a genuine guard test never does.
+  const guardTest = isNoCloudGuardTest(file.path) && !DYNAMIC_MODULE_LOAD.test(masked);
+  // Reading imports only makes sense where there is code to read. A lockfile
+  // or a dotenv file has no import statements, so requiring a binding there
+  // drops the check rather than scoping it.
+  const codeLike = file.kind === "source_import" || file.kind === "packed_artifact";
   const findings: NoCloudFinding[] = [];
 
   for (const { pattern, kind, message } of RUNTIME_PATTERNS) {
     let reason: string | null = null;
-    if (kind === "symbol") {
+    if (kind === "symbol" && codeLike) {
       // Bound from a forbidden module, or it is somebody else's function.
       const bound = MODULE_PATTERNS.some((module) => importedBindings(masked, module.pattern).has(pattern));
       if (bound) reason = "imported binding";
@@ -324,7 +340,7 @@ function edgeFinding(edge: DependencyEdge, path: string, kind: NoCloudCheckKind,
     path,
     ...(packageName ? { packageName } : {}),
     pattern: edge.packageName,
-    message: `Forbidden shared cloud runtime is an installed ${edge.scope} dependency${via}${where}`,
+    message: `Forbidden shared cloud runtime is a reachable ${edge.scope} dependency${via}${where}`,
     evidenceRefs: []
   };
 }

@@ -136,6 +136,75 @@ describe("no-cloud gate: comments are prose, not edges", () => {
   });
 });
 
+describe("no-cloud gate: the masker cannot blank live code", () => {
+  // Every case here is a FALSE NEGATIVE found by review: the branch exited 0
+  // where the substring scanner exited 1. The masker believed it had parsed
+  // cleanly, so the fail-open path never triggered.
+
+  test("an emoji before a comment does not shift the mask onto the code after it", () => {
+    // Code points vs UTF-16 units. One astral character was enough to leave
+    // the comment intact and blank the require() below it instead.
+    const menu = Array.from({ length: 40 }, (_, index) => `  { icon: "\u{1F916}", label: "i${index}" },`).join("\n");
+    withRepo(
+      { files: { "src/menu.ts": `export const MENU = [\n${menu}\n];\n// Load the runtime adapter\nexport const adapter = require("${RETIRED}");\n` } },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+        expect(patterns(report)).toContain(`src/menu.ts:${RETIRED}`);
+      },
+    );
+  });
+
+  test("an emoji before a hash comment does not shift the yaml mask either", () => {
+    withRepo(
+      { files: { "src/deploy.yaml": `title: "\u{1F916} \u{1F680} app"\n# retired\ninstall: ${RETIRED}\n` } },
+      (report) => {
+        expect(patterns(report)).toContain(`src/deploy.yaml:${RETIRED}`);
+      },
+    );
+  });
+
+  test("maskComments never blanks a character outside a comment, emoji or not", () => {
+    // The property, stated directly: a masked character must have been a
+    // comment character. Length equality alone does not catch index drift.
+    const text = `const a = "\u{1F916}\u{1F680}"; // note\nconst b = "${RETIRED}";\n`;
+    const masked = maskComments(text, "c-like");
+    expect(masked.length).toBe(text.length);
+    const commentStart = text.indexOf("//");
+    const commentEnd = text.indexOf("\n", commentStart);
+    for (let index = 0; index < text.length; index += 1) {
+      if (masked[index] === text[index]) continue;
+      expect(index).toBeGreaterThanOrEqual(commentStart);
+      expect(index).toBeLessThan(commentEnd);
+    }
+    expect(masked).toContain(`const b = "${RETIRED}"`);
+  });
+
+  test("a glob in JSX text does not open a block comment over the imports below", () => {
+    withRepo(
+      { files: { "src/Help.tsx": `export const Help = () => <code>src/*</code>;\nimport { thing } from "${RETIRED}";\n/** doc */\n` } },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+        expect(patterns(report)).toContain(`src/Help.tsx:${RETIRED}`);
+      },
+    );
+  });
+
+  test("a URL in JSX text does not comment out the rest of its line", () => {
+    withRepo(
+      { files: { "src/Doc.jsx": `export const Doc = () => <p>docs at https://x.invalid</p>; const m = require("${RETIRED}");\n` } },
+      (report) => {
+        expect(patterns(report)).toContain(`src/Doc.jsx:${RETIRED}`);
+      },
+    );
+  });
+
+  test("the cost of not masking JSX is a false positive, which is the acceptable direction", () => {
+    withRepo({ files: { "src/Note.tsx": `// removed ${RETIRED} in 1.4.0\nexport const Note = () => <p>ok</p>;\n` } }, (report) => {
+      expect(report.verdict).toBe("failed");
+    });
+  });
+});
+
 describe("no-cloud gate: the mandated guard test", () => {
   const guardTest =
     "const FORBIDDEN_PACKAGE = " +
@@ -157,6 +226,57 @@ describe("no-cloud gate: the mandated guard test", () => {
       (report) => {
         expect(report.verdict).toBe("failed");
         expect(patterns(report)).toContain(`src/no-cloud-boundary.test.ts:${RETIRED}`);
+      },
+    );
+  });
+
+  test("a dynamic import of a computed specifier withdraws the exemption", () => {
+    // The smuggle: the guard test may NAME the package, but the moment it
+    // loads a computed specifier the mention stops being a mention.
+    withRepo(
+      { files: { "src/no-cloud-boundary.test.ts": `const runtime = "${RETIRED}";\nexport const mod = import(runtime);\n` } },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+        expect(patterns(report)).toContain(`src/no-cloud-boundary.test.ts:${RETIRED}`);
+      },
+    );
+  });
+
+  test("a genuine guard test builds import regexes without tripping the dynamic-load rule", () => {
+    // Real guard tests write `require\\s*\\(` inside a regex source. That must
+    // not read as a dynamic load, or the allowlist is worthless.
+    withRepo(
+      {
+        files: {
+          "src/no-cloud-boundary.test.ts":
+            `const FORBIDDEN = "${RETIRED}";\n` +
+            "const RE = new RegExp(String.raw`(?:\\bfrom\\s*|\\brequire\\s*\\(\\s*)[\"']` + FORBIDDEN);\nexport { RE };\n",
+        },
+      },
+      (report) => {
+        expect(patterns(report)).toEqual([]);
+      },
+    );
+  });
+
+  test("config patterns are never exempt, even in the guard test", () => {
+    // These have no import to look for, so "it is only a test file" was the
+    // whole argument for skipping them — and the file can be re-exported.
+    withRepo(
+      {
+        files: {
+          "src/no-cloud-boundary.test.ts":
+            'export const endpoint = process.env.HASNA_CLOUD_ENDPOINT;\n' +
+            'export const pw = process.env.HASNA_RDS_PASSWORD;\n' +
+            'export const state = ".hasna/cloud/state.json";\n',
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+        const hit = patterns(report);
+        expect(hit).toContain("src/no-cloud-boundary.test.ts:HASNA_CLOUD_");
+        expect(hit).toContain("src/no-cloud-boundary.test.ts:HASNA_RDS_PASSWORD");
+        expect(hit).toContain("src/no-cloud-boundary.test.ts:.hasna/cloud");
       },
     );
   });
@@ -314,9 +434,71 @@ describe("no-cloud gate: dependency edges from bun.lock", () => {
     expect(lockfileEdges(text, [RETIRED, "open-cloud"])).toEqual([]);
   });
 
-  test("a LINKED package's devDependencies ARE installed, so they are edges", () => {
-    // hasna/logs, exactly: `@hasna/agent-registry` is a file: dependency, so
-    // its dev-only edge to the retired runtime really does land in the tree.
+  test("a LINKED package's REGISTRY devDependencies are installed, so they are edges", () => {
+    // Measured shape 2: root -> file:../pkg-a, pkg-a devDepends on a registry
+    // package -> that package is hoisted to the root and really is on disk.
+    const text = lock({
+      workspaces: { "": { name: "@hasna/subject", dependencies: { "@hasna/linked": "file:../linked" } } },
+      packages: {
+        "@hasna/linked": ["@hasna/linked@file:../linked", { devDependencies: { [RETIRED]: "^0.1.41" } }],
+        [`@hasna/linked/${RETIRED}`]: [`${RETIRED}@0.1.41`, {}],
+      },
+    });
+    const edges = lockfileEdges(text, [RETIRED, "open-cloud"]);
+    expect(edges?.map((edge) => edge.packageName)).toEqual([RETIRED]);
+    expect(edges?.[0]?.scope).toBe("development");
+  });
+
+
+
+
+  test("a WORKSPACE MEMBER's transitive production edge is walked", () => {
+    // A monorepo install materialises every member's dependencies. Seeding
+    // only from workspaces[""] made this invisible; platform-mailery and todos
+    // on this fleet are both multi-workspace.
+    const text = lock({
+      workspaces: {
+        "": { name: "@hasna/root" },
+        "packages/api": { name: "@hasna/api", dependencies: { "@hasna/wrapper": "^1" } },
+      },
+      packages: {
+        "@hasna/wrapper": ["@hasna/wrapper@1.0.0", { dependencies: { [RETIRED]: "^0.1.41" } }],
+        [RETIRED]: [`${RETIRED}@0.1.41`, {}],
+      },
+    });
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])?.map((edge) => edge.packageName)).toEqual([RETIRED]);
+  });
+
+  test("an npm: alias is followed to the package it really resolves to", () => {
+    // bun writes the ALIAS as the map key and the real name in the resolution
+    // id. Keying the graph only by resolved name made every alias a dead end.
+    const text = lock({
+      workspaces: { "": { name: "@hasna/subject", dependencies: { mycloud: `npm:${RETIRED}@0.1.41` } } },
+      packages: { mycloud: [`${RETIRED}@0.1.41`, {}] },
+    });
+    const edges = lockfileEdges(text, [RETIRED, "open-cloud"]);
+    expect(edges?.map((edge) => edge.packageName)).toEqual([RETIRED]);
+    expect(edges?.[0]?.path).toEqual(["mycloud", RETIRED]);
+  });
+
+  test("a transitive npm: alias is followed too", () => {
+    const text = lock({
+      workspaces: { "": { name: "@hasna/subject", dependencies: { "@hasna/wrapper": "^1" } } },
+      packages: {
+        "@hasna/wrapper": ["@hasna/wrapper@1.0.0", { dependencies: { mycloud: `npm:${RETIRED}@0.1.41` } }],
+        mycloud: [`${RETIRED}@0.1.41`, {}],
+      },
+    });
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])?.map((edge) => edge.packageName)).toEqual([RETIRED]);
+  });
+
+  test("a transitive linked resolution counts as an edge, because absence cannot be proven", () => {
+    // hasna/logs' exact shape. A clean-room install of its lockfile puts no
+    // @hasna/cloud on disk in a FLAT layout — but the same chain under a
+    // WORKSPACE layout does install, measured on the same bun. The lockfile
+    // does not say which topology applies, so absence is not claimed. This is
+    // a deliberate false positive; the alternative is going quiet on every
+    // monorepo. See `isLinkedResolution`.
     const text = lock({
       workspaces: { "": { name: "@hasna/logs", devDependencies: { "@hasna/agent-registry": "file:../open-agent-registry" } } },
       packages: {
@@ -327,7 +509,6 @@ describe("no-cloud gate: dependency edges from bun.lock", () => {
     const edges = lockfileEdges(text, [RETIRED, "open-cloud"]);
     expect(edges?.map((edge) => edge.packageName)).toEqual([RETIRED]);
     expect(edges?.[0]?.scope).toBe("development");
-    expect(edges?.[0]?.path).toEqual(["@hasna/agent-registry", RETIRED]);
   });
 
   test("isLinkedResolution reads the specifier, scope sigil and all", () => {
@@ -546,6 +727,67 @@ describe("no-cloud gate: dependency edges from bun.lock", () => {
         expect(finding?.message).toContain("@hasna/wrapper");
       },
     );
+  });
+
+  test("the graph is authoritative only for the packages it models", () => {
+    // Findings review caught being dropped once the graph parsed successfully:
+    // a legacy bin name and an env variable in a lockfile are not nodes in any
+    // dependency graph, so the graph's silence must not stand for them.
+    // The lockfile here PARSES — that is the whole point, since the
+    // unparseable path already falls back to a full text scan.
+    withRepo(
+      {
+        files: {
+          "bun.lock": JSON.stringify({
+            lockfileVersion: 1,
+            workspaces: { "": { name: "@hasna/subject", dependencies: {} } },
+            packages: {},
+            scripts: { postinstall: "HASNA_CLOUD_URL=x cloud-mcp setup" },
+          }),
+        },
+      },
+      (report) => {
+        expect(lockfileEdges(JSON.stringify({ lockfileVersion: 1, workspaces: { "": { name: "@hasna/subject" } }, packages: {} }), [RETIRED])).toEqual([]);
+        const hit = patterns(report);
+        // Package names are the graph's business; a config key is nobody's edge.
+        expect(hit).toContain("bun.lock:HASNA_CLOUD_");
+        expect(report.verdict).toBe("failed");
+      },
+    );
+  });
+
+  test("a symbol in a file with no imports to read is matched on its name", () => {
+    // Import analysis needs code. A lockfile has no import statements, so
+    // requiring a binding there means the name can never be evidence — which
+    // silently drops the check rather than scoping it.
+    withRepo({ files: { "yarn.lock": 'x "registerCloudTools"\n' } }, (report) => {
+      expect(patterns(report)).toContain("yarn.lock:registerCloudTools");
+    });
+    // ...and in real code the binding rule still applies, so a local
+    // definition of the same name stays clean.
+    withRepo({ files: { "src/local.ts": "export function registerCloudTools() {}\n" } }, (report) => {
+      expect(patterns(report)).toEqual([]);
+    });
+  });
+
+  test("an unreachable packages{} entry is not an edge, because nothing installs it", () => {
+    const text = lock({
+      workspaces: { "": { name: "@hasna/subject", dependencies: {} } },
+      packages: { [RETIRED]: [`${RETIRED}@0.1.41`, {}] },
+    });
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])).toEqual([]);
+  });
+
+  test("a cyclic lockfile terminates", () => {
+    const text = lock({
+      workspaces: { "": { name: "@hasna/subject", dependencies: { a: "^1" } } },
+      packages: {
+        a: ["a@1.0.0", { dependencies: { b: "^1" } }],
+        b: ["b@1.0.0", { dependencies: { a: "^1", [RETIRED]: "^1" } }],
+        [RETIRED]: [`${RETIRED}@0.1.41`, {}],
+      },
+    });
+    expect(lockfileEdges(text, [RETIRED, "open-cloud"])?.map((edge) => edge.packageName)).toEqual([RETIRED]);
   });
 
   test("parseLooseJson tolerates trailing commas without mangling string contents", () => {
