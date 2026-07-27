@@ -563,8 +563,19 @@ A 20,414-member package scans in **5.9 s**.
   in a package can defend against the publisher choosing not to run its own
   hooks; that is a release-process control, not a code one.
 - **IPv4 is read only from values** — whole quoted literals, or bare tokens in
-  non-code members. Reading raw text matched SVG path coordinates in minified
-  bundles, which would have failed every app shipping an icon set.
+  non-code members — in **presentation format**, and never under a version key
+  (`v8`, `node`, `chrome`, `engineVersion`, …). Reading raw text matched SVG
+  path coordinates in minified bundles; accepting zero-padded quads turned
+  latin1-decoded binaries into findings; and four-component version strings are
+  numerically indistinguishable from addresses, so `playwright` and
+  `node-releases` both failed on bundled version tables. A machine list keyed
+  with a version word is the residual, and it is narrow: address spellings
+  (`ipAddress`, `public_ip`, `PublicIpAddress`, `ansible_host`, …) all count.
+- **Binary members still yield roughly one spurious address per 22 MB** once
+  decoded as latin1. That is far below the per-file threshold, but the
+  artifact-wide union reaches it at around 450 MB of shipped binary — inside
+  the scan window. An artifact that large should declare an `ip` waiver rather
+  than have the gate loosened.
 
 Clause B is a prohibition, not a count: it binds whether or not the guard can
 see the violation.

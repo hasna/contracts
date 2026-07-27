@@ -227,17 +227,47 @@ const EMAIL_LITERAL = /^[a-z0-9._%+-]+@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.
 const IPV4_LITERAL = /^(?:(?:0|[1-9]\d{0,2})\.){3}(?:0|[1-9]\d{0,2})$/;
 
 /**
- * Object keys whose value is an ADDRESS rather than a version.
+ * Object keys whose value is a VERSION, not an address.
  *
  * A dotted quad is numerically indistinguishable from a four-component version
- * string, so in code the only available signal is the key it sits under.
- * `{"v8":"11.0.244.1"}` is a version; `{"ip":"51.15.0.10"}` is a machine.
+ * string, so in code the only available signal is the key it sits under. This
+ * is a DENYLIST rather than an address whitelist, and the difference is large:
+ * an exact-match whitelist of address words silently dropped every compound
+ * spelling — `ipAddress`, `public_ip`, `PublicIpAddress`, `ansible_host`,
+ * `tailscale_ip`, `ips`, `addresses` — so a 40-record EC2 `describe-instances`
+ * export keyed `PublicIpAddress` scanned clean, and a hostname->IP map scanned
+ * clean on all four kinds.
+ *
+ * The denylist loses nothing measurable. Enumerating which keys actually hold
+ * dotted quads in the two packages that produced the false positives:
+ * `node-releases@2.0.19` `envs.json` -> `v8` only; `playwright@1.61.1`
+ * `babelBundle.js` -> `v8` only, 315 occurrences. Suppressing those keys fixes
+ * both without suppressing anything else.
+ *
+ * THE COST, stated accurately: a machine list keyed with a version word — say
+ * `{"build": "51.15.0.10"}` — is not counted. That is the whole residual. It is
+ * not, as an earlier comment here claimed, "a machine list keyed `node`": that
+ * described the whitelist this replaced, which dropped every compound address
+ * spelling and is why a 40-record EC2 export scanned clean.
  */
-// `node` is deliberately ABSENT: `node-releases` keys its version table on it
-// (`{"node":"0.10.0","v8":"3.14.5.9"}`), which is the exact false positive this
-// list exists to prevent. A machine list keyed `node` loses detection; a
-// version table keyed `node` gaining it is worse.
-const ADDRESS_KEY = /^(?:ip|ipv4|addr|address|host|hostname|server|peer|endpoint|gateway|dns|resolver|bind|listen|remote)$/i;
+const VERSION_KEY =
+  /(?:^|[_.-])(?:v8|node|chrome|chromium|electron|engine|firefox|safari|opera|edge|ie|deno|bun|npm|yarn|pnpm|python|ruby|java|dotnet|semver|ver|version|revision|build|sdk|runtime|target|min|max)(?:[_.-]|$)/i;
+
+/**
+ * Is this key one whose value is a version rather than an address?
+ *
+ * camelCase is split first (`engineVersion` -> `engine_version`), because the
+ * word boundaries in a denylist are separators and camelCase has none.
+ *
+ * A key that is itself a HOSTNAME is never a version key, however it reads. In
+ * a hostname->IP map the key is `node-7.fleet.example` and the value is the
+ * address; matching `node` inside it suppressed the entire map.
+ */
+function isVersionKey(key: string): boolean {
+  if (isCountableHostname(key.toLowerCase())) return false;
+  const normalized = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+  return VERSION_KEY.test(normalized);
+}
 
 /** The object key a quoted literal is the value of, if any. */
 function enclosingKey(view: string, literalStart: number): string | null {
@@ -267,7 +297,7 @@ function addressCandidates(view: string, codeLike: boolean): string[] {
       // finding nobody could action. A bare array element has no key and still
       // counts, which is the shape a fleet list actually takes.
       const key = enclosingKey(view, match.index ?? 0);
-      if (key !== null && !ADDRESS_KEY.test(key)) continue;
+      if (key !== null && isVersionKey(key)) continue;
     }
     found.push(literal);
   }
@@ -773,6 +803,11 @@ function collectLiteralInventories(
       // every quoted token is matched, so short ones must be explicitly
       // ignored rather than treated as list terminators.
       if (literal.length < 3) continue;
+      // An address is a different asset KIND, counted by its own collector, so
+      // it must not end a hostname run: in a hostname->IP map the two alternate,
+      // and treating each address as a breaker took the map to zero on every
+      // kind at once.
+      if (IPV4_LITERAL.test(literal)) continue;
       // A key or a description leaves the list intact; a value shaped like an
       // asset that did not count ends it.
       if (!LABEL_LITERAL.test(literal)) closeRun();

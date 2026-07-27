@@ -115,6 +115,14 @@ describe("the failure this guard exists for", () => {
     expect(text).not.toContain("secret-brand-0.com");
     // Samples name a KIND and a per-report digest, never a fragment of the value.
     expect(text).toMatch(/<(?:domain|host|ip|email):[0-9a-f]{8}>/);
+    // And the kind is the FINDING's, not one guessed from the value's shape:
+    // reinstating label-by-shape made a `domain` finding print `<host:…>` and
+    // survived the whole suite.
+    for (const finding of report.findings) {
+      for (const sample of finding.sample) {
+        expect(sample.startsWith(`<${finding.kind}:`), `${finding.kind} sample ${sample}`).toBe(true);
+      }
+    }
     expect(report.findings.every((finding) => finding.sample.length <= 3)).toBe(true);
   });
 });
@@ -748,14 +756,33 @@ describe("an endpoint catalogue is not hidden by writing it as endpoints", () =>
   });
 
   test("a path is only stripped where a scheme says the piece is a URL", () => {
-    // Without that marker `agents.list/get` is a member access. The guard reads
-    // `dist` bundles, where those outnumber real hosts by orders of magnitude.
-    const members = ["agents.list/get", "config.replace/all", "schema.json/definitions", "README.md/section"]
+    // This fixture was doubly incapable of firing: FOUR quoted literals against
+    // a MIN_LITERAL_RUN of 5, so no run could form, and none of its last labels
+    // (`list`, `replace`, `json`, `md`) is a recognized TLD. Mutating
+    // `hostComponent` to strip paths unconditionally passed the whole suite.
+    //
+    // It now uses six entries under a REAL TLD, so the only thing standing
+    // between it and a finding is the rule under test.
+    const memberAccess = [
+      "agents.wiki/get", "config.wiki/all", "schema.wiki/definitions",
+      "records.wiki/list", "session.wiki/close", "tenant.wiki/create",
+    ]
       .map((identifier) => `"${identifier}"`)
       .join(",");
-    const counts = inventoryCounts(`const surface = [${members}];`);
+    const counts = inventoryCounts(`const surface = [${memberAccess}];`);
     expect(counts.domain).toEqual([]);
     expect(counts.host).toEqual([]);
+
+    // POSITIVE CONTROL: the same six with a scheme ARE endpoints, and the path
+    // is stripped. Without this the assertion above cannot tell the rule from
+    // the plumbing.
+    const endpoints = [
+      "https://agents.wiki/get", "https://config.wiki/all", "https://schema.wiki/definitions",
+      "https://records.wiki/list", "https://session.wiki/close", "https://tenant.wiki/create",
+    ]
+      .map((url) => `"${url}"`)
+      .join(",");
+    expect(inventoryCounts(`const surface = [${endpoints}];`).domain.length).toBeGreaterThanOrEqual(5);
   });
 });
 
@@ -984,13 +1011,38 @@ describe("fixes that had no regression coverage", () => {
     // same false-positive class. Real packages bundling browserslist or
     // node-releases data (playwright: 44, node-releases: 50) failed their own
     // mandatory prepack gate with a finding nobody could action.
-    const versions = Array.from({ length: 30 }, (_, i) => `{"v8":"11.0.${244 + i}.1"}`).join(",");
+    // 244+i stays inside 0-255 for all 30, so every one of these is a valid
+    // dotted quad. An earlier version ran to 273 and silently lost 18 of them
+    // to `isReservedIpv4`, overstating the fixture's strength 2.5x.
+    const versions = Array.from({ length: 30 }, (_, i) => `{"v8":"11.0.${200 + i}.1"}`).join(",");
     expect(inventoryCounts(`[${versions}]`).ip).toEqual([]);
     // `node` included deliberately: node-releases keys its version table on it.
     for (const key of ["version", "node", "chrome", "electron", "engine", "v8"]) {
-      const rows = Array.from({ length: 30 }, (_, i) => `{"${key}":"11.0.${244 + i}.1"}`).join(",");
+      const rows = Array.from({ length: 30 }, (_, i) => `{"${key}":"11.0.${200 + i}.1"}`).join(",");
       expect(inventoryCounts(`[${rows}]`).ip, key).toEqual([]);
     }
+
+    // Compound address spellings must all still count. An exact-match address
+    // WHITELIST silently dropped every one of these, so a 40-record EC2
+    // `describe-instances` export scanned clean.
+    for (const key of [
+      "ipAddress", "ip_address", "public_ip", "publicIp", "PublicIpAddress",
+      "privateIp", "host_ip", "ansible_host", "tailscale_ip", "ips", "addresses", "v4",
+    ]) {
+      const rows = Array.from({ length: 30 }, (_, i) => `{"${key}":"51.15.${i}.10"}`).join(",");
+      expect(inventoryCounts(`[${rows}]`).ip.length, key).toBe(30);
+    }
+
+    // A hostname->IP map counts on BOTH kinds. Under the whitelist it scored
+    // zero on all four, because each address broke the hostname run as well as
+    // being suppressed itself.
+    const hostMap: Record<string, string> = {};
+    for (let index = 0; index < 30; index += 1) {
+      hostMap[`node-${index}.fleet-example-corp.com`] = `51.15.${index}.10`;
+    }
+    const mapCounts = inventoryCounts(JSON.stringify(hostMap));
+    expect(mapCounts.ip.length).toBe(30);
+    expect(mapCounts.host.length).toBe(30);
 
     // But an address under an ADDRESS key, or with no key at all, still counts:
     // a bare array is the shape a fleet list actually takes.
