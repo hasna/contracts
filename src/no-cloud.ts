@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
-import { lockfileEdges, manifestEdges, type DependencyEdge } from "./dependency-edge";
+import { lockfileWalk, manifestEdges, type DependencyEdge, type LockfileWalk } from "./dependency-edge";
 import {
   commonArchiveRoot,
   isPackedArtifactPath,
@@ -8,7 +8,7 @@ import {
   normalizeArchiveEntry,
   readArchiveMemberText
 } from "./packed-artifact";
-import { importedBindings, importsModule, maskCommentsForPath } from "./source-text";
+import { importedBindings, importsModule, maskCommentsForPath, mentionsCannotLoad } from "./source-text";
 import {
   FORBIDDEN_SHARED_CLOUD_RUNTIMES,
   AppCloudManifestSchema,
@@ -34,6 +34,30 @@ interface ScanFile {
   kind: NoCloudCheckKind;
 }
 
+/**
+ * WHAT `verdict: passed` DOES NOT CLAIM.
+ *
+ * This scan reads an allowlist of directories and extensions. It is a gate on
+ * the shapes below, not a proof that no reference to the retired runtime exists
+ * anywhere in the tree, and the difference is load-bearing when the verdict is
+ * used to certify a remediation. Each of these is pinned by a test in
+ * `tests/no-cloud-edge.test.ts` so closing one cannot happen silently:
+ *
+ *   - a path with NO `SOURCE_DIRS` segment is not read at all: `app/api/…`,
+ *     `packages/…`, `apps/…`. `shouldReadPath` requires one.
+ *   - `tests/` is in `SKIP_DIRS`, and `test/` SINGULAR is in neither set — so a
+ *     `test/` tree is unscanned for the same reason but by a different route.
+ *   - a bare `node_modules/@hasna/cloud` on disk with no manifest or lockfile
+ *     entry: `node_modules` is skipped, and nothing else looks at disk.
+ *   - `Dockerfile`, `.tf` and an extensionless `bin/` script: the extension
+ *     filter excludes them.
+ *   - an assembled name — `"@hasna/" + "cloud"` — and an escaped specifier —
+ *     `"@hasna/cloud"`, `"\x40hasna/cloud"`. Text matching sees neither.
+ *     In the guard test `MODULE_RESOLUTION_CAPABILITY` covers the load; nowhere
+ *     else does.
+ *   - a `git+ssh:` dependency that installs UNDER the package name without the
+ *     name appearing in the specifier.
+ */
 const SKIP_DIRS = new Set([".git", "node_modules", ".cache", ".next", ".turbo", "coverage", "docs", "examples", "tests"]);
 const LOCKFILES = new Set(["bun.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"]);
 const SOURCE_DIRS = new Set(["src", "bin", "cli", "mcp", "server", "lib", "scripts", "config", "infra", "hooks", ".github", "dist"]);
@@ -88,25 +112,62 @@ const FORBIDDEN_LOCKFILE_PACKAGES: readonly string[] = [
 const LOCKFILE_TEXT_PATTERNS = RUNTIME_PATTERNS.filter((entry) => entry.kind === "config");
 
 /**
+ * A package name spelled as a lockfile TOKEN, not as a substring.
+ *
+ * The same argument as `LOCKFILE_TEXT_PATTERNS`, applied to the half it was
+ * never applied to. Module patterns lost their text fallback entirely when the
+ * graph walk took over `bun.lock`, so a pin the walk could not read —
+ * `"overrides": { "left-pad": { "@hasna/cloud": "0.1.41" } }` — named the
+ * package in plain text and scanned clean.
+ *
+ * Bounded to a token so this cannot become the substring check the walk
+ * replaced: a lockfile name is opened by a quote or a `/` and closed by a
+ * quote, an `@` (a resolution id) or a `/`. `@hasna/cloudflare-adapter` and
+ * `../open-cloud-shim` are different packages and stay out.
+ */
+function lockfileNamesPackage(text: string, packageName: string): boolean {
+  return new RegExp(`(?:^|["/])${packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=["@/])`).test(text);
+}
+
+/**
  * The guard test every remediated repo is required to ship.
  *
  * It exists to assert the retired runtime is absent, which it can only do by
  * naming it. Scoring those assertions as breaches meant the sanctioned fix
  * tripped the gate meant to certify it — `@hasna/connectors@1.4.0` failed on
  * its own guard test three times over. Allowlisting it here, once, is what
- * stops twelve repos from each inventing a local exemption.
+ * stops every repo in the remediation wave from inventing a local exemption.
  *
- * The exemption is narrow on purpose, because the file is claimed by PATH and
- * any repo can create it. It covers MENTIONS OF A MODULE NAME only:
+ * ONE path, anchored. The previous spelling matched the filename at ANY depth,
+ * which meant the exemption was claimable from `dist/no-cloud-boundary.test.js`
+ * — shipped build output — from the repo root, from `config/`, and from
+ * `src/deep/nested/`. A file that only asserts absence has no reason to live
+ * anywhere but next to the source it guards, and every extra location was a
+ * place to put a real load and have it erased.
  *
- *   - a real import is still a finding, whatever shape the specifier takes;
+ * Measured on this fleet at the time of the change: fourteen
+ * `no-cloud-boundary.test.*` files exist, TEN at this exact path, two under
+ * `test/` singular — which is unscanned for an unrelated reason, see the scope
+ * block above `SKIP_DIRS` — and two `dist/*.d.ts` stubs containing `export {};`
+ * whose extension does not match this pattern at all. So anchoring here costs
+ * nothing that is live today, which is the only claim worth making.
+ *
+ * Deliberately NOT read from the scanned repo's own manifest: the repo under
+ * audit writes that manifest, so a declared path is a path the subject chooses,
+ * and `dist/` is one of the things it could choose. A constant here is strictly
+ * narrower than anything self-declared.
+ *
+ * The exemption covers MENTIONS OF A MODULE NAME only:
+ *
+ *   - a real load is still a finding, whatever shape it takes — see
+ *     `guardTestMentionsOnly`, which decides this by ALLOWLIST;
  *   - runtime CONFIG — `HASNA_CLOUD_*`, `.hasna/cloud`, `HASNA_RDS_PASSWORD` —
  *     is still a finding, because a guard test asserts absence by naming a
  *     package, never by setting the shared runtime's environment;
  *   - the file cannot create an install edge without `package.json` or
  *     `bun.lock` showing it, and both are checked separately.
  */
-const NO_CLOUD_GUARD_TEST = /(?:^|\/)no-cloud-boundary\.test\.(?:[cm]?[jt]sx?|[cm]ts)$/;
+const NO_CLOUD_GUARD_TEST = /^src\/no-cloud-boundary\.test\.(?:[cm]?[jt]sx?|[cm]ts)$/;
 
 /**
  * `import(` or `require(` whose argument is not ONE complete, simple string
@@ -127,8 +188,45 @@ const NO_CLOUD_GUARD_TEST = /(?:^|\/)no-cloud-boundary\.test\.(?:[cm]?[jt]sx?|[c
  */
 const DYNAMIC_MODULE_LOAD = /\b(?:import|require)\s*\(\s*(?!(["'])[^"'\n]*\1\s*\))/;
 
+/**
+ * Module-resolution capability, present at all.
+ *
+ * The mention audit in `guardTestMentionsOnly` reads where the package NAME
+ * sits. This reads whether the file can resolve a module at all, whatever it
+ * resolves — because the name can be assembled (`"@hasna/" + "cloud"`), escaped
+ * (`"\x40hasna/cloud"`), or read from a fixture, and none of those spellings
+ * reach the audit. A file whose only job is to assert absence needs none of
+ * these APIs, so their presence alone withdraws the exemption.
+ *
+ * Verified against all fourteen `no-cloud-boundary.test.*` files on this fleet:
+ * none of them uses any of these.
+ */
+const MODULE_RESOLUTION_CAPABILITY =
+  /\b(?:createRequire|resolveSync|process\.binding|dlopen|eval|Function)\s*\(|\brequire\s*\.\s*resolve\b|\bimport\s*\.\s*meta\s*\.\s*resolve\b|\bBun\s*\.\s*plugin\b|\bnew\s+(?:URL|Worker|SharedWorker|Function)\s*\(/;
+
 function isNoCloudGuardTest(path: string): boolean {
   return NO_CLOUD_GUARD_TEST.test(path.replaceAll("\\", "/"));
+}
+
+/**
+ * Does this guard test only MENTION the retired runtimes?
+ *
+ * Three independent withdrawals, because the failure this replaces was a single
+ * check that knew about two shapes:
+ *
+ *   1. it resolves modules at all (`MODULE_RESOLUTION_CAPABILITY`);
+ *   2. it loads a computed specifier (`DYNAMIC_MODULE_LOAD`);
+ *   3. any literal mention of a forbidden module sits somewhere that could
+ *      resolve it (`mentionsCannotLoad`, an allowlist of inert positions).
+ *
+ * `masked` is for the shape checks, which must not fire on prose. The mention
+ * audit gets RAW text because it lexes, and it recognises comments itself.
+ */
+function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
+  if (!isNoCloudGuardTest(file.path)) return false;
+  if (MODULE_RESOLUTION_CAPABILITY.test(masked)) return false;
+  if (DYNAMIC_MODULE_LOAD.test(masked)) return false;
+  return MODULE_PATTERNS.every((module) => mentionsCannotLoad(file.text, file.path, module.pattern));
 }
 
 const DECLARATION_FILE_MARKERS = [
@@ -304,10 +402,10 @@ function textFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageN
   if (isAppCloudManifestDocument(file)) return [];
   if (isNoCloudDeclarationFile(file, packageName)) return [];
   const masked = maskCommentsForPath(file.text, file.path);
-  // The exemption is withdrawn from a "guard test" that dynamically loads a
-  // computed specifier — the one move that turns a mention into a real load,
-  // and the one thing a genuine guard test never does.
-  const guardTest = isNoCloudGuardTest(file.path) && !DYNAMIC_MODULE_LOAD.test(masked);
+  // The exemption is withdrawn from a "guard test" that can load a module at
+  // all — the one move that turns a mention into a real load, and the one thing
+  // a genuine guard test never does.
+  const guardTest = guardTestMentionsOnly(file, masked);
   // Reading imports only makes sense where there is code to read. A lockfile
   // or a dotenv file has no import statements, so requiring a binding there
   // drops the check rather than scoping it.
@@ -376,21 +474,64 @@ function lockfileTextFindings(file: ScanFile, severity: NoCloudFindingSeverity):
 }
 
 /**
+ * Module names this `bun.lock` spells out that the walk neither reported as an
+ * edge nor proved absent.
+ *
+ * The walk is authoritative for what it decided, not for what it never looked
+ * at. A pin shape it cannot read, a stale `packages` entry, a future lockfile
+ * layout — all of them name the package in plain text while the walk returns a
+ * list and the list reads as a clean tree. `clearedByLayout` is the one
+ * exception, and it is a measurement rather than an assumption: a transitive
+ * `file:`/`link:` resolution in a hoisted install lands nowhere on disk, which
+ * is what clears `hasna/logs` and must keep clearing it.
+ *
+ * So: report the difference, and over-approximate in the direction that costs
+ * noise rather than blindness.
+ */
+function lockfileUnwalkedNameFindings(
+  file: ScanFile,
+  severity: NoCloudFindingSeverity,
+  walk: LockfileWalk
+): NoCloudFinding[] {
+  const explained = new Set<string>([...walk.edges.map((edge) => edge.packageName), ...walk.clearedByLayout]);
+  const findings: NoCloudFinding[] = [];
+  for (const { pattern, message } of MODULE_PATTERNS) {
+    if (explained.has(pattern)) continue;
+    if (!lockfileNamesPackage(file.text, pattern)) continue;
+    findings.push({
+      id: `finding_${stableId(`${file.path}:${pattern}`)}`,
+      kind: file.kind,
+      severity,
+      path: file.path,
+      pattern,
+      message: `${message} (lockfile names it outside any edge the walk could read)`,
+      evidenceRefs: []
+    });
+  }
+  return findings;
+}
+
+/**
  * Lockfile findings.
  *
  * `bun.lock` is walked as a graph — see `src/dependency-edge.ts` for why a
  * substring is not the same question as an edge. The walk answers PACKAGE
  * NAMES, so the config patterns are still read as text and unioned in;
- * replacing the whole scan with the walk dropped them silently. Any other
- * lockfile keeps the old text scan, because we have no parser for it and going
- * quiet on an unparsed lockfile is the failure mode this change exists to
- * remove.
+ * replacing the whole scan with the walk dropped them silently. Module names
+ * are unioned back on the same terms, minus the ones the walk actively cleared
+ * — the asymmetry between the two halves was the whole bug. Any other lockfile
+ * keeps the old text scan, because we have no parser for it and going quiet on
+ * an unparsed lockfile is the failure mode this change exists to remove.
  */
 function lockfileFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageName?: string): NoCloudFinding[] {
   if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity, packageName);
-  const edges = lockfileEdges(file.text, FORBIDDEN_LOCKFILE_PACKAGES);
-  if (edges === null) return textFindings(file, severity, packageName);
-  return [...edges.map((edge) => edgeFinding(edge, file.path, "lockfile", packageName)), ...lockfileTextFindings(file, severity)];
+  const walk = lockfileWalk(file.text, FORBIDDEN_LOCKFILE_PACKAGES);
+  if (walk === null) return textFindings(file, severity, packageName);
+  return [
+    ...walk.edges.map((edge) => edgeFinding(edge, file.path, "lockfile", packageName)),
+    ...lockfileUnwalkedNameFindings(file, severity, walk),
+    ...lockfileTextFindings(file, severity)
+  ];
 }
 
 function scanFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageName?: string): NoCloudFinding[] {
