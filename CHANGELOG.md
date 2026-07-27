@@ -4,6 +4,123 @@ All notable changes to `@hasna/contracts` are documented here.
 
 ## [0.8.3] - 2026-07-27
 
+### `no-cloud-scan` stops scoring its own inlined declaration, without switching a detector off
+
+SUPERSEDES the first attempt at this in the same unreleased version. That attempt
+is documented below rather than deleted, because two of its measurements are the
+reason this one is shaped the way it is — and because it was merged, so anyone
+reading `git log` will meet it.
+
+WHAT IT GOT RIGHT, and this version keeps: key the mask on the array's VALUE
+rather than on the identifier it is assigned to, because a bundler rewrites the
+name and cannot rewrite the value. Measured there over 1656 build-output files in
+41 consumer repos. Require `=` immediately before the literal so it is a value
+being STORED, and withdraw the mask when `.`, `(` or `[` follows the closing
+bracket, because that turns the array into a load. All three survive here.
+
+WHY IT WAS NOT ENOUGH, measured apples-to-apples — its own bundle, scanned by its
+own scanner: **six findings still standing**, `verdict: failed`, `EXIT=1`.
+
+- **It matched one of the two shapes this package inlines.** The denylist array is
+  the smaller half. `RUNTIME_PATTERNS` is a row per pattern —
+  `{ pattern: "…", kind: "…", message: "…" }` — and it carries ALL EIGHT patterns,
+  including both credential env keys and the legacy config dotdir. Masking the
+  array cleared nothing that the rows did not put back.
+- **Two forbidden names were spelled at finding SITES, in code rather than data.**
+  `pattern === ".hasna/cloud"` and `path.includes(".hasna/cloud")` are not
+  literals a structural rule can attribute to anything, and a bundler inlined them
+  into every consumer just the same. They are read off the pattern table now, and
+  a test asserts no forbidden name appears in `src/no-cloud.ts` outside it.
+- **It was scoped by PATH**, needing `GENERATED_OUTPUT_DIRS`, then
+  `AUTHORED_SOURCE_DIRS` to stop `src/dist/loader.ts` claiming the exemption,
+  then an ordering rule between the two. Attribution reads content, so none of
+  that apparatus exists here and `git mv` cannot change a verdict.
+- **It left the identity-keyed exemption in place** — see below, that one is a
+  live credential blind spot rather than a false positive.
+
+### `no-cloud-scan` stops scoring its own inlined declaration, without switching a detector off
+
+A repo that bundles `@hasna/contracts` without externalising it gets this
+scanner's own pattern declaration copied into its build output. The scanner read
+that copy back and scored it as the consumer's breach — measured against
+published 0.8.1 and 0.8.2 on a consumer whose only import is
+`scanNoCloudTarget`: **six findings in one `dist/index.js`**, none of them
+removable by the consumer, with `open-cloud` reported against a repo that never
+used it.
+
+**A live credential blind spot is removed at the same time.** 0.8.1 and 0.8.2
+exempted a file by PATH plus package identity plus two "marker" substrings, and
+the exemption returned early for the whole file — which took the three `config`
+patterns with it, and those have no import to look for, so a bare occurrence is
+their only detector. Measured on the published bytes of both versions with a
+byte-identical `dist/no-cloud.js` carrying a planted shared-RDS credential:
+named `@hasna/contracts` it PASSED with zero findings; named anything else the
+same bytes scored two criticals. The one artifact whose credential detectors
+were off was this package's own release. That mechanism is gone.
+
+Two approaches were rejected on measurement before this one landed:
+
+- **Exempting build-output directories.** A `dist`-only tarball leaking the
+  shared RDS credential scored two criticals before and zero after. A
+  false-positive fix that opens a credential blind spot is worse than the bug.
+- **Treating a bare mention with no import specifier as a false positive.**
+  Unsound in both directions. `bun build --external` compiles `require("x")` to
+  `__require("x")` — a real load carrying no specifier the matcher could see —
+  and a source file importing its own `package.json` as JSON makes the bundler
+  inline the whole manifest, so a dependency name sits in the artifact with zero
+  specifiers anywhere in the file. Both are true positives.
+
+What is actually different about the copied declaration is that the text IS this
+scanner's own constant, still in the inert data shape it was written in. That is
+what is matched, and only the characters it spans are dropped:
+
+- the array must equal the denylist element for element, so a subset, a superset
+  and a reordering are all somebody else's data;
+- a row must equal one table row ENTRY FOR ENTRY — same entry count, every value
+  equal — so a forbidden name cannot be paired with a message that is not its own,
+  and no extra field can ride along inside the span. Matching three named keys and
+  a bounded key set were both tried first and each left one free slot. The rule is
+  complete only together with its other half: the parser REFUSES a record that
+  repeats a key, because `Map` keeps the last value and a shadowed one would sit
+  inside the blanked span having been compared to nothing;
+- the collection must sit where data sits, must not be indexed, called or
+  member-accessed in place, and if it is bound to a name, no load call in the
+  file may name that name. `__require(DENY[0])` is a real load whose specifier
+  never appears in specifier position, and that is what these three close.
+
+**No detector is switched off anywhere.** Each occurrence is judged on its own,
+so the same file keeps every check for every other occurrence in it: a consumer
+that bundles this package AND reads the retired runtime's config, or loads it, is
+still reported. No path and no package identity is consulted, so `git mv` cannot
+change a verdict, and a `package.json` is still read whole because attribution is
+restricted to C-family source — the only thing a bundler inlines a JavaScript
+constant into.
+
+Also in this release:
+
+- **Every forbidden name is spelled exactly once, in the pattern table.** Two
+  finding sites re-spelled the legacy config dotdir. Those copies were CODE
+  rather than data, so nothing structural could ever attribute them, and a
+  bundler inlined them into every consumer just the same. A test now asserts no
+  forbidden name appears in `src/no-cloud.ts` outside the table.
+- **`importsModule` and `importedBindings` recognise the bundler's require
+  wrapper.** A word boundary does not exist inside `__require`, so the one form
+  build output actually uses was invisible to both. Widening a load matcher can
+  only ADD findings: a load it fails to recognise falls through to reporting the
+  bare name, so a name recognised here is reclassified, never cleared.
+- **`scripts/mutation-audit.ts`**: 17 new mutations (M71-M87) pinning each rule
+  above in both directions, plus repairs to TEN stale anchors — seven of which
+  were already stale on `main`, so those rules had been unverified since the last
+  refactor and the audit could not come back clean. The script now writes the
+  in-flight mutation to a gitignored sentinel and repairs an abandoned one on the
+  next run (it had committed `if (false) roots.push(...)` into this repo),
+  handles signals, strips ANSI before parsing counts, refuses a zero-pass
+  baseline as "no reading" rather than "green", passes an explicit suite timeout
+  so machine load cannot manufacture a red baseline, and accepts `--anchors` to
+  check staleness without running the suite.
+
+<!-- superseded, retained for the record: the first 0.8.3 attempt -->
+
 ### `no-cloud-scan` stops reporting its own denylist as the consumer's breach
 
 `FORBIDDEN_SHARED_CLOUD_RUNTIMES` is a pair of string literals, so any repo that

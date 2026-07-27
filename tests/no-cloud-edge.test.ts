@@ -13,7 +13,7 @@
 // failed on two functions it defines itself. All four shapes are below.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanNoCloudTarget } from "../src/no-cloud";
@@ -26,7 +26,16 @@ import {
   parseLooseJson,
   resolutionTarget
 } from "../src/dependency-edge";
-import { importedBindings, importsModule, maskComments, maskCommentsForPath, mentionsCannotLoad } from "../src/source-text";
+import {
+  importedBindings,
+  importsModule,
+  inlineDataNodes,
+  inlineDataRegions,
+  loadCallMentions,
+  maskComments,
+  maskCommentsForPath,
+  mentionsCannotLoad
+} from "../src/source-text";
 
 /** The retired runtime, spelled in pieces so this file does not trip its own gate. */
 const RETIRED = ["@hasna/", "cloud"].join("");
@@ -1347,5 +1356,862 @@ describe("source-text masking primitives", () => {
     expect(importedBindings(`import a, { b, c as d } from "${RETIRED}";`, RETIRED)).toEqual(new Set(["b", "d", "a"]));
     expect(importedBindings(`import * as ns from "${RETIRED}";`, RETIRED)).toEqual(new Set(["ns"]));
     expect(importedBindings(`import { x } from "./local.js";`, RETIRED)).toEqual(new Set());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The scanner's own declaration, inlined into somebody else's build output.
+//
+// Every test here is a pair. The false positive this fixes and the true
+// positives it must not touch are the SAME code path — a bare occurrence in
+// build output — so a one-sided test would pass while a credential detector was
+// off. That is precisely how the first two attempts at this failed review.
+//
+// The declaration text below is written out rather than imported. It is the
+// signature the scanner recognises, so pinning it here is the point: change a
+// message in `RUNTIME_PATTERNS` and these fail, which is the correct signal that
+// the recognition signature moved.
+// ---------------------------------------------------------------------------
+describe("no-cloud gate: this package's inlined declaration is attributed, not exempted", () => {
+  const OTHER = ["open-", "cloud"].join("");
+  const LEGACY_MCP = ["cloud-", "mcp"].join("");
+  const RDS = ["HASNA_RDS", "_PASSWORD"].join("");
+  const CLOUD_ENV = ["HASNA_CLOUD", "_"].join("");
+  const DOTDIR = [".hasna/", "cloud"].join("");
+
+  /** What `bun build` emits when it inlines this package: the exact two shapes. */
+  const DENYLIST_ARRAY = `var FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["${RETIRED}", "${OTHER}"];`;
+  const PATTERN_ROWS =
+    "var RUNTIME_PATTERNS = [\n" +
+    `  { pattern: "${RETIRED}", kind: "module", message: "Shared ${RETIRED} runtime reference is forbidden" },\n` +
+    `  { pattern: "${OTHER}", kind: "module", message: "Shared ${OTHER} runtime reference is forbidden" },\n` +
+    `  { pattern: "${LEGACY_MCP}", kind: "module", message: "Legacy ${LEGACY_MCP} runtime surface is forbidden" },\n` +
+    '  { pattern: "registerCloudTools", kind: "symbol", message: "Legacy registerCloudTools runtime surface is forbidden" },\n' +
+    '  { pattern: "registerCloudCommands", kind: "symbol", message: "Legacy registerCloudCommands runtime surface is forbidden" },\n' +
+    `  { pattern: "${DOTDIR}", kind: "config", checkKind: "runtime_config", message: "Legacy ${DOTDIR} runtime config is forbidden" },\n` +
+    `  { pattern: "${CLOUD_ENV}", kind: "config", message: "Shared ${CLOUD_ENV}* runtime config is forbidden" },\n` +
+    `  { pattern: "${RDS}", kind: "config", message: "Legacy shared RDS credential config is forbidden" }\n` +
+    "];";
+  const INLINED_DECLARATION = `${DENYLIST_ARRAY}\n${PATTERN_ROWS}\nexport { FORBIDDEN_SHARED_CLOUD_RUNTIMES, RUNTIME_PATTERNS };\n`;
+
+  /** Scan a fixture as a PACKED TARBALL, where build-output findings are critical. */
+  function withTarball(files: Record<string, string>, assert: (verdict: ReturnType<typeof scanNoCloudTarget>) => void) {
+    const dir = mkdtempSync(join(tmpdir(), "no-cloud-pack-"));
+    try {
+      for (const [path, text] of Object.entries(files)) {
+        const full = join(dir, "package", path);
+        mkdirSync(join(full, ".."), { recursive: true });
+        writeFileSync(full, text);
+      }
+      const archive = join(dir, "fixture.tgz");
+      const packed = Bun.spawnSync(["tar", "-czf", archive, "-C", dir, "package"]);
+      expect(packed.exitCode, new TextDecoder().decode(packed.stderr)).toBe(0);
+      assert(scanNoCloudTarget(archive));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  test("PROOF: a consumer bundling this package without --external passes", () => {
+    // The bug. Six findings in one `dist/index.js`, none of them removable by
+    // the consumer, and `open-cloud` reported against a repo that never used it.
+    withRepo({ name: "iapp-consumer", files: { "dist/index.js": INLINED_DECLARATION } }, (report) => {
+      expect(patterns(report)).toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+  });
+
+  test("PROOF: the same bundle plus one real load fails, in the __require form", () => {
+    // The negative half, and the shape that matters: `bun build --external`
+    // compiles `require("x")` to `__require("x")`. A matcher anchored on `\b`
+    // cannot see it, so this must be recognised as an IMPORT, not merely as a
+    // bare name that happened to survive.
+    withRepo(
+      { name: "iapp-consumer", files: { "dist/index.js": `${INLINED_DECLARATION}var live = __require("${RETIRED}");\n` } },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+        const finding = report.findings.find((entry) => entry.pattern === RETIRED);
+        expect(finding?.message).toContain("module import");
+      },
+    );
+  });
+
+  test("PROOF: a planted credential in build output is still critical in a dist-only tarball", () => {
+    // The measurement the first attempt failed. `files: ["dist"]` keeps the
+    // source out of the tarball, so the compiled bare occurrence is the ONLY
+    // detector these three config patterns have.
+    withTarball(
+      {
+        "package.json": JSON.stringify({ name: "iapp-leaky", version: "1.0.0", files: ["dist"] }),
+        "dist/index.js": "var config = {\n  password: process.env." + RDS + ",\n  endpoint: process.env." + CLOUD_ENV + "API_URL\n};\nexport { config };\n",
+      },
+      (report) => {
+        expect(report.scanMode).toBe("packed_artifact");
+        const critical = report.findings.filter((entry) => entry.severity === "critical").map((entry) => entry.pattern);
+        expect(critical.sort()).toEqual([CLOUD_ENV, RDS]);
+        expect(report.verdict).toBe("failed");
+      },
+    );
+  });
+
+  test("PROOF: a credential sitting NEXT TO the inlined declaration is still reported", () => {
+    // Per-occurrence, not per-file. Both previous attempts returned early for
+    // the whole file, which is what took the credential detectors with them.
+    withTarball(
+      {
+        "package.json": JSON.stringify({ name: "iapp-consumer", version: "1.0.0", files: ["dist"] }),
+        "dist/index.js": `${INLINED_DECLARATION}var leaked = process.env.${RDS};\nexport { leaked };\n`,
+      },
+      (report) => {
+        expect(report.findings.map((entry) => entry.pattern)).toEqual([RDS]);
+        expect(report.findings[0]?.severity).toBe("critical");
+      },
+    );
+  });
+
+  test("a row cannot pair a pattern with a message that is not that pattern's own", () => {
+    // The hole in matching the SHAPE of a row rather than its content: a
+    // three-key object would otherwise let any repo silence any pattern, and
+    // carry an arbitrary string in the `message` slot while doing it.
+    for (const row of [
+      // An invented message.
+      `var x = [{ pattern: "${RDS}", kind: "config", message: "nothing to see" }];`,
+      // Another entry's message. (Spelled without naming a second pattern, or
+      // the fixture would report that one too and say nothing about this rule.)
+      `var x = [{ pattern: "${RDS}", kind: "config", message: "Legacy cloud-m" + "cp runtime surface is forbidden" }];`,
+      // Its own message, under the wrong `kind`.
+      `var x = [{ pattern: "${RDS}", kind: "module", message: "Legacy shared RDS credential config is forbidden" }];`,
+      // Its own message and kind, but as a two-key row with no `pattern` key.
+      `var x = [{ kind: "config", message: "Legacy shared RDS credential config is forbidden", name: "${RDS}" }];`,
+    ]) {
+      withRepo({ name: "iapp-consumer", files: { "dist/index.js": `${row}\nexport { x };\n` } }, (report) => {
+        expect(patterns(report), row).toEqual([`dist/index.js:${RDS}`]);
+      });
+    }
+    // And the row that IS this table's own row is attributed.
+    withRepo(
+      {
+        name: "iapp-consumer",
+        files: {
+          "dist/index.js":
+            `var x = [{ pattern: "${RDS}", kind: "config", message: "Legacy shared RDS credential config is forbidden" }];\nexport { x };\n`,
+        },
+      },
+      (report) => {
+        expect(patterns(report)).toEqual([]);
+      },
+    );
+  });
+
+  test("the denylist array must equal the constant element for element", () => {
+    // A longer array, a shorter one, and a reordered one are all somebody
+    // else's data. Only the constant this package declares is attributable.
+    for (const array of [
+      `["${RETIRED}", "${OTHER}", "left-pad"]`,
+      `["${RETIRED}"]`,
+      `["${OTHER}", "${RETIRED}"]`,
+    ]) {
+      withRepo({ name: "iapp-consumer", files: { "dist/index.js": `var deny = ${array};\nexport { deny };\n` } }, (report) => {
+        expect(report.verdict, array).toBe("failed");
+      });
+    }
+    withRepo(
+      { name: "iapp-consumer", files: { "dist/index.js": `var deny = ["${RETIRED}", "${OTHER}"];\nexport { deny };\n` } },
+      (report) => {
+        expect(report.verdict).toBe("passed");
+      },
+    );
+  });
+
+  test("a copy of the denylist read in place is a load, not a declaration", () => {
+    // `__require(["a","b"][0])` is a real load whose specifier never appears in
+    // specifier position. Indexing, calling and member access all consume the
+    // collection where it stands.
+    for (const source of [
+      `var m = __require(["${RETIRED}", "${OTHER}"][0]);`,
+      `var m = ["${RETIRED}", "${OTHER}"].map((n) => __require(n));`,
+      `var m = load(["${RETIRED}", "${OTHER}"]);`,
+    ]) {
+      withRepo({ name: "iapp-consumer", files: { "dist/index.js": `${source}\nexport { m };\n` } }, (report) => {
+        expect(report.verdict, source).toBe("failed");
+      });
+    }
+  });
+
+  test("a copy of the denylist a load call names is a laundering route, not a declaration", () => {
+    // Stored under a name, then indexed through the name. The collection is in
+    // data position and nothing reads it on the spot, so only the name links the
+    // two — which is why the name is checked.
+    withRepo(
+      {
+        name: "iapp-consumer",
+        files: { "dist/index.js": `var DENY = ["${RETIRED}", "${OTHER}"];\nvar m = __require(DENY[0]);\nexport { m };\n` },
+      },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+      },
+    );
+    // The pair: the same declaration with no load call naming it.
+    withRepo(
+      {
+        name: "iapp-consumer",
+        files: { "dist/index.js": `var DENY = ["${RETIRED}", "${OTHER}"];\nvar m = DENY.length;\nexport { m };\n` },
+      },
+      (report) => {
+        expect(report.verdict).toBe("passed");
+      },
+    );
+    // A NESTED CALL IN AN EARLIER ARGUMENT is still the same load call. The
+    // argument capture used to stop at the first `)`, so `norm(base)` was the
+    // whole of what the bound-name test ever saw and the declaration below it
+    // was attributed and blanked — with the array in inert position, the name is
+    // the only thing standing between it and a clean scan.
+    withRepo(
+      {
+        name: "iapp-consumer",
+        files: {
+          "dist/index.js": `var DENY = ["${RETIRED}", "${OTHER}"];\nvar m = __require(norm(base), DENY[0]);\nexport { m };\n`,
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+        expect(patterns(report).sort()).toEqual([`dist/index.js:${RETIRED}`, `dist/index.js:${OTHER}`].sort());
+      },
+    );
+    // Its pair: the same nesting under a callee that resolves nothing.
+    withRepo(
+      {
+        name: "iapp-consumer",
+        files: {
+          "dist/index.js": `var DENY = ["${RETIRED}", "${OTHER}"];\nvar m = harmless(norm(base), DENY[0]);\nexport { m };\n`,
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("passed");
+      },
+    );
+  });
+
+  test("PROOF: an inlined package.json manifest is a true positive with zero specifiers", () => {
+    // `import pkg from "../package.json" with { type: "json" }` makes the
+    // bundler inline the whole manifest, `dependencies` included. Confirmed real
+    // in `hasna/evals`' `dist/mcp/index.js`. This is the counterexample that
+    // rules out "a bare mention with no import specifier is a false positive":
+    // there is no specifier anywhere in this file.
+    const inlinedManifest =
+      "var package_default = {\n" +
+      '  name: "iapp-tp-manifest",\n' +
+      '  version: "1.0.0",\n' +
+      `  dependencies: { "${RETIRED}": "0.1.24" }\n` +
+      "};\nexport { package_default };\n";
+    expect(inlinedManifest).not.toContain('from "');
+    withTarball(
+      {
+        "package.json": JSON.stringify({ name: "iapp-tp-manifest", version: "1.0.0", files: ["dist"] }),
+        "dist/mcp/index.js": inlinedManifest,
+      },
+      (report) => {
+        expect(report.findings.map((entry) => entry.pattern)).toEqual([RETIRED]);
+        expect(report.findings[0]?.severity).toBe("critical");
+      },
+    );
+  });
+
+  test("PROOF: the runtime-config detectors still fire in build output", () => {
+    // The three patterns with no import to look for, each read out of a
+    // `dist/` file, because those are the ones a path exemption silences.
+    for (const [pattern, source] of [
+      [CLOUD_ENV, `var url = process.env.${CLOUD_ENV}API_URL;\nexport { url };\n`],
+      [RDS, `var secret = process.env.${RDS};\nexport { secret };\n`],
+      [DOTDIR, `var home = join(homedir(), "${DOTDIR}");\nexport { home };\n`],
+    ] as const) {
+      withRepo({ name: "iapp-consumer", files: { "dist/index.js": source } }, (report) => {
+        expect(patterns(report), pattern).toContain(`dist/index.js:${pattern}`);
+      });
+    }
+  });
+
+  test("no path is exempt, and no package identity is either", () => {
+    // The two mechanisms this replaces. Attribution reads content, so the same
+    // bytes get the same verdict at every path and under every package name —
+    // and `git mv` cannot change a verdict.
+    for (const path of ["src/gate.ts", "dist/index.js", "lib/gate.js", "bin/gate.js", "scripts/gate.ts"]) {
+      withRepo({ name: "iapp-consumer", files: { [path]: INLINED_DECLARATION } }, (report) => {
+        expect(report.verdict, path).toBe("passed");
+      });
+      withRepo(
+        { name: "iapp-consumer", files: { [path]: `${INLINED_DECLARATION}var leaked = process.env.${RDS};\nexport { leaked };\n` } },
+        (report) => {
+          expect(patterns(report), path).toEqual([`${path}:${RDS}`]);
+        },
+      );
+    }
+    // Byte-identical file, only the package NAME differs. Published 0.8.1 and
+    // 0.8.2 PASSED the first of these with zero findings and FAILED the second
+    // with two criticals, because the exemption was claimed by package identity.
+    const leak = `${DENYLIST_ARRAY}\nvar leaked = process.env.${RDS};\nexport { leaked };\n`;
+    for (const name of ["@hasna/contracts", "iapp-not-contracts"]) {
+      withRepo({ name, files: { "dist/no-cloud.js": leak } }, (report) => {
+        expect(patterns(report), name).toEqual([`dist/no-cloud.js:${RDS}`]);
+      });
+    }
+  });
+
+  test("a manifest is never text-edited on the strength of a shape match", () => {
+    // Attribution is for C-family source, because that is the only thing a
+    // bundler inlines a JavaScript constant into. A `package.json` array that
+    // happens to equal the denylist is the subject's own data in the subject's
+    // own manifest, and the manifest is the one file the scan must read whole.
+    withRepo(
+      {
+        files: {
+          "package.json": JSON.stringify({ name: "iapp-consumer", version: "1.0.0", keywords: [RETIRED, OTHER] }),
+        },
+      },
+      (report) => {
+        expect(patterns(report).sort()).toEqual([`package.json:${RETIRED}`, `package.json:${OTHER}`].sort());
+      },
+    );
+  });
+
+  test("a file living at the legacy config dotdir is read as runtime config", () => {
+    // `shouldReadPath` decides this off the pattern table. It used to re-spell
+    // the dotdir, and that copy was code rather than data — so a bundler inlined
+    // it into every consumer where nothing structural could explain it.
+    withRepo({ name: "iapp-consumer", files: { ".hasna/cloud/state.json": '{ "token": "x" }\n' } }, (report) => {
+      const finding = report.findings.find((entry) => entry.pattern === DOTDIR);
+      expect(finding?.kind).toBe("runtime_config");
+      expect(report.verdict).toBe("failed");
+    });
+  });
+
+  test("this repo does not spell a forbidden name outside the pattern table", () => {
+    // The two `.hasna/cloud` copies that used to sit at finding sites were CODE,
+    // not data, so no structural rule could ever attribute them — and a bundler
+    // inlined them into every consumer just the same. Reading them off the table
+    // is what makes the consumer's artifact attributable end to end.
+    const scanner = readFileSync(join(import.meta.dir, "..", "src", "no-cloud.ts"), "utf8");
+    const table = scanner.slice(scanner.indexOf("const RUNTIME_PATTERNS = ["), scanner.indexOf("] as const satisfies"));
+    const code = maskComments(scanner.replace(table, ""), "c-like");
+    for (const pattern of [RETIRED, OTHER, LEGACY_MCP, DOTDIR, CLOUD_ENV, RDS]) {
+      expect(code.includes(pattern), `${pattern} is spelled outside RUNTIME_PATTERNS`).toBe(false);
+    }
+    // Positive control: the table itself does contain them, so the slice above
+    // is not silently empty.
+    expect(table).toContain(RDS);
+    expect(table).toContain(RETIRED);
+  });
+});
+
+describe("source-text: inert data regions and load callees", () => {
+  test("inlineDataRegions reads arrays, records and nesting, and refuses anything else", () => {
+    const array = 'var deny = ["a", "b"];';
+    const [region] = inlineDataRegions(array, ["a"]);
+    expect(region?.boundName).toBe("deny");
+    expect(region?.root.kind).toBe("array");
+    expect(inlineDataNodes(region!.root).filter((node) => node.kind === "string").length).toBe(2);
+
+    // Nesting: the OUTERMOST collection is the region, because it carries the
+    // name a later load call would have to use.
+    const nested = 'var rows = [{ pattern: "a", kind: "module" }];';
+    const [outer] = inlineDataRegions(nested, ["a"]);
+    expect(outer?.boundName).toBe("rows");
+    expect(outer?.root.kind).toBe("array");
+
+    // Anything that is not a constant ends the parse, so no region is produced.
+    for (const source of [
+      'var deny = ["a", compute()];',
+      'var deny = ["a", NAME];',
+      "var deny = [`a${x}`];",
+      'var deny = { [key]: "a" };',
+    ]) {
+      expect(inlineDataRegions(source, ["a"]), source).toEqual([]);
+    }
+  });
+
+  test("inlineDataRegions refuses a collection consumed on the spot or passed to a call", () => {
+    for (const source of ['require(["a"][0]);', 'var m = ["a"].map(load);', "var m = load([\"a\"]);", 'var m = ["a"](0);']) {
+      expect(inlineDataRegions(source, ["a"]), source).toEqual([]);
+    }
+    // `=` must be an assignment, not a comparison.
+    expect(inlineDataRegions('var same = x === ["a"];', ["a"])).toEqual([]);
+    // A control head's `(` calls nothing, so the argument rule does not reach it
+    // — and a condition stores nothing either. This is the half of "a `(` after
+    // an identifier" that the bracket stack cannot answer.
+    expect(inlineDataRegions('while (["a"]) {}', ["a"])).toEqual([]);
+  });
+
+  test("a text the lexer cannot read yields no regions at all", () => {
+    // Whether a collection is an ARGUMENT is a question about brackets, and the
+    // lexer is what tracks them. When it loses the thread nothing is attributed,
+    // so every occurrence in the file is reported — the same direction
+    // `maskComments` fails in on the same text.
+    expect(inlineDataRegions('var deny = ["a", "b"];\n/* unterminated\n', ["a"])).toEqual([]);
+    // The pair: close the comment and the same declaration is a region again.
+    expect(inlineDataRegions('var deny = ["a", "b"];\n/* terminated */\n', ["a"]).length).toBe(1);
+  });
+
+  test("loadCallMentions sees the bundler's require wrapper, not just require", () => {
+    expect(loadCallMentions("var m = __require(DENY[0]);", "DENY")).toBe(true);
+    expect(loadCallMentions("var m = require(DENY[0]);", "DENY")).toBe(true);
+    expect(loadCallMentions("var m = await import(DENY[0]);", "DENY")).toBe(true);
+    expect(loadCallMentions("var m = DENY.length;", "DENY")).toBe(false);
+    // A name that merely CONTAINS the bound name is a different name.
+    expect(loadCallMentions("var m = __require(DENYLIST[0]);", "DENY")).toBe(false);
+  });
+
+  test("loadCallMentions reads the WHOLE argument list, nested calls included", () => {
+    // `[^)]*` stopped at the first `)`, so one nested call in an earlier argument
+    // was enough to hide the name the load actually uses.
+    expect(loadCallMentions("var m = __require(norm(base), DENY[0]);", "DENY")).toBe(true);
+    expect(loadCallMentions("var m = __require(opts.get(k), DENY[0]);", "DENY")).toBe(true);
+    expect(loadCallMentions("var m = require(resolveFrom(dir), DENY[0]);", "DENY")).toBe(true);
+    expect(loadCallMentions("var m = Module._load(x(), DENY[0]);", "DENY")).toBe(true);
+    // A `)` inside a string argument does not end the list either.
+    expect(loadCallMentions('var m = __require("a)b", DENY[0]);', "DENY")).toBe(true);
+    // THE PAIR. A callee that resolves nothing withdraws nothing, however its
+    // arguments nest; and the name is still matched whole, not as a substring.
+    expect(loadCallMentions("var m = harmless(norm(base), DENY[0]);", "DENY")).toBe(false);
+    expect(loadCallMentions("var m = __require(norm(base), DENYLIST[0]);", "DENY")).toBe(false);
+    // The list ends where its `)` does: a name AFTER the call is not an argument.
+    expect(loadCallMentions("var m = __require(norm(base));\nvar n = DENY[0];", "DENY")).toBe(false);
+  });
+
+  test("importsModule recognises the __require form bun build --external emits", () => {
+    expect(importsModule(`var legacy = __require("${RETIRED}");`, RETIRED)).toBe(true);
+    expect(importsModule(`var legacy = require("${RETIRED}");`, RETIRED)).toBe(true);
+    // Still a path SEGMENT, not a substring.
+    expect(importsModule('var legacy = __require("open-cloudy");', "open-cloud")).toBe(false);
+  });
+});
+
+describe("source-text: a tuple type is inert, but not when a member is read out of it", () => {
+  test("the .d.ts shape tsc emits beside every bundle is attributable", () => {
+    // `export declare const FORBIDDEN_SHARED_CLOUD_RUNTIMES: readonly ["…"];`
+    // is emitted into `dist/schemas.d.ts` on every build, and the scanner failed
+    // its own shipped artifact on it.
+    const declaration = 'export declare const DENY: readonly ["a", "b"];';
+    expect(inlineDataRegions(declaration, ["a"]).length).toBe(1);
+    // But a member read out of a tuple type is still a read, and there is no
+    // reason for the type keyword to buy an exemption the value form is denied.
+    expect(inlineDataRegions('type T = readonly ["a", "b"][0];', ["a"])).toEqual([]);
+  });
+});
+
+describe("no-cloud gate: attribution survives a minifier, and does not take the credential detector with it", () => {
+  // Measured emission of `bun build --minify` on a consumer that imports this
+  // package: whitespace gone, the variable renamed to `HA`, the string literals
+  // untouched. Attribution matches on CONTENT, so the rename is irrelevant — and
+  // a path or identifier rule would have had nothing left to key on.
+  const RETIRED_NAME = ["@hasna/", "cloud"].join("");
+  const OTHER_NAME = ["open-", "cloud"].join("");
+  const RDS_KEY = ["HASNA_RDS", "_PASSWORD"].join("");
+  const minified =
+    `var SA={},HA=["${RETIRED_NAME}","${OTHER_NAME}"],qU=[{pattern:"${RDS_KEY}",kind:"config",message:"Legacy shared RDS credential config is forbidden"}];` +
+    "export{HA,qU,SA};";
+
+  test("a minified bundle of this package passes", () => {
+    withRepo({ name: "iapp-consumer-min", files: { "dist/index.js": minified } }, (report) => {
+      expect(patterns(report)).toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+  });
+
+  test("the same minified bundle plus a planted credential fails on the credential", () => {
+    withRepo(
+      { name: "iapp-consumer-min", files: { "dist/index.js": `${minified}var leaked=process.env.${RDS_KEY};export{leaked};` } },
+      (report) => {
+        expect(patterns(report)).toEqual([`dist/index.js:${RDS_KEY}`]);
+        expect(report.verdict).toBe("failed");
+      },
+    );
+  });
+});
+
+describe("source-text: a collection must be STORED, not just written down somewhere", () => {
+  // FOUND BY A GAP IN THE MUTATION AUDIT, not by reading the code. Narrowing the
+  // audit to the test files that contain no self-conformance scan reported M79 —
+  // "a collection handed to a call is an argument, not a stored constant" —
+  // SURVIVED. It had been reading as `caught` because weakening it also makes the
+  // repo fail its own gate, and that broad failure was the first one reported for
+  // every mutation in the block.
+  //
+  // The shape it protects, and the reason it is not covered by the
+  // consumed-in-place rule: `for (const m of [...])` puts the collection in no
+  // binding at all, so there is no name for a load call to mention, and the
+  // character after `]` is `)`, which consumes nothing. Only the position BEFORE
+  // the `[` says this is not a stored constant.
+  const RETIRED_MODULE = ["@hasna/", "cloud"].join("");
+  const OTHER_MODULE = ["open-", "cloud"].join("");
+
+  test("a collection in a non-storing position is not a declaration", () => {
+    for (const source of [
+      `for (const m of ["${RETIRED_MODULE}", "${OTHER_MODULE}"]) __require(m);`,
+      `return ["${RETIRED_MODULE}", "${OTHER_MODULE}"];`,
+      `yield ["${RETIRED_MODULE}", "${OTHER_MODULE}"];`,
+      `typeof ["${RETIRED_MODULE}", "${OTHER_MODULE}"];`,
+    ]) {
+      expect(inlineDataRegions(source, [RETIRED_MODULE]), source).toEqual([]);
+    }
+  });
+
+  test("the for-of shape is still a finding end to end", () => {
+    withRepo(
+      {
+        name: "iapp-consumer",
+        files: {
+          "dist/index.js": `for (const m of ["${RETIRED_MODULE}", "${OTHER_MODULE}"]) __require(m);\nexport const ok = true;\n`,
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+        expect(patterns(report).sort()).toEqual(
+          [`dist/index.js:${RETIRED_MODULE}`, `dist/index.js:${OTHER_MODULE}`].sort(),
+        );
+      },
+    );
+    // The pair: the same two names, stored, with nothing loading through them.
+    withRepo(
+      {
+        name: "iapp-consumer",
+        files: { "dist/index.js": `var DENY = ["${RETIRED_MODULE}", "${OTHER_MODULE}"];\nexport { DENY };\n` },
+      },
+      (report) => {
+        expect(report.verdict).toBe("passed");
+      },
+    );
+  });
+
+  test("an argument is not a stored constant WHEREVER it sits in the list", () => {
+    // The character before the `[` can only ever see the FIRST argument.
+    // `load([...])` was rejected on the `(` while `load(cfg, [...])` landed on a
+    // `,` and was read as a stored constant — attributed, blanked, and scanned
+    // clean, which the base branch did not do. An argument is the callee's to do
+    // what it likes with, and `list.forEach((m) => __require(m))` one module away
+    // is the same load the for-of case above is rejected for.
+    for (const source of [
+      `var mods = registerAll(ctx, ["${RETIRED_MODULE}", "${OTHER_MODULE}"]);`,
+      `var mods = load(1, 2, ["${RETIRED_MODULE}", "${OTHER_MODULE}"]);`,
+      `var mods = register("app", ["${RETIRED_MODULE}", "${OTHER_MODULE}"]);`,
+      `loadAll(cfg, ["${RETIRED_MODULE}", "${OTHER_MODULE}"]).then(run);`,
+      // The immediately-invoked resolver, whose callee has no name to check.
+      `var mods = createRequire(url)(ctx, ["${RETIRED_MODULE}", "${OTHER_MODULE}"]);`,
+      // A ternary alternate ends on the same `:` a record key does, and stores
+      // nothing either.
+      `var mods = cond ? fallback : ["${RETIRED_MODULE}", "${OTHER_MODULE}"];`,
+    ]) {
+      expect(inlineDataRegions(source, [RETIRED_MODULE]), source).toEqual([]);
+    }
+    // THE PAIR, and the bound the argument rule needs. Only the INNERMOST
+    // bracket decides: a constant declared inside a callback BODY sits under a
+    // call frame too, and `__commonJS((exports) => { … })` is what a bundler
+    // emits for every CommonJS module it wraps. Rejecting on any enclosing call
+    // would unattribute all of them.
+    const wrapped =
+      `var mod = __commonJS((exports) => {\n  var DENY = ["${RETIRED_MODULE}", "${OTHER_MODULE}"];\n  exports.DENY = DENY;\n});`;
+    expect(inlineDataRegions(wrapped, [RETIRED_MODULE]).length).toBe(1);
+    // And a record entry is still a record entry: that `:` is a key's.
+    expect(inlineDataRegions(`var t = { deny: ["${RETIRED_MODULE}"] };`, [RETIRED_MODULE]).length).toBe(1);
+  });
+
+  test("the argument shape is still a finding end to end, in src/ as well as dist/", () => {
+    // The same fixture as the first-argument case above, with one leading
+    // argument. Attribution consults no path, so both have to behave the same
+    // way wherever they land.
+    for (const path of ["src/boot.ts", "dist/boot.js"]) {
+      withRepo(
+        {
+          name: "iapp-consumer",
+          files: { [path]: `export const mods = registerAll(ctx, ["${RETIRED_MODULE}", "${OTHER_MODULE}"]);\n` },
+        },
+        (report) => {
+          expect(report.verdict, path).toBe("failed");
+          expect(patterns(report).sort(), path).toEqual(
+            [`${path}:${RETIRED_MODULE}`, `${path}:${OTHER_MODULE}`].sort(),
+          );
+        },
+      );
+      // The pair: the same two names stored rather than handed to a call.
+      withRepo(
+        { name: "iapp-consumer", files: { [path]: `export const mods = ["${RETIRED_MODULE}", "${OTHER_MODULE}"];\n` } },
+        (report) => {
+          expect(report.verdict, path).toBe("passed");
+        },
+      );
+    }
+  });
+});
+
+describe("no-cloud gate: a blanked span may carry nothing but the row this table emits", () => {
+  // THE BLOCKING DEFECT A REVIEW FOUND, and it is the same shape as the rejection
+  // that killed the first attempt at this fix. `isOwnPatternDeclaration` checked
+  // three keys and ignored the rest of the key set, while
+  // `withoutInlinedDeclarations` blanks the WHOLE record. So a verbatim
+  // `{pattern, kind, message}` triple plus one more key smuggled anything at all
+  // through the blanked span — and the three `config` patterns have no second
+  // detector, so blanking a span is the only thing standing between them and a
+  // clean scan.
+  //
+  // Measured before the key-set bound existed, as a tarball under a third-party
+  // package name: the forge scored EXIT=0 with zero findings while the identical
+  // credential string WITHOUT a triple around it scored EXIT=1. In authored
+  // `src/` as well as in build output.
+  const RETIRED_ROW = ["@hasna/", "cloud"].join("");
+  const CONFIG_ROW = ["HASNA_CLOUD", "_"].join("");
+  const CREDENTIAL = ["HASNA_RDS", "_PASSWORD"].join("");
+  const DOTDIR_ROW = [".hasna/", "cloud"].join("");
+  const verbatimRow =
+    `{ pattern: "${RETIRED_ROW}", kind: "module", message: "Shared ${RETIRED_ROW} runtime reference is forbidden" }`;
+
+  test("the row this table emits is attributed", () => {
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${verbatimRow}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+  });
+
+  test("a verbatim row plus ONE extra key is not that row, and the extra key is read", () => {
+    const forged = verbatimRow.replace(
+      " }",
+      `, note: "${CREDENTIAL}=placeholder-not-a-real-value" }`,
+    );
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${forged}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the smuggled credential must be reported").toContain(`dist/bundle.js:${CREDENTIAL}`);
+      expect(report.verdict).toBe("failed");
+    });
+  });
+
+  test("checkKind is a FREE SLOT unless its value is compared too", () => {
+    // F1b, the second review blocker, and the reason the record rule is now full
+    // equality rather than another narrowing. `checkKind` is declared on exactly
+    // one table row, but bounding the key set to a union over ALL rows admitted it
+    // on all eight — and the check was that it held A string, never the RIGHT one.
+    // A backtick literal then made the blanked span multi-line and arbitrarily
+    // long. Measured before entry-for-entry equality, as tarballs under a
+    // third-party package name:
+    //
+    //   verbatim module row + checkKind holding a credential  EXIT=0, 0 findings
+    //     control: the same string with no triple             EXIT=1, 1 critical
+    //   verbatim config row + backtick checkKind, four
+    //     patterns over five lines                            EXIT=0, 0 findings
+    //   the same slot in hand-authored src/table.ts           EXIT=0, 0 findings
+    const forged =
+      `{ pattern: "${RETIRED_ROW}", kind: "module", checkKind: "${CREDENTIAL}=placeholder", ` +
+      `message: "Shared ${RETIRED_ROW} runtime reference is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${forged}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "a module row never carries checkKind, so this is not that row").toContain(
+        `dist/bundle.js:${CREDENTIAL}`,
+      );
+      expect(report.verdict).toBe("failed");
+    });
+    // A backtick value, so the span it would have blanked runs over five lines.
+    const multiline =
+      `{ pattern: "${CONFIG_ROW}", kind: "config", checkKind: \`\n  ${CREDENTIAL}\n  ${DOTDIR_ROW}\n\`, ` +
+      `message: "Shared ${CONFIG_ROW}* runtime config is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${multiline}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toContain(`dist/bundle.js:${CREDENTIAL}`);
+    });
+    // THE PAIR: the genuine `.hasna/cloud` row, which really does carry
+    // `checkKind`, with its own value. Four keys, all equal — attributed.
+    const genuine =
+      `{ pattern: "${DOTDIR_ROW}", kind: "config", checkKind: "runtime_config", ` +
+      `message: "Legacy ${DOTDIR_ROW} runtime config is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${genuine}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the one row that really carries checkKind must still be attributed").toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+    // And that same row with checkKind holding somebody else's string is not it.
+    const wrongValue = genuine.replace('"runtime_config"', `"${CREDENTIAL}"`);
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${wrongValue}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toContain(`dist/bundle.js:${CREDENTIAL}`);
+    });
+  });
+
+  test("a REPEATED key is a FREE SLOT unless the parser refuses the record", () => {
+    // F1c, the third review blocker, and the one that survived entry-for-entry
+    // equality. Duplicate property names are legal JavaScript that a bundler
+    // preserves, and `parseInlineData` used to build the entries with `Map.set` —
+    // which keeps the LAST value and shrinks the count. So a record repeating
+    // `message` arrived at `isOwnPatternDeclaration` as a THREE-entry record whose
+    // every entry equalled a module row, and `withoutInlinedDeclarations` blanked
+    // the whole span including the shadowed value nothing had compared.
+    //
+    // Measured before the parser refused it, as tarballs under a third-party
+    // package name, each against a control that fails:
+    //
+    //   verbatim module row + shadowed `message` holding a
+    //     credential env key                                  EXIT=0, 0 findings
+    //     control: the same credential with no record          EXIT=1, 1 critical
+    //   the same slot carrying three config patterns at once   EXIT=0, 0 findings
+    //   a backtick in the shadowed slot, span over five lines  EXIT=0, 0 findings
+    //
+    // The `config` patterns have no import to look for, so the bare-mention
+    // detector is their only one and a blanked span is the whole of what stands
+    // between them and a clean scan. The fix is in `parseInlineData`, not here: a
+    // duplicate key means the text is not the inert constant this package emits,
+    // so refusing to describe it is the fail-open direction.
+    const shadowed =
+      `{ pattern: "${RETIRED_ROW}", kind: "module", message: "${CREDENTIAL}=placeholder-not-a-real-value", ` +
+      `message: "Shared ${RETIRED_ROW} runtime reference is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${shadowed}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the credential in the shadowed entry must be reported").toContain(
+        `dist/bundle.js:${CREDENTIAL}`,
+      );
+      expect(report.verdict).toBe("failed");
+    });
+    // One shadowed slot hid the credential AND all three config patterns at once,
+    // on a plain assignment with no aliasing.
+    const manyPatterns = shadowed.replace(
+      `"${CREDENTIAL}=placeholder-not-a-real-value"`,
+      `"${CREDENTIAL} ${DOTDIR_ROW} ${CONFIG_ROW}"`,
+    );
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${manyPatterns}];\nexport { t };\n` } }, (report) => {
+      for (const pattern of [CREDENTIAL, DOTDIR_ROW, CONFIG_ROW]) {
+        expect(patterns(report), pattern).toContain(`dist/bundle.js:${pattern}`);
+      }
+      expect(report.verdict).toBe("failed");
+    });
+    // A backtick in the shadowed slot, so the span it would have blanked is
+    // multi-line and arbitrarily long.
+    const multiline = shadowed.replace(
+      `"${CREDENTIAL}=placeholder-not-a-real-value"`,
+      `\`\n  ${CREDENTIAL}\n  ${DOTDIR_ROW}\n\``,
+    );
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${multiline}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toContain(`dist/bundle.js:${CREDENTIAL}`);
+      expect(report.verdict).toBe("failed");
+    });
+    // The record as the region ROOT, not just as an element of one.
+    withRepo({ name: "@acme/consumer-app", files: { "src/table.ts": `export const t = ${shadowed};\n` } }, (report) => {
+      expect(patterns(report), "hand-authored source, same content, same verdict").toContain(
+        `src/table.ts:${CREDENTIAL}`,
+      );
+    });
+    // THE PAIR, both arities: the genuine three-entry module row and the genuine
+    // four-entry config row repeat no key, and must still be attributed.
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${verbatimRow}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the 3-key row this table emits must still be attributed").toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+    const genuineFourKey =
+      `{ pattern: "${DOTDIR_ROW}", kind: "config", checkKind: "runtime_config", ` +
+      `message: "Legacy ${DOTDIR_ROW} runtime config is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${genuineFourKey}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the 4-key row this table emits must still be attributed").toEqual([]);
+      expect(report.verdict).toBe("passed");
+    });
+  });
+
+  test("the parser refuses a duplicate-key record outright", () => {
+    // The rule lives in `parseInlineData`, so it is tested where it lives as well
+    // as end to end: a record with a repeated key describes nothing, and neither
+    // does any collection around it, so no span is ever blanked on its strength.
+    const duplicate = `var t = [{ pattern: "${RETIRED_ROW}", kind: "module", message: "a", message: "b" }];`;
+    expect(inlineDataRegions(duplicate, [RETIRED_ROW])).toEqual([]);
+    // A quoted key shadowing a bare one is the same key, and is refused too.
+    const quotedDuplicate = `var t = [{ pattern: "${RETIRED_ROW}", kind: "module", "kind": "config", message: "b" }];`;
+    expect(inlineDataRegions(quotedDuplicate, [RETIRED_ROW])).toEqual([]);
+    // The pair: distinct keys still parse, and the region is still found.
+    const distinct = `var t = [{ pattern: "${RETIRED_ROW}", kind: "module", message: "b" }];`;
+    expect(inlineDataRegions(distinct, [RETIRED_ROW]).length).toBe(1);
+  });
+
+  test("an accepted key cannot hold a nested collection", () => {
+    // Bounding the keys is not enough on its own: one key holding an object hides
+    // a whole table inside the blanked span. Entry-for-entry equality covers this
+    // as a side effect — a nested value is not equal to a string — but it is
+    // tested separately because the two rules can be broken independently.
+    const nested =
+      `{ pattern: "${DOTDIR_ROW}", kind: "config", checkKind: { a: "${CREDENTIAL}", b: "registerCloudTools" }, ` +
+      `message: "Legacy ${DOTDIR_ROW} runtime config is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${nested}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report), "the credential nested under an accepted key must be reported").toContain(
+        `dist/bundle.js:${CREDENTIAL}`,
+      );
+      expect(report.verdict).toBe("failed");
+    });
+  });
+
+  test("the bound holds in hand-authored source, not only in build output", () => {
+    // Attribution reads content and consults no path, so the forge and its
+    // rejection have to behave identically wherever they land. This is also the
+    // half a build-output path scope could never have covered.
+    const forged = verbatimRow.replace(" }", `, note: "${CREDENTIAL}=placeholder" }`);
+    for (const path of ["src/table.ts", "dist/bundle.js", "lib/table.js"]) {
+      withRepo({ name: "@acme/consumer-app", files: { [path]: `export const t = [${forged}];\n` } }, (report) => {
+        expect(patterns(report), path).toContain(`${path}:${CREDENTIAL}`);
+      });
+      withRepo({ name: "@acme/consumer-app", files: { [path]: `export const t = [${verbatimRow}];\n` } }, (report) => {
+        expect(patterns(report), path).toEqual([]);
+      });
+    }
+  });
+
+  test("the compared key set is the MATCHED row's, not a union over all rows", () => {
+    // The union was cause #1 of F1b: `checkKind` is declared on one row and the
+    // union admitted it on eight. Keys now come from the row being compared, so a
+    // module row carrying `checkKind` matches nothing — and the config row that
+    // really carries it still matches.
+    const moduleRowWithCheckKind =
+      `{ pattern: "${RETIRED_ROW}", kind: "module", checkKind: "runtime_config", ` +
+      `message: "Shared ${RETIRED_ROW} runtime reference is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${moduleRowWithCheckKind}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toContain(`dist/bundle.js:${RETIRED_ROW}`);
+    });
+    // A key that is in no row at all is rejected even holding an inert value.
+    const strangeKey =
+      `{ pattern: "${DOTDIR_ROW}", kind: "config", checkKind: "runtime_config", severity: "high", ` +
+      `message: "Legacy ${DOTDIR_ROW} runtime config is forbidden" }`;
+    withRepo({ name: "@acme/consumer-app", files: { "dist/bundle.js": `var t = [${strangeKey}];\nexport { t };\n` } }, (report) => {
+      expect(patterns(report)).toContain(`dist/bundle.js:${DOTDIR_ROW}`);
+    });
+  });
+});
+
+describe("source-text: resolver callees the underscore rule cannot reach", () => {
+  // A review reached a copy of the denylist through `Module._load(DENY[0])` and
+  // through a function returned by `createRequire`. The first is a member name, so
+  // `_*` never applies to it; the second has no word boundary before `Require` and
+  // differs in case. Both are spelled out in `LOAD_CALLEE` now.
+  //
+  // Only ONE of the two is actually closed by naming the callee, and the comment
+  // in `LOAD_CALLEE` says which: `Module._load(DENY[0])` names the array, so the
+  // bound-name check sees it. `var r = createRequire(…); r(DENY[0])` calls `r`,
+  // and no list of callee names can catch a name the caller chose — that route is
+  // conceded in the scope block at the top of `src/no-cloud.ts` rather than
+  // claimed here.
+  const DENY_A = ["@hasna/", "cloud"].join("");
+  const DENY_B = ["open-", "cloud"].join("");
+
+  test("Module._load counts as a load call", () => {
+    expect(loadCallMentions("var m = Module._load(DENY[0]);", "DENY")).toBe(true);
+    expect(loadCallMentions("var r = createRequire(DENY[0]);", "DENY")).toBe(true);
+    // Still a whole identifier, and still not just any call.
+    expect(loadCallMentions("var m = Module._loader(DENYLIST[0]);", "DENY")).toBe(false);
+    expect(loadCallMentions("var m = harmless(DENY[0]);", "DENY")).toBe(false);
+  });
+
+  test("a denylist copy loaded through Module._load is a finding", () => {
+    withRepo(
+      {
+        name: "@acme/consumer-app",
+        files: {
+          "dist/bundle.js": `var DENY = ["${DENY_A}", "${DENY_B}"];\nvar m = Module._load(DENY[0]);\nexport { m };\n`,
+        },
+      },
+      (report) => {
+        expect(report.verdict).toBe("failed");
+      },
+    );
+    // The pair: the same copy with a call that resolves nothing.
+    withRepo(
+      {
+        name: "@acme/consumer-app",
+        files: { "dist/bundle.js": `var DENY = ["${DENY_A}", "${DENY_B}"];\nvar m = harmless(DENY[0]);\nexport { m };\n` },
+      },
+      (report) => {
+        expect(report.verdict).toBe("passed");
+      },
+    );
   });
 });

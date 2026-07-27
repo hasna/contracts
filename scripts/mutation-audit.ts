@@ -13,7 +13,7 @@
 // A mutation that leaves the suite green is a rule with no test. That is a
 // defect in this file's terms, not a curiosity.
 
-import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 interface Mutation {
@@ -169,8 +169,8 @@ const MUTATIONS: Mutation[] = [
     id: "M19-nocloud-comments-are-not-code",
     rule: "a comment is prose; only code is an edge",
     file: "src/no-cloud.ts",
-    from: "  const masked = maskCommentsForPath(file.text, file.path);",
-    to: "  const masked = file.text;",
+    from: "  const masked = maskCommentsForPath(file.text, file.path);\n  // The exemption is withdrawn",
+    to: "  const masked = file.text;\n  // The exemption is withdrawn",
   },
   {
     id: "M20-nocloud-symbol-needs-an-import",
@@ -197,8 +197,8 @@ const MUTATIONS: Mutation[] = [
     id: "M23-nocloud-lockfile-is-a-graph",
     rule: "bun.lock is walked as a graph, not grepped",
     file: "src/no-cloud.ts",
-    from: "  if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity, packageName);",
-    to: "  return textFindings(file, severity, packageName);\n  if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity, packageName);",
+    from: "  if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity);",
+    to: "  return textFindings(file, severity);\n  if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity);",
   },
   {
     id: "M24-nocloud-unreadable-lockfile",
@@ -274,8 +274,8 @@ const MUTATIONS: Mutation[] = [
     id: "M33-nocloud-regex-literal-tracking",
     rule: "a quote inside a regex literal does not open a string",
     file: "src/source-text.ts",
-    from: "    if (character === \"/\" && regexCanStart(text.slice(Math.max(0, index - 64), index))) {",
-    to: "    if (false) {",
+    from: "      if (opensRegex) {",
+    to: "      if (false) {",
   },
   {
     id: "M34-nocloud-unterminated-masks-nothing",
@@ -309,29 +309,29 @@ const MUTATIONS: Mutation[] = [
     id: "M38-nocloud-alias-is-the-package-it-installs",
     rule: "a linked or npm-aliased resolution is the package it resolves to",
     file: "src/dependency-edge.ts",
-    from: "    if (node.alias !== null && forbidden.includes(node.alias)) return node.alias;",
-    to: "    if (false) return node.alias;",
+    from: "    if (node.alias !== null && forbidden.includes(node.alias)) found.add(node.alias);",
+    to: "    if (false) found.add(node.alias);",
   },
   {
     id: "M38b-nocloud-alias-is-not-a-substring",
     rule: "an alias lookup matches a whole name, never a substring",
     file: "src/dependency-edge.ts",
-    from: "    if (node.alias !== null && forbidden.includes(node.alias)) return node.alias;",
-    to: "    if (node.alias !== null && forbidden.some((entry) => node.alias!.includes(entry))) return node.alias;",
+    from: "    if (node.alias !== null && forbidden.includes(node.alias)) found.add(node.alias);",
+    to: "    if (node.alias !== null && forbidden.some((entry) => node.alias!.includes(entry))) found.add(node.alias);",
   },
   {
     id: "M39-nocloud-lockfile-walks-every-module-pattern",
     rule: "the lockfile walk covers every forbidden module name, not one constant",
     file: "src/no-cloud.ts",
-    from: "  const edges = lockfileEdges(file.text, FORBIDDEN_LOCKFILE_PACKAGES);",
-    to: "  const edges = lockfileEdges(file.text, FORBIDDEN_SHARED_CLOUD_RUNTIMES);",
+    from: "  const walk = lockfileWalk(file.text, FORBIDDEN_LOCKFILE_PACKAGES);",
+    to: "  const walk = lockfileWalk(file.text, FORBIDDEN_SHARED_CLOUD_RUNTIMES);",
   },
   {
     id: "M40-nocloud-allowlist-is-module-names-only",
     rule: "the guard-test allowlist never exempts runtime config",
     file: "src/no-cloud.ts",
-    from: '    } else if (!(guardTest && kind === "module") && masked.includes(pattern)) {',
-    to: "    } else if (!guardTest && masked.includes(pattern)) {",
+    from: '    } else if (!(guardTest && kind === "module") && bareMentionText.includes(pattern)) {',
+    to: "    } else if (!guardTest && bareMentionText.includes(pattern)) {",
   },
   {
     id: "M41-nocloud-specifier-is-matched-anywhere",
@@ -344,15 +344,15 @@ const MUTATIONS: Mutation[] = [
     id: "M42-nocloud-bare-import-needs-no-space",
     rule: "`import\"x\"` is the same side-effect import as `import \"x\"`",
     file: "src/source-text.ts",
-    from: "    String.raw`(?:\\bfrom\\s*|\\bimport\\s*\\(\\s*|\\brequire\\s*\\(\\s*|\\bimport\\s*)` + moduleSpecifier(moduleName),",
-    to: "    String.raw`(?:\\bfrom\\s*|\\bimport\\s*\\(\\s*|\\brequire\\s*\\(\\s*|\\bimport\\s+)` + moduleSpecifier(moduleName),",
+    from: "    String.raw`(?:\\bfrom\\s*|${LOAD_CALLEE}\\s*\\(\\s*|\\bimport\\s*)` + moduleSpecifier(moduleName),",
+    to: "    String.raw`(?:\\bfrom\\s*|${LOAD_CALLEE}\\s*\\(\\s*|\\bimport\\s+)` + moduleSpecifier(moduleName),",
   },
   {
     id: "M43-nocloud-lockfile-config-is-still-read",
     rule: "config patterns no edge can carry are still read out of bun.lock",
     file: "src/no-cloud.ts",
-    from: '  return [...edges.map((edge) => edgeFinding(edge, file.path, "lockfile", packageName)), ...lockfileTextFindings(file, severity)];',
-    to: '  return edges.map((edge) => edgeFinding(edge, file.path, "lockfile", packageName));',
+    from: "    ...lockfileTextFindings(file, severity)\n  ];",
+    to: "  ];",
   },
   {
     id: "M50-nocloud-utf16-index-alignment",
@@ -386,15 +386,15 @@ const MUTATIONS: Mutation[] = [
     id: "M54-nocloud-identity-reads-the-resolved-name",
     rule: "an aliased KEY is judged by the package its resolution names",
     file: "src/dependency-edge.ts",
-    from: "    if (forbidden.includes(node.name)) return node.name;",
-    to: "    if (false) return node.name;",
+    from: "    if (forbidden.includes(node.name)) found.add(node.name);",
+    to: "    if (false) found.add(node.name);",
   },
   {
     id: "M55-nocloud-dynamic-load-withdraws-exemption",
     rule: "a computed import in the guard test is a load, not a mention",
     file: "src/no-cloud.ts",
-    from: "  const guardTest = isNoCloudGuardTest(file.path) && !DYNAMIC_MODULE_LOAD.test(masked);",
-    to: "  const guardTest = isNoCloudGuardTest(file.path);",
+    from: "  if (DYNAMIC_MODULE_LOAD.test(masked)) return false;",
+    to: "  if (false) return false;",
   },
   {
     id: "M56-nocloud-symbols-need-code-to-read",
@@ -459,30 +459,477 @@ const MUTATIONS: Mutation[] = [
     from: "  return Object.values(workspaces).filter(isRecord).length <= 1;",
     to: "  return true;",
   },
+
+  // ---------------------------------------------------------------------
+  // The gate no longer scores its own inlined declaration as the consumer's
+  // breach — and every detector still runs on everything else in that file.
+  //
+  // Filter to these with `bun scripts/mutation-audit.ts attrib` — every id in
+  // this block carries that tag, which is what makes the filter usable.
+  //
+  // TWO DIRECTIONS, because this rule has failed review twice in the SAME
+  // direction. M71/M72/M80 revert the fix, so the false positive returns.
+  // Everything else pushes it TOO FAR — that is where a false-positive fix
+  // actually causes harm, and where the two rejected attempts landed: both
+  // returned early for a whole FILE and took the credential detectors with them.
+  // ---------------------------------------------------------------------
+  {
+    id: "M71-attrib-happens-at-all",
+    rule: "a consumer that bundles this package's own declaration is not in breach of it",
+    file: "src/no-cloud.ts",
+    from: "  const bareMentionText = withoutInlinedDeclarations(masked, file.path);",
+    to: "  const bareMentionText = masked;",
+  },
+  {
+    id: "M72-attrib-recognised-by-content",
+    rule: "the declaration is recognised, not merely parsed",
+    file: "src/no-cloud.ts",
+    from: "      if (isOwnPatternDeclaration(node)) spans.push({ start: node.start, end: node.end });",
+    to: "      if (false) spans.push({ start: node.start, end: node.end });",
+  },
+  {
+    id: "M73-attrib-is-per-occurrence-not-per-file",
+    rule: "attribution drops the declaration's own characters, never the whole file",
+    file: "src/no-cloud.ts",
+    from: "  return blankSpans(masked, spans);",
+    to: '  return spans.length > 0 ? "" : masked;',
+  },
+  {
+    id: "M74-attrib-array-must-match-length",
+    rule: "an array holding a SUBSET or SUPERSET of the denylist is somebody else's data",
+    file: "src/no-cloud.ts",
+    from: "      node.items.length === FORBIDDEN_SHARED_CLOUD_RUNTIMES.length &&",
+    to: "      true &&",
+  },
+  {
+    id: "M75-attrib-array-must-match-members",
+    rule: "an array of the right length but the wrong names is not the denylist",
+    file: "src/no-cloud.ts",
+    from: '      node.items.every((item, index) => item.kind === "string" && item.value === FORBIDDEN_SHARED_CLOUD_RUNTIMES[index])',
+    to: '      node.items.every((item) => item.kind === "string")',
+  },
+  {
+    id: "M76-attrib-row-equals-a-table-row-entry-for-entry",
+    rule: "a row must equal a table row's VALUES, not merely carry the right keys",
+    file: "src/no-cloud.ts",
+    from: "      return value?.kind === \"string\" && value.value === row[key];",
+    to: '      return value?.kind === "string";',
+  },
+  {
+    id: "M88-attrib-record-key-count-is-bounded",
+    rule: "an extra key means it is not the row, because the whole record gets blanked",
+    file: "src/no-cloud.ts",
+    from: "    if (keys.length !== node.entries.size) return false;",
+    to: "    if (false) return false;",
+  },
+  {
+    id: "M89-attrib-row-values-must-be-plain-strings",
+    rule: "a row's value cannot be a nested collection",
+    file: "src/no-cloud.ts",
+    from: "      return value?.kind === \"string\" && value.value === row[key];",
+    to: "      return value === undefined ? false : value.kind !== \"string\" ? true : value.value === row[key];",
+  },
+  {
+    id: "M90-attrib-row-keys-come-from-the-matched-row",
+    rule: "the key set is the MATCHED row's, not a union over all rows",
+    file: "src/no-cloud.ts",
+    from: "    const keys = Object.keys(row) as ReadonlyArray<keyof typeof row>;",
+    to: '    const keys = ["pattern", "kind", "message"] as unknown as ReadonlyArray<keyof typeof row>;',
+  },
+  {
+    id: "M77-attrib-row-shape-alone-is-not-enough",
+    rule: "a three-key row that names no known pattern is not this table's row",
+    file: "src/no-cloud.ts",
+    from: "  return RUNTIME_PATTERNS.some(",
+    to: "  return true || RUNTIME_PATTERNS.some(",
+  },
+  {
+    id: "M78-attrib-not-read-in-place",
+    rule: "indexing, calling or member-accessing a collection is a load, not a declaration",
+    file: "src/source-text.ts",
+    from: '  if (next.startsWith("[") || next.startsWith("(") || next.startsWith(".") || next.startsWith("?.")) return false;',
+    to: "  if (false) return false;",
+  },
+  {
+    id: "M79-attrib-must-sit-in-data-position",
+    rule: "a collection handed to a call is an argument, not a stored constant",
+    file: "src/source-text.ts",
+    from: '    if (!typePosition && !(last === "=" || last === "[" || last === "," || last === ":" || last === "(")) return false;',
+    to: "    if (false) return false;",
+  },
+  {
+    id: "M79b-attrib-call-argument-is-not-a-declaration",
+    rule: "a `(` that follows an identifier is a CALL, and its argument is not a declaration",
+    file: "src/source-text.ts",
+    from: '    if (last === "(" && IDENTIFIER_TAIL.test(before.slice(0, -1))) return false;',
+    to: "    if (false) return false;",
+  },
+  {
+    id: "M79c-attrib-an-argument-is-not-a-declaration-in-any-position",
+    rule: "a collection handed to a call is an argument WHEREVER it sits in the list, not only first",
+    file: "src/source-text.ts",
+    from: "  if (callArgumentOpeners.has(start)) return false;",
+    to: "  if (false) return false;",
+  },
+  {
+    id: "M79d-attrib-only-the-innermost-bracket-decides",
+    rule: "a constant declared in a callback BODY is not an argument, so only the innermost frame counts",
+    file: "src/source-text.ts",
+    from:
+      "      const enclosing = brackets[brackets.length - 1];\n" +
+      "      if (enclosing?.paren === true && enclosing.callee !== null) callArgumentOpeners.add(index);",
+    to: "      if (brackets.some((frame) => frame.paren && frame.callee !== null)) callArgumentOpeners.add(index);",
+  },
+  {
+    id: "M79e-attrib-a-colon-must-introduce-a-record-value",
+    rule: "a ternary alternate ends on the same `:` a record key does, and stores nothing",
+    file: "src/source-text.ts",
+    from: '    if (!typePosition && last === ":" && !recordKeyPrecedes(before.slice(0, -1).replace(/\\s+$/, ""))) return false;',
+    to: "    if (false) return false;",
+  },
+  {
+    id: "M83b-attrib-an-unreadable-text-is-attributed-nothing",
+    rule: "positions come off the lexer, so a text it cannot read yields no regions at all",
+    file: "src/source-text.ts",
+    from: "      if (lexed === undefined) lexed = lexCLike(text);",
+    to: "      if (lexed === undefined) lexed = lexCLike(text) ?? { tokens: [], callArgumentOpeners: new Set<number>() };",
+  },
+  {
+    id: "M80-attrib-bound-name-in-a-load-call-withdraws-it",
+    rule: "a declaration stored under a name a load call names is a laundering route",
+    file: "src/no-cloud.ts",
+    from: "    if (region.boundName !== null && loadCallMentions(masked, region.boundName)) continue;",
+    to: "    if (false) continue;",
+  },
+  {
+    id: "M81-attrib-load-callee-includes-the-bundler-wrapper",
+    rule: "`__require` is a load: bun build --external emits it and `\\b` cannot see it",
+    file: "src/source-text.ts",
+    from: "const LOAD_CALLEE = String.raw`(?:^|[^\\w$])(?:_*(?:import|require)|createRequire|Module\\s*\\.\\s*_load)`;",
+    to: "const LOAD_CALLEE = String.raw`\\b(?:import|require)`;",
+  },
+  {
+    id: "M81b-attrib-resolver-callees-are-spelled-out",
+    rule: "createRequire and Module._load are loads the underscore rule cannot reach",
+    file: "src/source-text.ts",
+    from: "const LOAD_CALLEE = String.raw`(?:^|[^\\w$])(?:_*(?:import|require)|createRequire|Module\\s*\\.\\s*_load)`;",
+    to: "const LOAD_CALLEE = String.raw`(?:^|[^\\w$])_*(?:import|require)`;",
+  },
+  {
+    id: "M80b-attrib-the-whole-argument-list-is-read",
+    rule: "a nested call in an earlier argument does not end the load call's argument list",
+    file: "src/source-text.ts",
+    from: '    if (character === "(" || character === "[" || character === "{") depth += 1;',
+    to: '    if (character === "(" && depth === 0) depth += 1;',
+  },
+  {
+    id: "M82-attrib-load-call-name-is-a-whole-identifier",
+    rule: "`DENYLIST` is not `DENY`, so a bound-name check cannot match a substring",
+    file: "src/source-text.ts",
+    from: "  const bounded = new RegExp(`[^\\\\w$]${escapeRegex(name)}(?![\\\\w$])`);",
+    to: "  const bounded = new RegExp(escapeRegex(name));",
+  },
+  {
+    id: "M83-attrib-enclosure-checked-before-the-seen-set",
+    rule: "an unrelated region recorded upstream does not end the search for this occurrence",
+    file: "src/source-text.ts",
+    from:
+      "        if (!(root.start <= at && at + needle.length <= root.end)) continue;\n" +
+      "        // Enclosing, so it is the answer for this occurrence either way.\n" +
+      "        if (seen.has(opener)) break;",
+    to:
+      "        if (seen.has(opener)) break;\n" +
+      "        if (!(root.start <= at && at + needle.length <= root.end)) continue;",
+  },
+  {
+    id: "M84-attrib-c-family-source-only",
+    rule: "a manifest is read structurally; its text is not edited on a shape match",
+    file: "src/no-cloud.ts",
+    from: '  if (commentSyntaxForPath(path) !== "c-like") return masked;',
+    to: "  if (false) return masked;",
+  },
+  {
+    id: "M85-attrib-a-constant-is-only-string-literals",
+    rule: "a collection holding a call or an identifier is code, and code is never attributed",
+    file: "src/source-text.ts",
+    from: "      const item = parseInlineData(text, index);\n      if (item === null) return null;",
+    to: "      const item = parseInlineData(text, index);\n      if (item === null) { index = skipSpace(text, index + 1); continue; }",
+  },
+  {
+    id: "M86-attrib-names-spelled-once-in-the-table",
+    rule: "no finding site re-spells a forbidden name, because a re-spelling is code a bundler inlines",
+    file: "src/no-cloud.ts",
+    from: '      kind: "checkKind" in entry ? entry.checkKind : file.kind,',
+    // Spelled in pieces so this file does not carry a literal the gate forbids.
+    to: '      kind: entry.pattern === ".hasna/' + 'cloud" ? "runtime_config" : file.kind,',
+  },
+  {
+    id: "M89-attrib-a-repeated-key-is-refused",
+    rule: "a record repeating a key is not describable: `Map` keeps the last value, so the first is never compared",
+    file: "src/source-text.ts",
+    from: "      if (entries.has(key)) return null;",
+    to: "      if (false) return null;",
+  },
+  {
+    id: "M87-attrib-path-config-read-off-the-table",
+    rule: "a legacy config dotdir path is runtime config, decided from the table not a literal",
+    file: "src/no-cloud.ts",
+    from: "  for (const entry of PATH_CONFIG_PATTERNS) {\n    if (path.includes(entry.pattern)) return entry.checkKind;\n  }",
+    to: "  for (const entry of PATH_CONFIG_PATTERNS) {\n    if (false) return entry.checkKind;\n  }",
+  },
 ];
 
 const repoRoot = join(import.meta.dir, "..");
 
+/**
+ * Long enough that machine load cannot manufacture a failure.
+ *
+ * `tests/published-package-security.test.ts` runs a full `bun run build` and a
+ * `bun pm pack` in `beforeAll`. Measured on this machine at load ~85 that hook
+ * takes ~39 s, and the default timeout aborted it at 30 s — which reads as a red
+ * suite, and a red baseline makes this script refuse to audit at all. A timeout
+ * that trips under load turns every run into a coin flip.
+ */
+const SUITE_TIMEOUT_MS = 180_000;
+
+/**
+ * CSI escape sequences, so a coloured suite still parses.
+ *
+ * Written as `\x1b` rather than a literal escape byte: a raw control character
+ * in source is invisible in review and easy for an editor to eat. Anchoring on
+ * ESC also matters — matching a bare `[...]` would eat ordinary text, and a test
+ * named `handles [1m] input` would lose part of its name.
+ */
+const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
+
+/**
+ * `--suite <file>…` — narrow which test files decide "caught".
+ *
+ * WHY THIS EXISTS, and it is not for speed. Run whole, this suite contains
+ * `open-contracts passes conformance against itself`, which scans this repo with
+ * its own scanner. Weakening almost anything in `src/no-cloud.ts` makes that one
+ * test fail, so it is the FIRST failure reported for every no-cloud mutation and
+ * it hides whether the rule has a test of its own. Eighteen rules reported
+ * `caught` behind one broad test.
+ *
+ * Narrowing to the files that contain no self-scan answers the sharper question:
+ * is this rule pinned by a test somebody wrote FOR IT. Asked that way, M79 —
+ * "a collection handed to a call is an argument, not a stored constant" — came
+ * back SURVIVED, and it had been reading as caught all along. Its test exists
+ * now; the flag is what found the gap, so it stays.
+ *
+ *   bun scripts/mutation-audit.ts attrib --suite tests/no-cloud-edge.test.ts tests/cli.test.ts
+ *
+ * The narrowed run is WEAKER evidence than the whole suite and is not a
+ * substitute for it: a rule can legitimately be pinned by a test in another file.
+ * Read the two together.
+ */
+/**
+ * One pass over argv, because two independent passes disagreed.
+ *
+ * `--suite` takes bare words as VALUES, and the id filter is also a bare word,
+ * so neither can be found by scanning for "the first thing without dashes" —
+ * `--print-json attrib` selected all 78 mutations, silently, while reporting a
+ * filter was applied. Parse once, and let `--suite` claim its own values.
+ */
+const cli = (() => {
+  const flags = new Set<string>();
+  const suite: string[] = [];
+  let only: string | undefined;
+  let collectingSuite = false;
+  for (const argument of process.argv.slice(2)) {
+    if (argument.startsWith("--")) {
+      flags.add(argument);
+      collectingSuite = argument === "--suite";
+      continue;
+    }
+    if (collectingSuite) suite.push(argument);
+    else if (only === undefined) only = argument;
+  }
+  return { flags, suite, only };
+})();
+const suiteFilter = cli.suite;
+
 function runSuite(): { pass: number; fail: number; failed: string[] } {
-  const result = Bun.spawnSync(["bun", "test"], { cwd: repoRoot, stdout: "pipe", stderr: "pipe" });
-  const blob = new TextDecoder().decode(result.stdout) + new TextDecoder().decode(result.stderr);
+  const result = Bun.spawnSync(["bun", "test", ...suiteFilter, "--timeout", String(SUITE_TIMEOUT_MS)], {
+    cwd: repoRoot,
+    stdout: "pipe",
+    stderr: "pipe",
+    // `bun test` drops colour when stdout is a pipe, EXCEPT when something in
+    // the environment forces it. `FORCE_COLOR=3` is set by some terminals and
+    // agent harnesses, and then every count arrives wrapped in escapes,
+    // `/^\s*(\d+) pass$/m` matches nothing, and the audit reports NO-RESULT for
+    // mutations the suite actually caught. Ask for plain output, then strip
+    // escapes anyway, because the env is not ours to rely on.
+    env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+  });
+  const blob = (new TextDecoder().decode(result.stdout) + new TextDecoder().decode(result.stderr)).replace(ANSI, "");
   const pass = Number(/^\s*(\d+) pass$/m.exec(blob)?.[1] ?? "0");
   const fail = Number(/^\s*(\d+) fail$/m.exec(blob)?.[1] ?? "0");
   const failed = [...blob.matchAll(/^\(fail\) (.+?) \[/gm)].map((match) => match[1]!);
   return { pass, fail, failed };
 }
 
-const only = process.argv[2];
+/**
+ * Crash-surviving record of the file currently holding a mutation.
+ *
+ * WHY THIS EXISTS. This script edits tracked source in place and restores it on
+ * the next line. Anything that stops the process between those two lines leaves
+ * the mutation on disk looking exactly like someone's edit — that is how
+ * `if (false) roots.push(...)` reached a commit in this repo.
+ *
+ * SIGNAL HANDLERS DO NOT CLOSE IT, and the reason is specific to this script
+ * rather than general: it spends essentially all of its life inside a blocking
+ * `Bun.spawnSync`, which does not yield to the event loop, so a queued handler
+ * gets no turn until the suite returns. Measured during this change — SIGTERM to
+ * the audit process was delivered and the process kept going through two more
+ * mutations with the handler never running. SIGKILL cannot be caught at all.
+ *
+ * So the original text is ALSO written to disk before the mutation, and the next
+ * run repairs from it. That path is the one that works, and it was verified the
+ * only honest way: SIGKILL the audit mid-mutation, confirm the mutation is left
+ * on disk, then confirm the next run prints RECOVERED and restores the file. The
+ * handlers below are kept as a cheap best effort for the idle case, not as the
+ * guarantee.
+ *
+ * The sentinel lives in the repo root, gitignored, so a human or agent looking
+ * at a confusing diff can SEE it.
+ */
+const SENTINEL = join(repoRoot, ".mutation-audit-inflight.json");
+
+let inFlight: { path: string; original: string } | null = null;
+
+function beginMutation(path: string, original: string): void {
+  inFlight = { path, original };
+  writeFileSync(SENTINEL, JSON.stringify({ pid: process.pid, path, original }));
+}
+
+function endMutation(): void {
+  if (inFlight) {
+    const { path, original } = inFlight;
+    inFlight = null;
+    writeFileSync(path, original);
+  }
+  if (existsSync(SENTINEL)) rmSync(SENTINEL, { force: true });
+}
+
+/**
+ * Repair a previous run that was killed before it could restore.
+ *
+ * REFUSES TO RUN CONCURRENTLY, and that guard is not hygiene — without it this
+ * function is a corruption source. Two audits in the same worktree share one
+ * tree: the second one's recovery restores the file the first one is actively
+ * mutating, so the first then measures an unmutated tree and reports SURVIVED
+ * for rules that are fine. Reproduced by starting a second run by accident during
+ * this change.
+ *
+ * The sentinel carries the owning pid, so "abandoned" can be told from "someone
+ * else is working". A stale pid that has been recycled onto an unrelated process
+ * is possible and would make this refuse instead of recover — the safe direction,
+ * and the message says what to do.
+ */
+function recoverAbandonedMutation(): void {
+  if (!existsSync(SENTINEL)) return;
+  const record = JSON.parse(readFileSync(SENTINEL, "utf8")) as { pid?: number; path: string; original: string };
+  if (record.pid !== undefined && record.pid !== process.pid && processIsAlive(record.pid)) {
+    console.error(
+      `Refusing to run: pid ${record.pid} holds a mutation in ${record.path}. ` +
+        `Wait for it, or kill that pid and re-run to recover.`,
+    );
+    process.exit(2);
+  }
+  if (readFileSync(record.path, "utf8") !== record.original) {
+    writeFileSync(record.path, record.original);
+    console.error(`RECOVERED: a previous run left ${record.path} mutated. Restored it.`);
+  }
+  rmSync(SENTINEL, { force: true });
+}
+
+/** `kill -0`: does this pid exist and are we allowed to signal it? */
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means it exists and belongs to somebody else, which still counts.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"] as const) {
+  process.on(signal, () => {
+    endMutation();
+    console.error(`\n${signal} — restored the mutated file before exiting.`);
+    process.exit(130);
+  });
+}
+process.on("uncaughtException", (error) => {
+  endMutation();
+  console.error(error);
+  process.exit(1);
+});
+process.on("exit", endMutation);
+
+recoverAbandonedMutation();
+
+// Flags are not filters. `bun scripts/mutation-audit.ts --anchors` used to be
+// read as "select mutations whose id contains `--anchors`", i.e. none of them.
+const only = cli.only;
 const selected = only ? MUTATIONS.filter((mutation) => mutation.id.includes(only)) : MUTATIONS;
 if (selected.length === 0) {
   console.error(`No mutation matches '${only}'. Known ids:\n  ${MUTATIONS.map((m) => m.id).join("\n  ")}`);
   process.exit(2);
 }
 
+/**
+ * `--print-json` — the selected mutations, as data.
+ *
+ * The list is the evidence, so anything that wants to check a property of it
+ * should read it from here rather than re-parsing this file. Re-parsing was
+ * tried and is a trap: `from` and `to` are TypeScript string literals, some of
+ * them concatenated across lines and full of escaped regex, so a text scraper
+ * gets them subtly wrong and reports on mutations that do not exist.
+ */
+if (cli.flags.has("--print-json")) {
+  console.log(JSON.stringify(selected, null, 2));
+  process.exit(0);
+}
+
+/**
+ * `--anchors` — check every `from` still exists, without running anything.
+ *
+ * A STALE anchor is scored a survivor, which is correct but expensive to learn:
+ * the audit only says so after a full suite run per mutation. Refactoring
+ * `src/` silently staled four entries in this list, and nobody found out until
+ * an audit that costs an hour reported them. This is the cheap way to ask.
+ */
+if (cli.flags.has("--anchors")) {
+  let stale = 0;
+  const cache = new Map<string, string>();
+  for (const mutation of MUTATIONS) {
+    if (!cache.has(mutation.file)) cache.set(mutation.file, readFileSync(join(repoRoot, mutation.file), "utf8"));
+    if (!cache.get(mutation.file)!.includes(mutation.from)) {
+      console.log(`STALE ${mutation.id.padEnd(46)} ${mutation.file}`);
+      stale += 1;
+    }
+  }
+  console.log(`\n${MUTATIONS.length - stale}/${MUTATIONS.length} anchors present`);
+  process.exit(stale === 0 ? 0 : 1);
+}
+
 const baseline = runSuite();
 console.log(`baseline: ${baseline.pass} pass / ${baseline.fail} fail\n`);
+// A baseline of zero passes is not a green suite, it is no reading at all — the
+// suite failed to start, or its output could not be parsed. Continuing from it
+// scores every mutation NO-RESULT and prints a clean-looking audit that proves
+// nothing, which is the exact failure this file exists to prevent. Fatal, not a
+// warning.
+if (baseline.pass === 0) {
+  console.error("Refusing to audit: the baseline suite reported no passing tests, so nothing here can be measured.");
+  process.exit(2);
+}
 if (baseline.fail !== 0) {
-  console.error("Refusing to audit against a red suite.");
+  console.error(`Refusing to audit against a red suite. Failing: ${baseline.failed.join(", ")}`);
   process.exit(2);
 }
 
@@ -495,6 +942,7 @@ for (const mutation of selected) {
     survivors += 1;
     continue;
   }
+  beginMutation(path, original);
   writeFileSync(path, original.replace(mutation.from, mutation.to));
   let result = runSuite();
   // A suite that reported NOTHING did not survive the mutation — it failed to
@@ -502,15 +950,24 @@ for (const mutation of selected) {
   // review saw `M21 SURVIVED 0/0` that re-ran clean in isolation. Retry once,
   // then say "no result" rather than blame the rule.
   if (result.pass === 0 && result.fail === 0) result = runSuite();
-  writeFileSync(path, original);
+  endMutation();
   const ranAtAll = result.pass > 0 || result.fail > 0;
   const caught = result.fail > 0;
   if (!caught) survivors += 1;
   const verdict = !ranAtAll ? "NO-RESULT" : caught ? "caught " : "SURVIVED";
-  console.log(
-    `${mutation.id.padEnd(38)} ${verdict} ${result.pass}/${result.fail}` +
-      (caught ? `  -> ${result.failed[0]?.slice(0, 60) ?? ""}` : `  (rule: ${mutation.rule})`),
-  );
+  // THE FULL FAILING SET, not the first failure.
+  //
+  // Most mutations in the no-cloud blocks trip `open-contracts passes
+  // conformance against itself`, which scans this repo with its own scanner. It
+  // sorts first, so printing `failed[0]` printed the SAME string for 13 of 18
+  // attribution mutations — and that uniformity is exactly what hid a rule with
+  // no test of its own behind a rule that had one. Printing every failing test
+  // makes "this mutation is only caught by the self-scan" visible without having
+  // to re-run anything.
+  const detail = caught
+    ? result.failed.map((name) => `\n      ${name}`).join("")
+    : `  (rule: ${mutation.rule})`;
+  console.log(`${mutation.id.padEnd(38)} ${verdict} ${result.pass}/${result.fail}${detail}`);
 }
 
 console.log(`\n${selected.length - survivors}/${selected.length} caught`);

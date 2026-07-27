@@ -8,7 +8,17 @@ import {
   normalizeArchiveEntry,
   readArchiveMemberText
 } from "./packed-artifact";
-import { importedBindings, importsModule, maskCommentsForPath, mentionsCannotLoad } from "./source-text";
+import {
+  blankSpans,
+  commentSyntaxForPath,
+  importedBindings,
+  importsModule,
+  inlineDataRegions,
+  loadCallMentions,
+  maskCommentsForPath,
+  mentionsCannotLoad,
+  type InlineDataNode
+} from "./source-text";
 import {
   FORBIDDEN_SHARED_CLOUD_RUNTIMES,
   AppCloudManifestSchema,
@@ -57,6 +67,28 @@ interface ScanFile {
  *     else does.
  *   - a `git+ssh:` dependency that installs UNDER the package name without the
  *     name appearing in the specifier.
+ *   - a copy of this scanner's own denylist reached through a SECOND binding, so
+ *     the bound-name check never sees the name the load uses. Three routes were
+ *     measured, each with a plain-`require` control that fails:
+ *       * array destructuring — `var DENY = […]; var [a] = DENY; __require(a)`;
+ *       * a function RETURNED by a resolver — `var r = createRequire(…); r(DENY[0])`,
+ *         where the callee is `r` and no callee list can name it;
+ *       * a two-file re-export — `export const DENY` in one module, the load in
+ *         another. Single-file text matching cannot follow it, by construction.
+ *     `Module._load(DENY[0])` was a fourth and is now closed — see `LOAD_CALLEE`.
+ *     All three need a hand-built fake denylist; the assembled-name case above
+ *     needs nothing. All three are MODULE-class: the equality rules in
+ *     `isOwnPatternDeclaration` leave no slot for a `config` pattern or a
+ *     credential env key to ride along.
+ *
+ *     Two measurements about the alternatives, so this is not read as a
+ *     regression. The path-scoped predecessor on `main` did not close the
+ *     two-file route either — it caught it in `lib/` only because it declined to
+ *     attribute outside build output, and the same two files under `dist/`
+ *     scanned clean there too. Published 0.8.2 DOES catch it, because it
+ *     attributes nothing at all — which is the same property that makes it report
+ *     six unremovable findings against every consumer that bundles this package.
+ *     See `isOwnPatternDeclaration` for the trade.
  */
 const SKIP_DIRS = new Set([".git", "node_modules", ".cache", ".next", ".turbo", "coverage", "docs", "examples", "tests"]);
 const LOCKFILES = new Set(["bun.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"]);
@@ -77,16 +109,36 @@ const MAX_TEXT_BYTES = 5 * 1024 * 1024;
  */
 type RuntimePatternKind = "module" | "symbol" | "config";
 
+/**
+ * `checkKind` — the finding kind this pattern reports, when it is not the kind
+ * of the file it was found in.
+ *
+ * Declared here rather than decided at the finding site, because the finding
+ * site had to SPELL the pattern to decide it: `pattern === ".hasna/cloud"`. A
+ * second literal copy of a forbidden name inside the scanner is a second thing
+ * a bundler inlines into every consumer, and the copies at the finding sites
+ * were not data — they were code, so nothing structural could ever explain them
+ * away. Every forbidden name this file knows is now written exactly once, in
+ * this table.
+ */
 const RUNTIME_PATTERNS = [
   { pattern: "@hasna/cloud", kind: "module", message: "Shared @hasna/cloud runtime reference is forbidden" },
   { pattern: "open-cloud", kind: "module", message: "Shared open-cloud runtime reference is forbidden" },
   { pattern: "cloud-mcp", kind: "module", message: "Legacy cloud-mcp runtime surface is forbidden" },
   { pattern: "registerCloudTools", kind: "symbol", message: "Legacy registerCloudTools runtime surface is forbidden" },
   { pattern: "registerCloudCommands", kind: "symbol", message: "Legacy registerCloudCommands runtime surface is forbidden" },
-  { pattern: ".hasna/cloud", kind: "config", message: "Legacy .hasna/cloud runtime config is forbidden" },
+  { pattern: ".hasna/cloud", kind: "config", checkKind: "runtime_config", message: "Legacy .hasna/cloud runtime config is forbidden" },
   { pattern: "HASNA_CLOUD_", kind: "config", message: "Shared HASNA_CLOUD_* runtime config is forbidden" },
   { pattern: "HASNA_RDS_PASSWORD", kind: "config", message: "Legacy shared RDS credential config is forbidden" }
-] as const satisfies ReadonlyArray<{ pattern: string; kind: RuntimePatternKind; message: string }>;
+] as const satisfies ReadonlyArray<{ pattern: string; kind: RuntimePatternKind; checkKind?: NoCloudCheckKind; message: string }>;
+
+/**
+ * Patterns that are a PATH fragment, so a file living at one is runtime config
+ * whatever its extension says. Read off the table instead of re-spelled.
+ */
+const PATH_CONFIG_PATTERNS = RUNTIME_PATTERNS.filter(
+  (entry): entry is typeof entry & { checkKind: NoCloudCheckKind } => "checkKind" in entry
+);
 
 const MODULE_PATTERNS = RUNTIME_PATTERNS.filter((entry) => entry.kind === "module");
 
@@ -229,33 +281,232 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
   return MODULE_PATTERNS.every((module) => mentionsCannotLoad(file.text, file.path, module.pattern));
 }
 
-const DECLARATION_FILE_MARKERS = [
-  "FORBIDDEN_SHARED_CLOUD_RUNTIMES",
-  "RUNTIME_PATTERNS",
-  "hasna.app_cloud_manifest.v1",
-  "hasna.no_cloud_evidence_pack.v1"
-] as const;
-const CONTRACTS_DECLARATION_PATHS = new Set([
-  "src/no-cloud.ts",
-  "src/schemas.ts",
-  "dist/no-cloud.js",
-  "dist/schemas.js",
-  "dist/validators.js",
-  "dist/index.js",
-  "dist/mode.js",
-  "dist/service-contract.js",
-  "dist/secure-local-store.js",
-  "dist/conformance.js",
-  "dist/client/transport.js",
-  "dist/client/storage.js",
-  "dist/cli/index.js",
-  "dist/no-cloud.d.ts",
-  "dist/schemas.d.ts",
-  "dist/mode.d.ts",
-  "dist/service-contract.d.ts",
-  "dist/secure-local-store.d.ts",
-  "dist/conformance.d.ts"
-]);
+/**
+ * THE INLINED-DECLARATION FALSE POSITIVE, AND WHY IT IS ANSWERED BY CONTENT.
+ *
+ * This scanner declares what it forbids as data:
+ * `FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud", "open-cloud"]` and a
+ * `RUNTIME_PATTERNS` row per pattern. A bundler that inlines `@hasna/contracts`
+ * copies both into the consumer's output verbatim, and the scanner then read its
+ * own denylist back out of the consumer's artifact and scored it as the
+ * consumer's breach. Measured on a consumer that imports nothing but
+ * `scanNoCloudTarget`: SIX findings in one `dist/index.js`, including
+ * `HASNA_RDS_PASSWORD`, and nothing the consumer could delete to clear them. The
+ * tell was `open-cloud` reported against a repo that never used it.
+ *
+ * WHAT WAS TRIED AND REJECTED, because the same idea will look attractive again:
+ *
+ *   - EXEMPT BUILD-OUTPUT PATHS (`dist/`, `bin/`, …). The three `config`
+ *     patterns have no import to look for, so a bare occurrence is their only
+ *     detector; exempting build output turns it off. Measured: a `dist`-only
+ *     tarball leaking `HASNA_RDS_PASSWORD` scored two criticals before and zero
+ *     after. A false-positive fix that opens a credential blind spot is worse
+ *     than the bug.
+ *   - EXEMPT THIS PACKAGE'S OWN FILE PATHS by name and package identity. Shipped,
+ *     and it has the same defect in a smaller box: `textFindings` returned `[]`
+ *     for the whole file, config patterns included. Measured against published
+ *     0.8.1 and 0.8.2 with a byte-identical `dist/no-cloud.js` carrying a planted
+ *     `HASNA_RDS_PASSWORD` — named `@hasna/contracts` it PASSED with zero
+ *     findings; named anything else the same bytes scored two criticals. The one
+ *     artifact whose credential detectors were off was this package's own
+ *     release.
+ *   - TREAT A BARE MENTION WITH NO IMPORT SPECIFIER AS A FALSE POSITIVE. Unsound
+ *     in both directions. `bun build --external` emits `__require("…")`, which is
+ *     a real load carrying no specifier the old matcher could see; and a source
+ *     file doing `import pkg from "../package.json" with { type: "json" }` makes
+ *     the bundler inline the whole manifest, so `"@hasna/cloud": "0.1.24"` sits
+ *     in the artifact as a bare mention with zero specifiers anywhere — a
+ *     confirmed true positive.
+ *
+ * WHAT IS ACTUALLY DIFFERENT about the copied declaration is not where it lives
+ * and not what surrounds it in the file. It is that the text IS this scanner's
+ * own constant, still in the inert data shape the scanner wrote it in. So that
+ * is what gets matched, and only the characters it spans are dropped:
+ *
+ *   - the array must equal `FORBIDDEN_SHARED_CLOUD_RUNTIMES` element for
+ *     element, so an array holding anything else is not it;
+ *   - a row must equal one `RUNTIME_PATTERNS` row ENTRY FOR ENTRY — same key
+ *     count, every value equal — which is the record analogue of the array rule
+ *     above. Partial versions of this were tried three times and each left one
+ *     free slot: comparing three keys left the rest of the key set uncompared;
+ *     bounding the key set to a union over all rows admitted `checkKind` on all
+ *     eight while only ever checking it was A string, never the RIGHT one; and
+ *     entry-for-entry equality by itself still counted an entry set that a
+ *     REPEATED KEY had already collapsed, so a shadowed `message:` rode through
+ *     a span the surviving one justified blanking. The comparison is complete
+ *     only because `parseInlineData` now refuses a record with a duplicate key
+ *     outright — that is the half of this rule that lives in `src/source-text.ts`,
+ *     and removing it puts the free slot straight back;
+ *   - the collection must sit where data sits and must not be read in place, and
+ *     if it is bound to a name, no load call in the file may mention that name.
+ *     That is what keeps `__require(DENY[0])` from becoming a way to launder a
+ *     specifier through a copy of the denylist.
+ *
+ * The consequence that matters, and the wording has been wrong three times so it
+ * is worth reading precisely: no detector is turned off for any occurrence OUTSIDE
+ * a blanked span, and a blanked span holds nothing but an exact copy of something
+ * this table declares — a record equal to a row entry for entry, or an array equal
+ * to the denylist element for element. Every character of the span was compared,
+ * and that takes TWO rules rather than one: the comparator leaves no entry
+ * uncompared, and the parser refuses to hand it a record whose text carries an
+ * entry the entry set does not hold. Both halves are load-bearing. The comparator
+ * on its own left exactly one admitted-but-uncompared slot, and a duplicate key
+ * opened it.
+ *
+ * It was not true before, and each time this comment overstated it, a review found
+ * the slot it was overstating. The first version claimed "NO DETECTOR IS TURNED
+ * OFF ANYWHERE" while three keys were compared and the rest of the key set was
+ * not. The second claimed "nothing but a row this table emits" while `checkKind`
+ * was admitted on every row and never compared — a module row carrying a
+ * `checkKind` is a row this table never emits, and it was attributed. The third
+ * claimed entry-for-entry equality had removed the class, while a record repeating
+ * a key — `{pattern, kind, message: "<credential>", message: "<the real one>"}` —
+ * was still attributed, because `Map.set` had dropped the shadowed value and
+ * shrunk the count before the comparison ever ran. Measured as a tarball under a
+ * third-party package name: EXIT=0 with zero findings against a control carrying
+ * the same credential unwrapped that scored one critical. All three were caught by
+ * review rather than by a test, which is the argument for writing the guarantee as
+ * narrowly as the code earns it — and for testing each narrowing in both
+ * directions, which the duplicate-key rule now is.
+ *
+ * Each occurrence is judged on its own, so the same file keeps every check for
+ * every other occurrence in it — a consumer that bundles `@hasna/contracts` and
+ * also reads `HASNA_CLOUD_*`, or also loads the retired runtime, is still
+ * reported. No path is consulted, so nothing is exempt for living in `dist/`, and
+ * `git mv` cannot change a verdict.
+ *
+ * WHAT IT DOES NOT CLOSE, corrected after a review measured it: not one route
+ * but THREE, and they are single-binding rather than two-step. Each reaches a copy
+ * of the denylist through a name the bound-name check cannot see — array
+ * destructuring, a function returned by `createRequire`, and a two-file
+ * re-export. `Module._load` was a fourth and is closed. The scope block at the top
+ * of this file enumerates them with the controls that fail.
+ *
+ * They are MODULE-CLASS ONLY, and that bound comes from the two equality rules
+ * rather than from an argument: the only array ever attributed equals the
+ * denylist, which holds package names and nothing else, and the only record ever
+ * attributed equals a table row entry for entry over an entry set the parser
+ * guarantees describes the whole record, so it has no slot to carry a value in.
+ * No `config` pattern and no credential env key can ride any of the three. That
+ * bound is exactly as strong as the completeness of those two rules — when the
+ * record rule was incomplete, a shadowed key carried all three `config` patterns
+ * and a credential at once, on a plain assignment, with no aliasing needed.
+ *
+ * The earlier wording here said "bound to one name, rebound to a second", which
+ * made the residual sound narrower and harder to reach than it is. Understating it
+ * was wrong.
+ *
+ * THE TRADE, stated plainly, because "attribution is strictly better" would be the
+ * comfortable version and it is not accurate. Published 0.8.2 attributes NOTHING,
+ * so it catches the two-file re-export route that this concedes — and that same
+ * property is why it reports six unremovable findings against every consumer that
+ * bundles this package. 0.8.2 catches more and cries wolf; this cries less and
+ * concedes three aliasing routes, all module-class. That is the exchange being
+ * made, deliberately, and it is reversible: the array and record equality rules are
+ * where to tighten if the exchange ever looks wrong.
+ */
+function isOwnPatternDeclaration(node: InlineDataNode): boolean {
+  if (node.kind === "array") {
+    return (
+      node.items.length === FORBIDDEN_SHARED_CLOUD_RUNTIMES.length &&
+      node.items.every((item, index) => item.kind === "string" && item.value === FORBIDDEN_SHARED_CLOUD_RUNTIMES[index])
+    );
+  }
+  if (node.kind !== "record") return false;
+  // A ROW MUST EQUAL ONE TABLE ROW ENTRY FOR ENTRY. Same entry count, every value
+  // equal. Nothing in the entry set is left uncompared.
+  //
+  // This is the record analogue of the array branch above, and it belongs beside
+  // it: an array is attributed only when it matches ELEMENT FOR ELEMENT, and a
+  // record only when it matches ENTRY FOR ENTRY. Three rounds of review were spent
+  // arriving at that symmetry, by three different partial versions of it:
+  //
+  //   1. compare three keys, ignore the rest of the key set. A verbatim
+  //      `{pattern, kind, message}` triple plus one more key carried anything at
+  //      all through the blanked span.
+  //   2. bound the key set to the union of keys the table emits, and require
+  //      every value to be a string. `checkKind` is declared on exactly ONE row,
+  //      but a union admitted it on all eight — and being a string was all it had
+  //      to be, never the right string. A backtick literal then made the span
+  //      multi-line and arbitrarily long.
+  //   3. compare the whole ENTRY SET, while the entry set was not the whole
+  //      RECORD. Duplicate property names are legal JavaScript and a bundler
+  //      preserves them, but `parseInlineData` built the entries with `Map.set`,
+  //      which keeps only the last value — so `{pattern, kind, message: <payload>,
+  //      message: "<the real one>"}` arrived here as a three-entry record equal to
+  //      a module row, and the span blanked on that basis covered the payload.
+  //
+  // Measured at the second and third versions, as tarballs under a third-party
+  // package name, each against a control that fails:
+  //
+  //   verbatim module row + `checkKind` holding a credential env key -> EXIT=0, 0 findings
+  //     control: the same string with no triple around it            -> EXIT=1, 1 critical
+  //   verbatim config row + backtick `checkKind`, four patterns
+  //     spread over five lines                                      -> EXIT=0, 0 findings
+  //     control: the same payload with no triple                    -> EXIT=1, 3 critical
+  //   the same slot in hand-authored `src/table.ts`                  -> EXIT=0, 0 findings
+  //   verbatim module row + a SHADOWED `message` holding a
+  //     credential env key                                          -> EXIT=0, 0 findings
+  //     control: the same credential with no record around it       -> EXIT=1, 1 critical
+  //
+  // Each narrowing removed one free slot and left the next. What removes the CLASS
+  // is completeness over the whole record, and this function only supplies half of
+  // it: it compares every entry, and `parseInlineData` refuses any record whose
+  // text holds something the entry set does not. Both halves are needed — #3 is
+  // what a complete comparison over an incomplete entry set looks like. That is
+  // the property to preserve: if this ever needs loosening, loosen the SHAPES
+  // matched, never the completeness of either half.
+  //
+  // It costs nothing real: the build emits `{pattern, kind, message}` seven times
+  // and `{pattern, kind, checkKind, message}` once, and full equality accepts
+  // every one of them. The keys come from the MATCHED ROW rather than from a union
+  // over all rows, so `checkKind` is admitted only on the row that declares it.
+  return RUNTIME_PATTERNS.some((row) => {
+    const keys = Object.keys(row) as ReadonlyArray<keyof typeof row>;
+    if (keys.length !== node.entries.size) return false;
+    return keys.every((key) => {
+      const value = node.entries.get(key);
+      return value?.kind === "string" && value.value === row[key];
+    });
+  });
+}
+
+/**
+ * `masked`, with this package's own inlined declarations blanked out.
+ *
+ * Blanked rather than deleted, so every offset in the returned text still lines
+ * up with the original — the invariant `maskComments` maintains, and the reason a
+ * caller can mix the two.
+ *
+ * Restricted to C-family source because that is the only thing a bundler inlines
+ * a JavaScript constant into. A `package.json` is read structurally by
+ * `manifestEdges` and a lockfile by the graph walk, and neither should have its
+ * text quietly edited on the strength of a shape match.
+ */
+function withoutInlinedDeclarations(masked: string, path: string): string {
+  if (commentSyntaxForPath(path) !== "c-like") return masked;
+  const spans: Array<{ start: number; end: number }> = [];
+  for (const region of inlineDataRegions(masked, RUNTIME_PATTERNS.map((entry) => entry.pattern))) {
+    // A collection stored under a name that a load call also names is a
+    // laundering route, not a declaration. Withdraw the whole region.
+    if (region.boundName !== null && loadCallMentions(masked, region.boundName)) continue;
+    // The region ROOT, or a direct element of a root array — not an arbitrary
+    // node anywhere inside it.
+    //
+    // This is what this package actually emits: the denylist is a bare assigned
+    // array, and `RUNTIME_PATTERNS` is an assigned array whose ELEMENTS are the
+    // rows. Nothing it emits buries either shape under a property key. Walking
+    // the whole tree instead would have attributed
+    // `var schema = { forbidden: ["…", "…"] };` — a consumer's own object, which
+    // this package never writes. It is reachable only through `schema`, and the
+    // bound-name check above already covers a load through that name, so the
+    // looser rule was not unsafe so much as unearned. Claim the shapes we emit.
+    for (const node of [region.root, ...(region.root.kind === "array" ? region.root.items : [])]) {
+      if (isOwnPatternDeclaration(node)) spans.push({ start: node.start, end: node.end });
+    }
+  }
+  return blankSpans(masked, spans);
+}
 
 function stableId(input: string) {
   let hash = 0;
@@ -360,149 +611,17 @@ function isAppCloudManifestDocument(file: ScanFile): boolean {
   return isRecord(parsed) && parsed.schema === SCHEMA_IDS.appCloudManifest;
 }
 
-function isNoCloudDeclarationFile(file: ScanFile, packageName?: string): boolean {
-  if (packageName !== "@hasna/contracts") return false;
-  const normalized = file.path.replaceAll("\\", "/");
-  if (!CONTRACTS_DECLARATION_PATHS.has(normalized)) return false;
-  if (!/\.(cjs|cts|js|jsx|mjs|mts|ts|tsx)$/i.test(normalized)) return false;
-  const markerCount = DECLARATION_FILE_MARKERS.filter((marker) => file.text.includes(marker)).length;
-  return markerCount >= 2;
-}
-
-/**
- * Directories whose contents are BUILD OUTPUT — emitted by a bundler rather than
- * written by anyone.
- *
- * `lib` is deliberately absent even though `SOURCE_DIRS` lists it: plenty of
- * repos author directly in `lib/`, and mistaking authored code for output buys a
- * false negative. Erring toward noise is the correct direction here.
- */
-const GENERATED_OUTPUT_DIRS = new Set(["bin", "dist", "build", "out", ".output"]);
-
-/**
- * What a bundler EMITS: a JavaScript or TypeScript module, `.d.ts` included.
- *
- * Sitting in `bin/` is not on its own enough to call a file generated. `bin/`
- * and `build/` routinely hold hand-written shell scripts, and `shouldReadPath`
- * reads `.sh`, `.yml`, `.toml` and `.env` too. A `bin/deploy.sh` exporting
- * `HASNA_CLOUD_*` is somebody's decision, not a byte a bundler copied.
- */
-const BUNDLED_ARTIFACT_FILE = /\.(?:[cm]?[jt]sx?)$/i;
-
-/**
- * Directories nobody generates INTO — where a `dist` segment underneath is a
- * folder somebody named, not a build.
- *
- * Without this, `src/dist/loader.ts` counted as build output, which is a
- * self-service exemption: a repo could park authored code one directory deep and
- * be exempt. Measured before this clause existed — that exact path scanned clean.
- * Ordering is what separates the two: build output nested under authored source
- * is authored, while authored-looking structure nested under build output —
- * `dist/src/index.js`, which `tsc --rootDir .` really does emit — is still
- * output.
- *
- * Kept to the three names that are never a package folder. `app` is deliberately
- * absent: `app/dist/index.js` is a real build path in a monorepo, and listing it
- * would trade this bypass back for the false positive #34 is about. Verified
- * against every build-output file carrying a hit on this fleet — none has a `src`
- * or `lib` segment above its output directory.
- */
-const AUTHORED_SOURCE_DIRS = new Set(["src", "lib", "source"]);
-
-/**
- * Is this path a bundler-emitted module inside build output?
- *
- * Directory segments only for the directory test — the basename is excluded so a
- * FILE called `dist.ts` is still read as the source it is.
- */
-function isGeneratedOutputPath(path: string): boolean {
-  const normalized = path.replaceAll("\\", "/");
-  if (!BUNDLED_ARTIFACT_FILE.test(normalized)) return false;
-  const dirs = normalized.split("/").slice(0, -1);
-  const output = dirs.findIndex((segment) => GENERATED_OUTPUT_DIRS.has(segment));
-  if (output === -1) return false;
-  return !dirs.slice(0, output).some((segment) => AUTHORED_SOURCE_DIRS.has(segment));
-}
-
-/**
- * An assigned, single-line ARRAY LITERAL — captured by its VALUE, not by the
- * name it is assigned to.
- *
- * WHY BY VALUE. This scanner's own denylist is a pair of string literals, so any
- * repo that bundles `@hasna/contracts` without externalising it gets
- * `["@hasna/cloud", "open-cloud"]` inlined into its output, and the scanner then
- * read its own denylist back out of the consumer's artifact and scored it as the
- * consumer's breach. The tell was `open-cloud` reported against repos that never
- * used it.
- *
- * Keying on the identifier `FORBIDDEN_SHARED_CLOUD_RUNTIMES` plus a
- * `const|let|var` prefix does NOT recognise what bundlers actually emit, and was
- * measured missing both real shapes on this fleet:
- *
- *   - bun's lazy `__esm` wrapper HOISTS the declaration and emits a bare
- *     assignment: `  FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud", …];`
- *     with no keyword anywhere near it;
- *   - `--minify-identifiers` RENAMES it and folds it into a comma sequence:
- *     `…,Ob=["@hasna/cloud","open-cloud"],pG=…` — no keyword, no original name,
- *     no trailing `;`.
- *
- * The value is the part a bundler cannot rewrite, so the value is what this
- * matches. Sweep over 1656 build-output files in 41 consumer repos: 18 of 18
- * files whose only hits were the two module names are cleared by this; the
- * remaining 4 are `registerCloudTools`/`registerCloudCommands` in a repo that
- * defines its own, which is a `symbol` pattern and never reached this branch.
- *
- * TWO NARROWINGS, both load-bearing:
- *
- *   - `=` immediately before the literal, so it is a VALUE BEING STORED. A
- *     literal passed straight into a call — `loadAll(["@hasna/cloud", …])` — is
- *     not a declaration and stays visible. The lookbehind rejects `==`, `===`,
- *     `!==`, `<=`, `>=`; `=>` cannot match because `>` is not whitespace.
- *   - nothing may be INVOKED on the literal. `[…].map((name) => require(name))`
- *     and `[…][0]` turn the array into a load, which is the one move that makes
- *     these strings live again, so `.`, `(` and `[` after the closing bracket
- *     withdraw the mask.
- */
-const ASSIGNED_ARRAY_LITERAL = /(?<![=!<>])=[^\S\r\n]*\[([^[\]\r\n]*)\](?![^\S\r\n]*[.(\[])/g;
-
-/** The literal's elements, or `null` for any element that is not a plain string literal. */
-function arrayLiteralStrings(elements: string): (string | null)[] {
-  return elements.split(",").map((element) => {
-    const literal = element.trim();
-    const quote = literal[0];
-    if ((quote !== '"' && quote !== "'") || literal.at(-1) !== quote || literal.length < 2) return null;
-    return literal.slice(1, -1);
-  });
-}
-
-/**
- * Blank out inlined copies of this package's denylist, in place.
- *
- * Same-length spaces, so every other byte keeps its offset and no two tokens
- * merge: a second mention, or a real import, elsewhere on the same minified line
- * stays exactly where the scanner can still see it.
- */
-function maskVendoredDenylistLiterals(text: string): string {
-  return text.replace(ASSIGNED_ARRAY_LITERAL, (assignment, elements: string) => {
-    const values = arrayLiteralStrings(elements);
-    const isVendoredDenylist =
-      values.length === FORBIDDEN_SHARED_CLOUD_RUNTIMES.length &&
-      values.every((value, index) => value === FORBIDDEN_SHARED_CLOUD_RUNTIMES[index]);
-    return isVendoredDenylist ? assignment.replace(/[^\r\n]/g, " ") : assignment;
-  });
-}
-
 function pathFindings(file: ScanFile, severity: NoCloudFindingSeverity): NoCloudFinding[] {
   const findings: NoCloudFinding[] = [];
-  for (const { pattern, message } of RUNTIME_PATTERNS) {
-    if (!file.path.includes(pattern)) continue;
+  for (const entry of RUNTIME_PATTERNS) {
+    if (!file.path.includes(entry.pattern)) continue;
     findings.push({
-      id: `finding_${stableId(`${file.path}:path:${pattern}`)}`,
-      kind: pattern === ".hasna/cloud" ? "runtime_config" : file.kind,
+      id: `finding_${stableId(`${file.path}:path:${entry.pattern}`)}`,
+      kind: "checkKind" in entry ? entry.checkKind : file.kind,
       severity,
       path: file.path,
-      pattern,
-      message: `${message} in path`,
+      pattern: entry.pattern,
+      message: `${entry.message} in path`,
       evidenceRefs: []
     });
   }
@@ -517,13 +636,17 @@ function pathFindings(file: ScanFile, severity: NoCloudFindingSeverity): NoCloud
  * `@hasna/connectors@1.4.0`, whose only `@hasna/cloud` reference in `src/` is
  * the JSDoc line recording that the import was REMOVED.
  *
+ * Then this package's own inlined pattern declarations are blanked — see
+ * `withoutInlinedDeclarations` for why that is decided by content and not by
+ * path, and for the two path-shaped attempts it replaces. Both maskers preserve
+ * offsets, so they compose.
+ *
  * Each pattern yields at most one finding, and the reason is recorded in the
  * message so a reviewer can tell an import from a mention without re-running
  * anything.
  */
-function textFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageName?: string): NoCloudFinding[] {
+function textFindings(file: ScanFile, severity: NoCloudFindingSeverity): NoCloudFinding[] {
   if (isAppCloudManifestDocument(file)) return [];
-  if (isNoCloudDeclarationFile(file, packageName)) return [];
   const masked = maskCommentsForPath(file.text, file.path);
   // The exemption is withdrawn from a "guard test" that can load a module at
   // all — the one move that turns a mention into a real load, and the one thing
@@ -534,20 +657,17 @@ function textFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageN
   // drops the check rather than scoping it.
   const codeLike = file.kind === "source_import" || file.kind === "packed_artifact";
   /**
-   * The text a BARE MENTION is read out of — the vendored denylist blanked, but
-   * ONLY where a bundler could have put it there.
+   * The text a BARE MENTION is read out of, and ONLY a bare mention.
    *
-   * Scoping this to build output is what stops a repo exempting itself: an
-   * authored `src/loader.ts` that writes the same array and then loads through it
-   * (`await import(NAMES[0])`) is unchanged here, so it stays a finding. Without
-   * the path scope the mask is a self-service exemption in hand-written code.
-   *
-   * `importsModule` and `importedBindings` keep reading the ORIGINAL bytes: an
-   * externalised `import { connect } from "@hasna/cloud"` survives bundling
-   * verbatim and is still critical in `dist/`, as are dependency edges, which
-   * `package.json` and `bun.lock` answer separately.
+   * `importsModule` and `importedBindings` below keep reading the ORIGINAL
+   * masked bytes. That asymmetry is deliberate and it is the cheapest safety
+   * margin available here: an externalised `import { connect } from "…"`, or a
+   * `__require("…")`, survives bundling verbatim and is still reported even if
+   * attribution were to over-mask. Dependency edges are answered separately again
+   * by `package.json` and `bun.lock`. So the attributed text is used for exactly
+   * one of four detectors, and the other three are untouched by it.
    */
-  const bareMentionText = codeLike && isGeneratedOutputPath(file.path) ? maskVendoredDenylistLiterals(masked) : masked;
+  const bareMentionText = withoutInlinedDeclarations(masked, file.path);
   const findings: NoCloudFinding[] = [];
 
   for (const { pattern, kind, message } of RUNTIME_PATTERNS) {
@@ -662,9 +782,9 @@ function lockfileUnwalkedNameFindings(
  * an unparsed lockfile is the failure mode this change exists to remove.
  */
 function lockfileFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageName?: string): NoCloudFinding[] {
-  if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity, packageName);
+  if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity);
   const walk = lockfileWalk(file.text, FORBIDDEN_LOCKFILE_PACKAGES);
-  if (walk === null) return textFindings(file, severity, packageName);
+  if (walk === null) return textFindings(file, severity);
   return [
     ...walk.edges.map((edge) => edgeFinding(edge, file.path, "lockfile", packageName)),
     ...lockfileUnwalkedNameFindings(file, severity, walk),
@@ -674,16 +794,22 @@ function lockfileFindings(file: ScanFile, severity: NoCloudFindingSeverity, pack
 
 function scanFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageName?: string): NoCloudFinding[] {
   if (file.kind === "package_manifest") {
-    return [...dependencyFindings(file), ...pathFindings(file, severity), ...textFindings(file, "high", packageName)];
+    return [...dependencyFindings(file), ...pathFindings(file, severity), ...textFindings(file, "high")];
   }
   if (file.kind === "lockfile") {
     return [...pathFindings(file, severity), ...lockfileFindings(file, severity, packageName)];
   }
-  return [...pathFindings(file, severity), ...textFindings(file, severity, packageName)];
+  return [...pathFindings(file, severity), ...textFindings(file, severity)];
 }
 
 function shouldReadPath(path: string): NoCloudCheckKind | null {
-  if (path.includes(".hasna/cloud")) return "runtime_config";
+  // Read off `RUNTIME_PATTERNS` rather than re-spelled here. A second literal
+  // copy of a forbidden name inside this file is a second thing a bundler
+  // inlines into every consumer, and unlike the table it is code, so nothing
+  // structural can ever attribute it back to us.
+  for (const entry of PATH_CONFIG_PATTERNS) {
+    if (path.includes(entry.pattern)) return entry.checkKind;
+  }
   const name = basename(path);
   if (name === "package.json") return "package_manifest";
   if (LOCKFILES.has(name)) return "lockfile";

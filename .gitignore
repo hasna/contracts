@@ -3,3 +3,4 @@ dist/
 .hasna/
 *.log
 .DS_Store
+.mutation-audit-inflight.json
