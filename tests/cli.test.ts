@@ -484,29 +484,59 @@ describe("contracts CLI", () => {
     expect(JSON.stringify(payload)).not.toContain(import.meta.dir);
   });
 
-  test("allows only exact generated contracts declaration bundles to skip runtime edge scanning", () => {
+  test("marker strings buy no exemption; only a copy of the declaration itself does", () => {
+    // REPLACES a test that pinned an exemption keyed on FILE PATH plus package
+    // identity plus two "marker" substrings. That mechanism was measurably
+    // unsafe, and this is the measurement: under it, a file at an allowlisted
+    // path in a package calling itself `@hasna/contracts` had its whole text
+    // skipped, credential patterns included. Published 0.8.1 and 0.8.2 both
+    // PASSED a `dist/no-cloud.js` carrying a planted shared-RDS credential for
+    // exactly that reason, and FAILED the same bytes under any other package
+    // name.
+    //
+    // Attribution replaces it: the recognised thing is a copy of this scanner's
+    // own inert declaration, wherever it lands and whatever the package is
+    // called. Naming the constants near a runtime reference does nothing.
     const dir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-"));
-    const declarationText =
+    const retired = ["@hasna/", "cloud"].join("");
+    const other = ["open-", "cloud"].join("");
+    const rds = ["HASNA_RDS", "_PASSWORD"].join("");
+    const markersOnly =
       "const markerA = 'FORBIDDEN_SHARED_CLOUD_RUNTIMES';\n" +
       "const markerB = 'hasna.no_cloud_evidence_pack.v1';\n" +
-      "const runtime = '@hasna/cloud';\n";
+      `const runtime = '${retired}';\n`;
+    const realDeclaration = `var FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["${retired}", "${other}"];\nexport { FORBIDDEN_SHARED_CLOUD_RUNTIMES };\n`;
     try {
       mkdirSync(join(dir, "dist"));
       writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/contracts", version: "0.4.1" }));
-      writeFileSync(join(dir, "dist", "mode.js"), declarationText);
-      writeFileSync(join(dir, "dist", "service-contract.js"), declarationText);
-      writeFileSync(join(dir, "dist", "secure-local-store.js"), declarationText);
-      writeFileSync(join(dir, "dist", "conformance.js"), declarationText);
 
-      const result = runContracts(["no-cloud-scan", "--json", dir]);
-      expect(result.exitCode).toBe(0);
-      expect(parseStdoutJson(result).verdict).toBe("passed");
+      // Marker strings beside a bare runtime name: still a finding, even at the
+      // path and under the package name the old exemption honoured.
+      writeFileSync(join(dir, "dist", "mode.js"), markersOnly);
+      const markerResult = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(markerResult.exitCode).toBe(1);
+      expect(
+        parseStdoutJson(markerResult).findings.some(
+          (finding: { path: string; pattern: string }) => finding.path === "dist/mode.js" && finding.pattern === retired,
+        ),
+      ).toBe(true);
 
-      writeFileSync(join(dir, "dist", "other.js"), declarationText);
-      const invalidResult = runContracts(["no-cloud-scan", "--json", dir]);
-      expect(invalidResult.exitCode).toBe(1);
-      const payload = parseStdoutJson(invalidResult);
-      expect(payload.findings.some((finding: { path: string; pattern: string }) => finding.path === "dist/other.js" && finding.pattern === "@hasna/cloud")).toBe(true);
+      // The declaration itself, inlined: attributed, so the file passes.
+      writeFileSync(join(dir, "dist", "mode.js"), realDeclaration);
+      const declarationResult = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(declarationResult.exitCode).toBe(0);
+      expect(parseStdoutJson(declarationResult).verdict).toBe("passed");
+
+      // Same file, same package name, same path — plus a planted credential.
+      // This is what the old exemption erased.
+      writeFileSync(join(dir, "dist", "mode.js"), `${realDeclaration}const leaked = process.env.${rds};\nexport { leaked };\n`);
+      const leakResult = runContracts(["no-cloud-scan", "--json", dir]);
+      expect(leakResult.exitCode).toBe(1);
+      expect(
+        parseStdoutJson(leakResult).findings.some(
+          (finding: { path: string; pattern: string }) => finding.path === "dist/mode.js" && finding.pattern === rds,
+        ),
+      ).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

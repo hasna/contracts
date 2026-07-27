@@ -8,7 +8,18 @@ import {
   normalizeArchiveEntry,
   readArchiveMemberText
 } from "./packed-artifact";
-import { importedBindings, importsModule, maskCommentsForPath, mentionsCannotLoad } from "./source-text";
+import {
+  blankSpans,
+  commentSyntaxForPath,
+  importedBindings,
+  importsModule,
+  inlineDataNodes,
+  inlineDataRegions,
+  loadCallMentions,
+  maskCommentsForPath,
+  mentionsCannotLoad,
+  type InlineDataNode
+} from "./source-text";
 import {
   FORBIDDEN_SHARED_CLOUD_RUNTIMES,
   AppCloudManifestSchema,
@@ -57,6 +68,10 @@ interface ScanFile {
  *     else does.
  *   - a `git+ssh:` dependency that installs UNDER the package name without the
  *     name appearing in the specifier.
+ *   - a copy of this scanner's own denylist, bound to one name, rebound to a
+ *     second, and indexed into a load through that second name. Reaching it
+ *     needs a hand-built fake denylist; the assembled-name case above needs
+ *     nothing. See `isOwnPatternDeclaration`.
  */
 const SKIP_DIRS = new Set([".git", "node_modules", ".cache", ".next", ".turbo", "coverage", "docs", "examples", "tests"]);
 const LOCKFILES = new Set(["bun.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"]);
@@ -77,16 +92,36 @@ const MAX_TEXT_BYTES = 5 * 1024 * 1024;
  */
 type RuntimePatternKind = "module" | "symbol" | "config";
 
+/**
+ * `checkKind` — the finding kind this pattern reports, when it is not the kind
+ * of the file it was found in.
+ *
+ * Declared here rather than decided at the finding site, because the finding
+ * site had to SPELL the pattern to decide it: `pattern === ".hasna/cloud"`. A
+ * second literal copy of a forbidden name inside the scanner is a second thing
+ * a bundler inlines into every consumer, and the copies at the finding sites
+ * were not data — they were code, so nothing structural could ever explain them
+ * away. Every forbidden name this file knows is now written exactly once, in
+ * this table.
+ */
 const RUNTIME_PATTERNS = [
   { pattern: "@hasna/cloud", kind: "module", message: "Shared @hasna/cloud runtime reference is forbidden" },
   { pattern: "open-cloud", kind: "module", message: "Shared open-cloud runtime reference is forbidden" },
   { pattern: "cloud-mcp", kind: "module", message: "Legacy cloud-mcp runtime surface is forbidden" },
   { pattern: "registerCloudTools", kind: "symbol", message: "Legacy registerCloudTools runtime surface is forbidden" },
   { pattern: "registerCloudCommands", kind: "symbol", message: "Legacy registerCloudCommands runtime surface is forbidden" },
-  { pattern: ".hasna/cloud", kind: "config", message: "Legacy .hasna/cloud runtime config is forbidden" },
+  { pattern: ".hasna/cloud", kind: "config", checkKind: "runtime_config", message: "Legacy .hasna/cloud runtime config is forbidden" },
   { pattern: "HASNA_CLOUD_", kind: "config", message: "Shared HASNA_CLOUD_* runtime config is forbidden" },
   { pattern: "HASNA_RDS_PASSWORD", kind: "config", message: "Legacy shared RDS credential config is forbidden" }
-] as const satisfies ReadonlyArray<{ pattern: string; kind: RuntimePatternKind; message: string }>;
+] as const satisfies ReadonlyArray<{ pattern: string; kind: RuntimePatternKind; checkKind?: NoCloudCheckKind; message: string }>;
+
+/**
+ * Patterns that are a PATH fragment, so a file living at one is runtime config
+ * whatever its extension says. Read off the table instead of re-spelled.
+ */
+const PATH_CONFIG_PATTERNS = RUNTIME_PATTERNS.filter(
+  (entry): entry is typeof entry & { checkKind: NoCloudCheckKind } => "checkKind" in entry
+);
 
 const MODULE_PATTERNS = RUNTIME_PATTERNS.filter((entry) => entry.kind === "module");
 
@@ -229,33 +264,117 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
   return MODULE_PATTERNS.every((module) => mentionsCannotLoad(file.text, file.path, module.pattern));
 }
 
-const DECLARATION_FILE_MARKERS = [
-  "FORBIDDEN_SHARED_CLOUD_RUNTIMES",
-  "RUNTIME_PATTERNS",
-  "hasna.app_cloud_manifest.v1",
-  "hasna.no_cloud_evidence_pack.v1"
-] as const;
-const CONTRACTS_DECLARATION_PATHS = new Set([
-  "src/no-cloud.ts",
-  "src/schemas.ts",
-  "dist/no-cloud.js",
-  "dist/schemas.js",
-  "dist/validators.js",
-  "dist/index.js",
-  "dist/mode.js",
-  "dist/service-contract.js",
-  "dist/secure-local-store.js",
-  "dist/conformance.js",
-  "dist/client/transport.js",
-  "dist/client/storage.js",
-  "dist/cli/index.js",
-  "dist/no-cloud.d.ts",
-  "dist/schemas.d.ts",
-  "dist/mode.d.ts",
-  "dist/service-contract.d.ts",
-  "dist/secure-local-store.d.ts",
-  "dist/conformance.d.ts"
-]);
+/**
+ * THE INLINED-DECLARATION FALSE POSITIVE, AND WHY IT IS ANSWERED BY CONTENT.
+ *
+ * This scanner declares what it forbids as data:
+ * `FORBIDDEN_SHARED_CLOUD_RUNTIMES = ["@hasna/cloud", "open-cloud"]` and a
+ * `RUNTIME_PATTERNS` row per pattern. A bundler that inlines `@hasna/contracts`
+ * copies both into the consumer's output verbatim, and the scanner then read its
+ * own denylist back out of the consumer's artifact and scored it as the
+ * consumer's breach. Measured on a consumer that imports nothing but
+ * `scanNoCloudTarget`: SIX findings in one `dist/index.js`, including
+ * `HASNA_RDS_PASSWORD`, and nothing the consumer could delete to clear them. The
+ * tell was `open-cloud` reported against a repo that never used it.
+ *
+ * WHAT WAS TRIED AND REJECTED, because the same idea will look attractive again:
+ *
+ *   - EXEMPT BUILD-OUTPUT PATHS (`dist/`, `bin/`, …). The three `config`
+ *     patterns have no import to look for, so a bare occurrence is their only
+ *     detector; exempting build output turns it off. Measured: a `dist`-only
+ *     tarball leaking `HASNA_RDS_PASSWORD` scored two criticals before and zero
+ *     after. A false-positive fix that opens a credential blind spot is worse
+ *     than the bug.
+ *   - EXEMPT THIS PACKAGE'S OWN FILE PATHS by name and package identity. Shipped,
+ *     and it has the same defect in a smaller box: `textFindings` returned `[]`
+ *     for the whole file, config patterns included. Measured against published
+ *     0.8.1 and 0.8.2 with a byte-identical `dist/no-cloud.js` carrying a planted
+ *     `HASNA_RDS_PASSWORD` — named `@hasna/contracts` it PASSED with zero
+ *     findings; named anything else the same bytes scored two criticals. The one
+ *     artifact whose credential detectors were off was this package's own
+ *     release.
+ *   - TREAT A BARE MENTION WITH NO IMPORT SPECIFIER AS A FALSE POSITIVE. Unsound
+ *     in both directions. `bun build --external` emits `__require("…")`, which is
+ *     a real load carrying no specifier the old matcher could see; and a source
+ *     file doing `import pkg from "../package.json" with { type: "json" }` makes
+ *     the bundler inline the whole manifest, so `"@hasna/cloud": "0.1.24"` sits
+ *     in the artifact as a bare mention with zero specifiers anywhere — a
+ *     confirmed true positive.
+ *
+ * WHAT IS ACTUALLY DIFFERENT about the copied declaration is not where it lives
+ * and not what surrounds it in the file. It is that the text IS this scanner's
+ * own constant, still in the inert data shape the scanner wrote it in. So that
+ * is what gets matched, and only the characters it spans are dropped:
+ *
+ *   - the array must equal `FORBIDDEN_SHARED_CLOUD_RUNTIMES` element for
+ *     element, so an array holding anything else is not it;
+ *   - a row must match one `RUNTIME_PATTERNS` entry on ALL THREE of `pattern`,
+ *     `kind` and `message`, so a row cannot pair a name with a message that is
+ *     not that name's own. Wrapping `HASNA_RDS_PASSWORD` in a three-key object
+ *     does not buy an exemption, because the message would have to be the one
+ *     this table already carries — and then the row holds no value, only the
+ *     name of a variable, which is what a denylist is;
+ *   - the collection must sit where data sits and must not be read in place, and
+ *     if it is bound to a name, no load call in the file may mention that name.
+ *     That is what keeps `__require(DENY[0])` from becoming a way to launder a
+ *     specifier through a copy of the denylist.
+ *
+ * The consequence that matters: NO DETECTOR IS TURNED OFF ANYWHERE. Each
+ * occurrence is judged on its own, so the same file keeps every check for every
+ * other occurrence in it — a consumer that bundles `@hasna/contracts` and also
+ * reads `HASNA_CLOUD_*`, or also loads the retired runtime, is still reported.
+ * No path is consulted, so nothing is exempt for living in `dist/`, and
+ * `git mv` cannot change a verdict.
+ *
+ * WHAT IT DOES NOT CLOSE, stated rather than implied: a copy of the denylist
+ * bound to one name, rebound to a second, and indexed into a load through the
+ * second name. Reaching that needs the evader to build a fake denylist; the
+ * scope block at the top of this file already concedes the strictly easier
+ * `"@hasna/" + "cloud"`, which needs nothing. This is inside that documented
+ * limit, not a new hole beside it.
+ */
+function isOwnPatternDeclaration(node: InlineDataNode): boolean {
+  if (node.kind === "array") {
+    return (
+      node.items.length === FORBIDDEN_SHARED_CLOUD_RUNTIMES.length &&
+      node.items.every((item, index) => item.kind === "string" && item.value === FORBIDDEN_SHARED_CLOUD_RUNTIMES[index])
+    );
+  }
+  if (node.kind !== "record") return false;
+  const pattern = node.entries.get("pattern");
+  const kind = node.entries.get("kind");
+  const message = node.entries.get("message");
+  if (pattern?.kind !== "string" || kind?.kind !== "string" || message?.kind !== "string") return false;
+  return RUNTIME_PATTERNS.some(
+    (entry) => entry.pattern === pattern.value && entry.kind === kind.value && entry.message === message.value
+  );
+}
+
+/**
+ * `masked`, with this package's own inlined declarations blanked out.
+ *
+ * Blanked rather than deleted, so every offset in the returned text still lines
+ * up with the original — the invariant `maskComments` maintains, and the reason a
+ * caller can mix the two.
+ *
+ * Restricted to C-family source because that is the only thing a bundler inlines
+ * a JavaScript constant into. A `package.json` is read structurally by
+ * `manifestEdges` and a lockfile by the graph walk, and neither should have its
+ * text quietly edited on the strength of a shape match.
+ */
+function withoutInlinedDeclarations(masked: string, path: string): string {
+  if (commentSyntaxForPath(path) !== "c-like") return masked;
+  const spans: Array<{ start: number; end: number }> = [];
+  for (const region of inlineDataRegions(masked, RUNTIME_PATTERNS.map((entry) => entry.pattern))) {
+    // A collection stored under a name that a load call also names is a
+    // laundering route, not a declaration. Withdraw the whole region.
+    if (region.boundName !== null && loadCallMentions(masked, region.boundName)) continue;
+    for (const node of inlineDataNodes(region.root)) {
+      if (isOwnPatternDeclaration(node)) spans.push({ start: node.start, end: node.end });
+    }
+  }
+  return blankSpans(masked, spans);
+}
 
 function stableId(input: string) {
   let hash = 0;
@@ -360,26 +479,17 @@ function isAppCloudManifestDocument(file: ScanFile): boolean {
   return isRecord(parsed) && parsed.schema === SCHEMA_IDS.appCloudManifest;
 }
 
-function isNoCloudDeclarationFile(file: ScanFile, packageName?: string): boolean {
-  if (packageName !== "@hasna/contracts") return false;
-  const normalized = file.path.replaceAll("\\", "/");
-  if (!CONTRACTS_DECLARATION_PATHS.has(normalized)) return false;
-  if (!/\.(cjs|cts|js|jsx|mjs|mts|ts|tsx)$/i.test(normalized)) return false;
-  const markerCount = DECLARATION_FILE_MARKERS.filter((marker) => file.text.includes(marker)).length;
-  return markerCount >= 2;
-}
-
 function pathFindings(file: ScanFile, severity: NoCloudFindingSeverity): NoCloudFinding[] {
   const findings: NoCloudFinding[] = [];
-  for (const { pattern, message } of RUNTIME_PATTERNS) {
-    if (!file.path.includes(pattern)) continue;
+  for (const entry of RUNTIME_PATTERNS) {
+    if (!file.path.includes(entry.pattern)) continue;
     findings.push({
-      id: `finding_${stableId(`${file.path}:path:${pattern}`)}`,
-      kind: pattern === ".hasna/cloud" ? "runtime_config" : file.kind,
+      id: `finding_${stableId(`${file.path}:path:${entry.pattern}`)}`,
+      kind: "checkKind" in entry ? entry.checkKind : file.kind,
       severity,
       path: file.path,
-      pattern,
-      message: `${message} in path`,
+      pattern: entry.pattern,
+      message: `${entry.message} in path`,
       evidenceRefs: []
     });
   }
@@ -394,14 +504,18 @@ function pathFindings(file: ScanFile, severity: NoCloudFindingSeverity): NoCloud
  * `@hasna/connectors@1.4.0`, whose only `@hasna/cloud` reference in `src/` is
  * the JSDoc line recording that the import was REMOVED.
  *
+ * Then this package's own inlined pattern declarations are blanked — see
+ * `withoutInlinedDeclarations` for why that is decided by content and not by
+ * path, and for the two path-shaped attempts it replaces. Both maskers preserve
+ * offsets, so they compose.
+ *
  * Each pattern yields at most one finding, and the reason is recorded in the
  * message so a reviewer can tell an import from a mention without re-running
  * anything.
  */
-function textFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageName?: string): NoCloudFinding[] {
+function textFindings(file: ScanFile, severity: NoCloudFindingSeverity): NoCloudFinding[] {
   if (isAppCloudManifestDocument(file)) return [];
-  if (isNoCloudDeclarationFile(file, packageName)) return [];
-  const masked = maskCommentsForPath(file.text, file.path);
+  const masked = withoutInlinedDeclarations(maskCommentsForPath(file.text, file.path), file.path);
   // The exemption is withdrawn from a "guard test" that can load a module at
   // all — the one move that turns a mention into a real load, and the one thing
   // a genuine guard test never does.
@@ -524,9 +638,9 @@ function lockfileUnwalkedNameFindings(
  * an unparsed lockfile is the failure mode this change exists to remove.
  */
 function lockfileFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageName?: string): NoCloudFinding[] {
-  if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity, packageName);
+  if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity);
   const walk = lockfileWalk(file.text, FORBIDDEN_LOCKFILE_PACKAGES);
-  if (walk === null) return textFindings(file, severity, packageName);
+  if (walk === null) return textFindings(file, severity);
   return [
     ...walk.edges.map((edge) => edgeFinding(edge, file.path, "lockfile", packageName)),
     ...lockfileUnwalkedNameFindings(file, severity, walk),
@@ -536,16 +650,22 @@ function lockfileFindings(file: ScanFile, severity: NoCloudFindingSeverity, pack
 
 function scanFindings(file: ScanFile, severity: NoCloudFindingSeverity, packageName?: string): NoCloudFinding[] {
   if (file.kind === "package_manifest") {
-    return [...dependencyFindings(file), ...pathFindings(file, severity), ...textFindings(file, "high", packageName)];
+    return [...dependencyFindings(file), ...pathFindings(file, severity), ...textFindings(file, "high")];
   }
   if (file.kind === "lockfile") {
     return [...pathFindings(file, severity), ...lockfileFindings(file, severity, packageName)];
   }
-  return [...pathFindings(file, severity), ...textFindings(file, severity, packageName)];
+  return [...pathFindings(file, severity), ...textFindings(file, severity)];
 }
 
 function shouldReadPath(path: string): NoCloudCheckKind | null {
-  if (path.includes(".hasna/cloud")) return "runtime_config";
+  // Read off `RUNTIME_PATTERNS` rather than re-spelled here. A second literal
+  // copy of a forbidden name inside this file is a second thing a bundler
+  // inlines into every consumer, and unlike the table it is code, so nothing
+  // structural can ever attribute it back to us.
+  for (const entry of PATH_CONFIG_PATTERNS) {
+    if (path.includes(entry.pattern)) return entry.checkKind;
+  }
   const name = basename(path);
   if (name === "package.json") return "package_manifest";
   if (LOCKFILES.has(name)) return "lockfile";

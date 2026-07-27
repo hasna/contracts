@@ -601,6 +601,294 @@ function escapeRegex(value: string): string {
 }
 
 /**
+ * A constant data structure spelled out in source: a literal array, a literal
+ * record, or a string.
+ *
+ * WHY THIS EXISTS. A bundler that inlines a dependency copies that
+ * dependency's constants into the consumer's output verbatim. The consumer did
+ * not write them and cannot delete them. Deciding what to do about that needs
+ * the STRUCTURE the names sit in, because that is the only place the answer
+ * lives: a filename cannot tell a copied constant from a hand-written one, and
+ * the presence or absence of import specifiers elsewhere in the file cannot
+ * either — a bundle that inlines `package.json` carries a whole `dependencies`
+ * map with no specifier anywhere near it.
+ *
+ * Deliberately NOT a JS parser. It reads one shape only: collections whose
+ * leaves are all string literals. That shape can hold data and nothing else —
+ * no call, no identifier, no computed member, no template with a substitution.
+ * Anything else makes the parse fail, and a failed parse yields no region, so
+ * the caller learns nothing and scans the text as it stands.
+ */
+export type InlineDataNode =
+  | { kind: "string"; value: string; start: number; end: number }
+  | { kind: "array"; items: readonly InlineDataNode[]; start: number; end: number }
+  | { kind: "record"; entries: ReadonlyMap<string, InlineDataNode>; start: number; end: number };
+
+/** An outermost inert collection, with the name it is bound to if it has one. */
+export interface InlineDataRegion {
+  root: InlineDataNode;
+  /**
+   * The identifier this collection is assigned to — `RUNTIME_PATTERNS` in
+   * `var RUNTIME_PATTERNS = [...]`. `null` when the collection is not assigned
+   * to anything, which is also the answer when we could not read a name.
+   */
+  boundName: string | null;
+  start: number;
+  end: number;
+}
+
+/**
+ * How far back from an occurrence we look for the collection enclosing it.
+ *
+ * A bound, not a guess: the parse is attempted from every `[` and `{` in this
+ * window, so an unbounded window would make a large file quadratic. The
+ * declarations this exists to recognise are one line each; 4 KiB is three
+ * orders of magnitude of headroom, and a structure that does not fit simply
+ * yields no region — noise, never blindness.
+ */
+const INLINE_DATA_WINDOW = 4096;
+const IDENTIFIER_TAIL = /([A-Za-z_$][\w$]*)\s*$/;
+/** `readonly` is a type-only modifier, so what follows it is a type, not a value. */
+const TYPE_POSITION_KEYWORD = /(?:^|[^\w$])readonly$/;
+
+/** Read one string literal. Backticks count, but only without a substitution. */
+function readStringLiteral(text: string, start: number): { value: string; end: number } | null {
+  const quote = text[start];
+  if (quote !== '"' && quote !== "'" && quote !== "`") return null;
+  let value = "";
+  for (let index = start + 1; index < text.length; index += 1) {
+    const character = text[index]!;
+    if (character === "\\") {
+      const escaped = text[index + 1];
+      if (escaped === undefined) return null;
+      // Only the escapes needed to READ the literal are undone. An escape that
+      // encodes a character another way — `\x40` for `@` — is left alone on
+      // purpose: decoding it would let an obfuscated spelling claim whatever
+      // the caller grants a recognised constant, and refusing to decode it
+      // costs a missed recognition, which is the noisy direction.
+      value += escaped === "\\" || escaped === '"' || escaped === "'" || escaped === "`" ? escaped : `\\${escaped}`;
+      index += 1;
+      continue;
+    }
+    if (character === quote) return { value, end: index + 1 };
+    // A substitution makes this a template under construction, not a constant.
+    if (quote === "`" && character === "$" && text[index + 1] === "{") return null;
+    if (character === "\n" && quote !== "`") return null;
+    value += character;
+  }
+  return null;
+}
+
+function skipSpace(text: string, index: number): number {
+  let at = index;
+  while (at < text.length && /\s/.test(text[at]!)) at += 1;
+  return at;
+}
+
+/**
+ * Parse one inert collection starting at `[` or `{`, or fail.
+ *
+ * Every failure is a refusal to describe the text, so the caller falls back to
+ * reading it as it is. That is the direction this whole module fails in.
+ */
+function parseInlineData(text: string, start: number): InlineDataNode | null {
+  const opener = text[start];
+  if (opener === '"' || opener === "'" || opener === "`") {
+    const literal = readStringLiteral(text, start);
+    return literal === null ? null : { kind: "string", value: literal.value, start, end: literal.end };
+  }
+  if (opener === "[") {
+    const items: InlineDataNode[] = [];
+    let index = skipSpace(text, start + 1);
+    while (index < text.length) {
+      if (text[index] === "]") return { kind: "array", items, start, end: index + 1 };
+      const item = parseInlineData(text, index);
+      if (item === null) return null;
+      items.push(item);
+      index = skipSpace(text, item.end);
+      if (text[index] === ",") index = skipSpace(text, index + 1);
+      else if (text[index] !== "]") return null;
+    }
+    return null;
+  }
+  if (opener === "{") {
+    const entries = new Map<string, InlineDataNode>();
+    let index = skipSpace(text, start + 1);
+    while (index < text.length) {
+      if (text[index] === "}") return { kind: "record", entries, start, end: index + 1 };
+      // A key is a bare identifier or a quoted string. A computed key `[k]` is
+      // not a constant, so it ends the parse.
+      const quoted = readStringLiteral(text, index);
+      let key: string;
+      if (quoted !== null) {
+        key = quoted.value;
+        index = skipSpace(text, quoted.end);
+      } else {
+        const identifier = /^[A-Za-z_$][\w$]*/.exec(text.slice(index, index + 128));
+        if (identifier === null) return null;
+        key = identifier[0];
+        index = skipSpace(text, index + identifier[0].length);
+      }
+      if (text[index] !== ":") return null;
+      index = skipSpace(text, index + 1);
+      const value = parseInlineData(text, index);
+      if (value === null) return null;
+      entries.set(key, value);
+      index = skipSpace(text, value.end);
+      if (text[index] === ",") index = skipSpace(text, index + 1);
+      else if (text[index] !== "}") return null;
+    }
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Is this collection sitting where data sits, and does nothing read a member
+ * out of it on the spot?
+ *
+ * Both halves close the same evasion: a collection is inert, but a member
+ * PULLED OUT of one is an ordinary value that can be handed to a resolver.
+ * `require(["a","b"][0])` is a real load whose specifier never appears as a
+ * specifier. So the collection has to be in a position that only stores it —
+ * after `=`, or as an element or property of another collection — and the
+ * character after it must not be the `[`, `(`, `.` or `?.` that would consume
+ * it in place.
+ */
+function isInertPosition(text: string, start: number, end: number): boolean {
+  const before = text.slice(Math.max(0, start - 64), start).replace(/\s+$/, "");
+  if (before !== "") {
+    const last = before[before.length - 1]!;
+    // A tuple TYPE, which is erased at compile time and cannot be read at
+    // runtime at all: `declare const DENY: readonly ["a", "b"];` is what `tsc`
+    // emits into the `.d.ts` beside every bundle, and `readonly` is a type-only
+    // modifier, so this cannot admit a value position by mistake. Without it the
+    // scanner failed its own shipped `dist/schemas.d.ts`.
+    if (TYPE_POSITION_KEYWORD.test(before)) return true;
+    if (!(last === "=" || last === "[" || last === "," || last === ":" || last === "(")) return false;
+    // `=` must be assignment, not a comparison: `x === [...]` cannot store it,
+    // and `!== [...]` is the same. `(` is allowed for a parenthesised value but
+    // a CALL argument is not — that is `require([...][0])`'s outer shape.
+    if (last === "=" && /[=!<>]$/.test(before.slice(0, -1))) return false;
+    if (last === "(" && IDENTIFIER_TAIL.test(before.slice(0, -1))) return false;
+  }
+  const after = skipSpace(text, end);
+  const next = text.slice(after, after + 2);
+  if (next.startsWith("[") || next.startsWith("(") || next.startsWith(".") || next.startsWith("?.")) return false;
+  return true;
+}
+
+function boundNameBefore(text: string, start: number): string | null {
+  const before = text.slice(Math.max(0, start - 128), start).replace(/\s+$/, "");
+  if (!before.endsWith("=")) return null;
+  return IDENTIFIER_TAIL.exec(before.slice(0, -1))?.[1] ?? null;
+}
+
+/**
+ * The outermost inert collections that contain any of `needles`.
+ *
+ * Driven from the occurrences rather than from every bracket in the file, so
+ * the cost is proportional to how many times the caller's names appear — a
+ * handful — and not to the size of a bundle.
+ *
+ * OUTERMOST matters for `boundName`: the record `{ pattern: "…" }` is an
+ * element of `RUNTIME_PATTERNS`, and it is the array that carries the name a
+ * later `require(NAME[0])` would have to use.
+ */
+export function inlineDataRegions(text: string, needles: readonly string[]): InlineDataRegion[] {
+  const regions: InlineDataRegion[] = [];
+  const seen = new Set<number>();
+  for (const needle of needles) {
+    for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {
+      const floor = Math.max(0, at - INLINE_DATA_WINDOW);
+      const openers: number[] = [];
+      for (let back = at; back >= floor; back -= 1) {
+        const character = text[back];
+        if (character === "[" || character === "{") openers.push(back);
+      }
+      // Farthest first: the widest collection that still parses and still
+      // covers the occurrence is the outermost one.
+      //
+      // COVERAGE IS CHECKED BEFORE ANYTHING ELSE, and that ordering is the
+      // whole correctness of this loop. An earlier version consulted `seen`
+      // first, so an unrelated collection recorded a few hundred characters
+      // upstream — a second declaration in the same bundle — ended the search
+      // for an occurrence it does not contain, and the occurrence went
+      // unattributed. It only reproduced when the two declarations were closer
+      // together than this window, which is why a compact fixture caught it and
+      // a real 336 KB bundle did not.
+      for (const opener of openers.reverse()) {
+        const root = parseInlineData(text, opener);
+        if (root === null || root.kind === "string") continue;
+        if (!(root.start <= at && at + needle.length <= root.end)) continue;
+        // Enclosing, so it is the answer for this occurrence either way.
+        if (seen.has(opener)) break;
+        if (!isInertPosition(text, root.start, root.end)) break;
+        seen.add(opener);
+        regions.push({ root, boundName: boundNameBefore(text, root.start), start: root.start, end: root.end });
+        break;
+      }
+    }
+  }
+  return regions;
+}
+
+/** Every node in a region, outermost first. */
+export function inlineDataNodes(node: InlineDataNode): InlineDataNode[] {
+  if (node.kind === "array") return [node, ...node.items.flatMap(inlineDataNodes)];
+  if (node.kind === "record") return [node, ...[...node.entries.values()].flatMap(inlineDataNodes)];
+  return [node];
+}
+
+/**
+ * Callee shapes that resolve a module.
+ *
+ * `__require` is why this is not `\brequire`. `bun build --external` compiles a
+ * CommonJS `require("x")` to `__require("x")`, and a word boundary does not
+ * exist between `_` and `r`, so the plain spelling walked straight past the one
+ * form that build output actually uses. A leading-underscore wrapper is the
+ * convention across bundlers (`__require`, `__toESM`-fed requires), so the
+ * underscores are matched rather than enumerated.
+ *
+ * Widening this can only ADD findings: a caller that fails to recognise a load
+ * falls through to reporting the bare name instead, so a name recognised here
+ * is reclassified, never cleared.
+ */
+const LOAD_CALLEE = String.raw`(?:^|[^\w$])_*(?:import|require)`;
+
+/**
+ * Does a load call in this text mention `name`?
+ *
+ * The companion to `isInertPosition`: that one refuses to explain away a
+ * collection something reads a member out of ON THE SPOT, and this one refuses
+ * when the collection was stored under a name and a load call names it —
+ * `var X = [...]; __require(X[0]);`.
+ *
+ * Bounded to the argument list, because a load call is the only place a
+ * specifier can arrive.
+ */
+export function loadCallMentions(text: string, name: string): boolean {
+  const calls = new RegExp(`${LOAD_CALLEE}\\s*\\(([^)]*)`, "g");
+  // Whole identifier, not a substring: `DENYLIST` is not `DENY`. The argument is
+  // padded so the leading boundary always has a character to match — reading it
+  // straight after the `(` left nothing there, and the check returned false for
+  // the one shape it exists to catch, `__require(DENY[0])`.
+  const bounded = new RegExp(`[^\\w$]${escapeRegex(name)}(?![\\w$])`);
+  for (const match of text.matchAll(calls)) {
+    if (bounded.test(` ${match[1] ?? ""}`)) return true;
+  }
+  return false;
+}
+
+/** Replace the given spans with spaces, so every later offset still lines up. */
+export function blankSpans(text: string, spans: ReadonlyArray<{ start: number; end: number }>): string {
+  if (spans.length === 0) return text;
+  const chars = toUnits(text);
+  for (const span of spans) blank(chars, span.start, span.end);
+  return chars.join("");
+}
+
+/**
  * The three quotes a specifier can be written in.
  *
  * The backtick is the one that was missing, and leaving it out cost a FALSE
@@ -653,7 +941,7 @@ function moduleSpecifier(moduleName: string): string {
  */
 export function importsModule(maskedText: string, moduleName: string): boolean {
   const pattern = new RegExp(
-    String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s*)` + moduleSpecifier(moduleName),
+    String.raw`(?:\bfrom\s*|${LOAD_CALLEE}\s*\(\s*|\bimport\s*)` + moduleSpecifier(moduleName),
   );
   return pattern.test(maskedText);
 }
@@ -672,9 +960,9 @@ export function importedBindings(maskedText: string, moduleName: string): Set<st
 
   // import <clause> from "mod"  /  export <clause> from "mod"
   const statement = new RegExp(String.raw`\b(?:import|export)\s+([^;]*?)\bfrom\s*${specifier}`, "g");
-  // const <clause> = require("mod")  /  = await import("mod")
+  // const <clause> = require("mod")  /  = await import("mod")  /  = __require("mod")
   const assignment = new RegExp(
-    String.raw`(?:const|let|var)\s+([^=;]*?)=\s*(?:await\s+)?(?:require|import)\s*\(\s*${specifier}\s*\)`,
+    String.raw`(?:const|let|var)\s+([^=;]*?)=\s*(?:await\s+)?_*(?:require|import)\s*\(\s*${specifier}\s*\)`,
     "g",
   );
 
