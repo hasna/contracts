@@ -155,6 +155,310 @@ const MUTATIONS: Mutation[] = [
     from: "  const text = withoutComment(segment).trim();",
     to: "  const text = segment.trim();",
   },
+
+  // ---------------------------------------------------------------------
+  // The no-cloud gate: dependency edges and real imports, not substrings.
+  //
+  // Filter to these with `bun scripts/mutation-audit.ts nocloud`.
+  //
+  // These pin the fix for the gate that failed `@hasna/connectors@1.4.0` — the
+  // one repo already remediated and published — on a JSDoc comment and on the
+  // guard test the remediation pattern itself mandates.
+  // ---------------------------------------------------------------------
+  {
+    id: "M19-nocloud-comments-are-not-code",
+    rule: "a comment is prose; only code is an edge",
+    file: "src/no-cloud.ts",
+    from: "  const masked = maskCommentsForPath(file.text, file.path);",
+    to: "  const masked = file.text;",
+  },
+  {
+    id: "M20-nocloud-symbol-needs-an-import",
+    rule: "registerCloud* is the retired surface only when imported from it",
+    file: "src/no-cloud.ts",
+    from: "      const bound = MODULE_PATTERNS.some((module) => importedBindings(masked, module.pattern).has(pattern));",
+    to: "      const bound = masked.includes(pattern);",
+  },
+  {
+    id: "M21-nocloud-guard-test-allowlisted",
+    rule: "the mandated guard test may name what it forbids",
+    file: "src/no-cloud.ts",
+    from: "  return NO_CLOUD_GUARD_TEST.test(path.replaceAll(\"\\\\\", \"/\"));",
+    to: "  return false;",
+  },
+  {
+    id: "M22-nocloud-allowlist-is-not-a-bypass",
+    rule: "the allowlist covers mentions, never a real import",
+    file: "src/no-cloud.ts",
+    from: "  return NO_CLOUD_GUARD_TEST.test(path.replaceAll(\"\\\\\", \"/\"));",
+    to: "  return /\\.test\\.[cm]?[jt]sx?$/.test(path.replaceAll(\"\\\\\", \"/\"));",
+  },
+  {
+    id: "M23-nocloud-lockfile-is-a-graph",
+    rule: "bun.lock is walked as a graph, not grepped",
+    file: "src/no-cloud.ts",
+    from: "  if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity, packageName);",
+    to: "  return textFindings(file, severity, packageName);\n  if (basename(file.path) !== BUN_LOCKFILE) return textFindings(file, severity, packageName);",
+  },
+  {
+    id: "M24-nocloud-unreadable-lockfile",
+    rule: "a lockfile we cannot parse is scanned, not passed",
+    file: "src/dependency-edge.ts",
+    from: "  if (roots.length === 0) return null;",
+    to: "  if (roots.length === 0) return [];",
+  },
+  {
+    id: "M25-nocloud-linked-dev-is-installed",
+    rule: "a linked package's devDependencies land in the tree and are edges",
+    file: "src/dependency-edge.ts",
+    from: "      if (node.linked) {",
+    to: "      if (false) {",
+  },
+  {
+    id: "M25b-nocloud-registry-dev-is-not-installed",
+    rule: "a registry package's devDependencies are not installed and not edges",
+    file: "src/dependency-edge.ts",
+    from: "      if (node.linked) {",
+    to: "      if (true) {",
+  },
+  {
+    id: "M25c-nocloud-linked-is-read-from-the-specifier",
+    rule: "file:/link:/workspace: is what marks a resolution linked",
+    file: "src/dependency-edge.ts",
+    from: "  return /^(?:file|link|workspace):/.test(id.slice(name.length + 1));",
+    to: "  return false;",
+  },
+  {
+    id: "M26-nocloud-transitive-production-edge",
+    rule: "a transitive production dependency is still an edge",
+    file: "src/dependency-edge.ts",
+    from: "    for (const node of reachable) {",
+    to: "    for (const node of []) {",
+  },
+  {
+    id: "M27-nocloud-pin-sections-are-edges",
+    rule: "overrides and resolutions pull a package in",
+    file: "src/dependency-edge.ts",
+    from: 'export const PIN_SECTIONS = ["overrides", "resolutions"] as const;',
+    to: "export const PIN_SECTIONS = [] as unknown as readonly [\"overrides\", \"resolutions\"];",
+  },
+  {
+    id: "M28-nocloud-name-list-sections-are-edges",
+    rule: "bundleDependencies and trustedDependencies are arrays of names",
+    file: "src/dependency-edge.ts",
+    from: '  if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === "string");',
+    to: "  if (Array.isArray(value)) return [];",
+  },
+  {
+    id: "M29-nocloud-strings-are-not-comments",
+    rule: "`//` inside a string literal does not start a comment",
+    file: "src/source-text.ts",
+    from: "    if (character === '\"' || character === \"'\") {",
+    to: "    if (false) {",
+  },
+  {
+    id: "M30-nocloud-yaml-hash-needs-space",
+    rule: "`#` opens a YAML comment only at line start or after whitespace",
+    file: "src/source-text.ts",
+    from: "        if (previous === \"\" || /\\s/.test(previous)) {",
+    to: "        if (true) {",
+  },
+  {
+    id: "M32-nocloud-template-frame-closes",
+    rule: "a closed template pops its frame, so later comments still mask",
+    file: "src/source-text.ts",
+    from: "      if (chunk.closed) templateDepths.pop();",
+    to: "      if (false) templateDepths.pop();",
+  },
+  {
+    id: "M33-nocloud-regex-literal-tracking",
+    rule: "a quote inside a regex literal does not open a string",
+    file: "src/source-text.ts",
+    from: "    if (character === \"/\" && regexCanStart(text.slice(Math.max(0, index - 64), index))) {",
+    to: "    if (false) {",
+  },
+  {
+    id: "M34-nocloud-unterminated-masks-nothing",
+    rule: "a parse we lost the thread on masks nothing, and fails closed",
+    file: "src/source-text.ts",
+    from: "      const end = text.indexOf(\"*/\", index + 2);\n      if (end === -1) return null;",
+    to: "      const end = text.indexOf(\"*/\", index + 2);\n      if (end === -1) return chars.join(\"\");",
+  },
+  {
+    id: "M35-nocloud-rename-binds-the-local-name",
+    rule: "`x as y` binds y, the name actually in scope",
+    file: "src/source-text.ts",
+    from: '      const name = (pieces[pieces.length - 1] ?? "").trim();',
+    to: '      const name = (pieces[0] ?? "").trim();',
+  },
+  {
+    id: "M36-nocloud-deep-imports-count",
+    rule: "a deep import path is the same edge as the bare specifier",
+    file: "src/source-text.ts",
+    from: "${escapeRegex(moduleName)}(?:/${SPECIFIER_CHAR}*)?${SPECIFIER_QUOTE}",
+    to: "${escapeRegex(moduleName)}${SPECIFIER_QUOTE}",
+  },
+  {
+    id: "M37-nocloud-every-workspace-is-a-seed",
+    rule: "a monorepo's member workspaces seed the walk, not just the root entry",
+    file: "src/dependency-edge.ts",
+    from: "  const roots = installRoots(lock);",
+    to: "  const roots = installRoots(lock).filter((root) => root.label === null);",
+  },
+  {
+    id: "M38-nocloud-alias-is-the-package-it-installs",
+    rule: "a linked or npm-aliased resolution is the package it resolves to",
+    file: "src/dependency-edge.ts",
+    from: "    if (node.alias !== null && forbidden.includes(node.alias)) return node.alias;",
+    to: "    if (false) return node.alias;",
+  },
+  {
+    id: "M38b-nocloud-alias-is-not-a-substring",
+    rule: "an alias lookup matches a whole name, never a substring",
+    file: "src/dependency-edge.ts",
+    from: "    if (node.alias !== null && forbidden.includes(node.alias)) return node.alias;",
+    to: "    if (node.alias !== null && forbidden.some((entry) => node.alias!.includes(entry))) return node.alias;",
+  },
+  {
+    id: "M39-nocloud-lockfile-walks-every-module-pattern",
+    rule: "the lockfile walk covers every forbidden module name, not one constant",
+    file: "src/no-cloud.ts",
+    from: "  const edges = lockfileEdges(file.text, FORBIDDEN_LOCKFILE_PACKAGES);",
+    to: "  const edges = lockfileEdges(file.text, FORBIDDEN_SHARED_CLOUD_RUNTIMES);",
+  },
+  {
+    id: "M40-nocloud-allowlist-is-module-names-only",
+    rule: "the guard-test allowlist never exempts runtime config",
+    file: "src/no-cloud.ts",
+    from: '    } else if (!(guardTest && kind === "module") && masked.includes(pattern)) {',
+    to: "    } else if (!guardTest && masked.includes(pattern)) {",
+  },
+  {
+    id: "M41-nocloud-specifier-is-matched-anywhere",
+    rule: "the module name is matched as a path segment, not anchored at the quote",
+    file: "src/source-text.ts",
+    from: "(?:${SPECIFIER_CHAR}*/)?${escapeRegex(moduleName)}",
+    to: "${escapeRegex(moduleName)}",
+  },
+  {
+    id: "M42-nocloud-bare-import-needs-no-space",
+    rule: "`import\"x\"` is the same side-effect import as `import \"x\"`",
+    file: "src/source-text.ts",
+    from: "    String.raw`(?:\\bfrom\\s*|\\bimport\\s*\\(\\s*|\\brequire\\s*\\(\\s*|\\bimport\\s*)` + moduleSpecifier(moduleName),",
+    to: "    String.raw`(?:\\bfrom\\s*|\\bimport\\s*\\(\\s*|\\brequire\\s*\\(\\s*|\\bimport\\s+)` + moduleSpecifier(moduleName),",
+  },
+  {
+    id: "M43-nocloud-lockfile-config-is-still-read",
+    rule: "config patterns no edge can carry are still read out of bun.lock",
+    file: "src/no-cloud.ts",
+    from: '  return [...edges.map((edge) => edgeFinding(edge, file.path, "lockfile", packageName)), ...lockfileTextFindings(file, severity)];',
+    to: '  return edges.map((edge) => edgeFinding(edge, file.path, "lockfile", packageName));',
+  },
+  {
+    id: "M50-nocloud-utf16-index-alignment",
+    rule: "the mask is addressed in UTF-16 units, the same as the offsets it uses",
+    file: "src/source-text.ts",
+    from: "  return text.split(\"\");\n}",
+    to: "  return [...text];\n}",
+  },
+  {
+    id: "M51-nocloud-json-and-jsx-are-not-masked",
+    rule: "JSON and JSX are scanned raw, because guessing their comments hides code",
+    file: "src/source-text.ts",
+    from: "const C_LIKE_EXTENSIONS = /\\.(?:[cm]?[jt]s)$/i;",
+    to: "const C_LIKE_EXTENSIONS = /\\.(?:[cm]?[jt]sx?|json)$/i;",
+  },
+  {
+    id: "M52-nocloud-dev-hop-is-not-laundered",
+    rule: "a production hop after a dev hop is still a dev edge",
+    file: "src/dependency-edge.ts",
+    from: '        for (const name of node.development) next.push({ name, scope: "development" });',
+    to: "        for (const name of node.development) next.push({ name, scope: current.scope });",
+  },
+  {
+    id: "M53-nocloud-key-alias-is-registered",
+    rule: "an entry is findable by the name a dependent wrote, not only by what it resolves to",
+    file: "src/dependency-edge.ts",
+    from: "    for (const lookup of new Set([name, aliasFromKey(key, keys)])) {",
+    to: "    for (const lookup of new Set([name])) {",
+  },
+  {
+    id: "M54-nocloud-identity-reads-the-resolved-name",
+    rule: "an aliased KEY is judged by the package its resolution names",
+    file: "src/dependency-edge.ts",
+    from: "    if (forbidden.includes(node.name)) return node.name;",
+    to: "    if (false) return node.name;",
+  },
+  {
+    id: "M55-nocloud-dynamic-load-withdraws-exemption",
+    rule: "a computed import in the guard test is a load, not a mention",
+    file: "src/no-cloud.ts",
+    from: "  const guardTest = isNoCloudGuardTest(file.path) && !DYNAMIC_MODULE_LOAD.test(masked);",
+    to: "  const guardTest = isNoCloudGuardTest(file.path);",
+  },
+  {
+    id: "M56-nocloud-symbols-need-code-to-read",
+    rule: "import analysis applies where there is code; elsewhere the name is the evidence",
+    file: "src/no-cloud.ts",
+    from: '  const codeLike = file.kind === "source_import" || file.kind === "packed_artifact";',
+    to: "  const codeLike = true;",
+  },
+  {
+    id: "M57-nocloud-lockfile-top-level-sections",
+    rule: "the lockfile's own overrides/trusted/patched sections are install-bearing",
+    file: "src/dependency-edge.ts",
+    from: "  if (Object.keys(topLevel).length > 0) roots.push({ label: null, record: topLevel });",
+    to: "  if (false) roots.push({ label: null, record: topLevel });",
+  },
+  {
+    id: "M58-nocloud-patched-key-carries-a-version",
+    rule: "a patchedDependencies key is name@version, not a bare name",
+    file: "src/dependency-edge.ts",
+    from: "      .map((key) => nameFromResolutionId(key) ?? key)",
+    to: "      .map((key) => key)",
+  },
+  {
+    id: "M59-nocloud-node-name-lists-are-edges",
+    rule: "a node's bundleDependencies pull a package in, same as the manifest's",
+    file: "src/dependency-edge.ts",
+    from: "      production: meta ? [...PRODUCTION_SECTIONS, ...PIN_SECTIONS, ...NAME_LIST_SECTIONS].flatMap((section) => namesInSection(meta, section)) : [],",
+    to: "      production: meta ? [...PRODUCTION_SECTIONS].flatMap((section) => namesInSection(meta, section)) : [],",
+  },
+  {
+    id: "M60-nocloud-dynamic-load-is-a-negative",
+    rule: "anything but one complete simple string literal withdraws the exemption",
+    file: "src/no-cloud.ts",
+    from: "\\s*(?!([\"'])[^\"'\\n]*\\1\\s*\\))/;",
+    to: "\\s*[A-Za-z_$]/;",
+  },
+  {
+    id: "M61-nocloud-backtick-is-a-specifier",
+    rule: "a template-literal specifier is a real import",
+    file: "src/source-text.ts",
+    from: "const SPECIFIER_QUOTE = \"[\\\"'`]\";",
+    to: "const SPECIFIER_QUOTE = \"[\\\"']\";",
+  },
+  {
+    id: "M62-nocloud-hoisted-skips-transitive-links",
+    rule: "a hoisted install does not materialise a transitive linked resolution",
+    file: "src/dependency-edge.ts",
+    from: "    const reachable = hoisted ? known.filter((node) => current.root || !node.linked) : known;",
+    to: "    const reachable = known;",
+  },
+  {
+    id: "M63-nocloud-isolated-keeps-transitive-links",
+    rule: "an isolated (monorepo) install DOES materialise them, so they stay edges",
+    file: "src/dependency-edge.ts",
+    from: "    const reachable = hoisted ? known.filter((node) => current.root || !node.linked) : known;",
+    to: "    const reachable = known.filter((node) => current.root || !node.linked);",
+  },
+  {
+    id: "M64-nocloud-workspace-count-is-the-discriminator",
+    rule: "the workspace count is what tells hoisted from isolated",
+    file: "src/dependency-edge.ts",
+    from: "  return Object.values(workspaces).filter(isRecord).length <= 1;",
+    to: "  return true;",
+  },
 ];
 
 const repoRoot = join(import.meta.dir, "..");
@@ -192,12 +496,19 @@ for (const mutation of selected) {
     continue;
   }
   writeFileSync(path, original.replace(mutation.from, mutation.to));
-  const result = runSuite();
+  let result = runSuite();
+  // A suite that reported NOTHING did not survive the mutation — it failed to
+  // run at all, which under load looks identical to a survivor and is why a
+  // review saw `M21 SURVIVED 0/0` that re-ran clean in isolation. Retry once,
+  // then say "no result" rather than blame the rule.
+  if (result.pass === 0 && result.fail === 0) result = runSuite();
   writeFileSync(path, original);
+  const ranAtAll = result.pass > 0 || result.fail > 0;
   const caught = result.fail > 0;
   if (!caught) survivors += 1;
+  const verdict = !ranAtAll ? "NO-RESULT" : caught ? "caught " : "SURVIVED";
   console.log(
-    `${mutation.id.padEnd(38)} ${caught ? "caught " : "SURVIVED"} ${result.pass}/${result.fail}` +
+    `${mutation.id.padEnd(38)} ${verdict} ${result.pass}/${result.fail}` +
       (caught ? `  -> ${result.failed[0]?.slice(0, 60) ?? ""}` : `  (rule: ${mutation.rule})`),
   );
 }

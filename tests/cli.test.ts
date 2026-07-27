@@ -325,7 +325,8 @@ describe("contracts CLI", () => {
     try {
       mkdirSync(join(dir, ".hasna", "cloud"), { recursive: true });
       writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/example", version: "0.1.0" }));
-      writeFileSync(join(dir, "index.js"), "registerCloudTools();\n");
+      // Imported from the retired runtime — the binding, not the bare name, is the breach.
+      writeFileSync(join(dir, "index.js"), "import { registerCloudTools } from '@hasna/cloud';\nregisterCloudTools();\n");
       writeFileSync(join(dir, "wrangler.toml"), "name = 'open-cloud'\n");
       writeFileSync(join(dir, ".env.local"), "HASNA_CLOUD_URL=https://example.invalid\n");
       writeFileSync(join(dir, ".hasna", "cloud", "config"), "{}\n");
@@ -347,7 +348,7 @@ describe("contracts CLI", () => {
     const tarball = join(packDir, "bad.tgz");
     try {
       writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/example", version: "0.1.0" }));
-      writeFileSync(join(dir, "index.js"), "registerCloudCommands();\n");
+      writeFileSync(join(dir, "index.js"), "import { registerCloudCommands } from '@hasna/cloud';\nregisterCloudCommands();\n");
       execFileSync("tar", ["-czf", tarball, "-C", dir, "."]);
       const result = runContracts(["no-cloud-scan", "--json", tarball]);
       expect(result.exitCode).toBe(1);
@@ -371,7 +372,7 @@ describe("contracts CLI", () => {
     try {
       mkdirSync(packDir);
       writeFileSync(join(packDir, "package.json"), JSON.stringify({ name: "@hasna/example", version: "0.1.0" }));
-      writeFileSync(join(packDir, "index.js"), "registerCloudTools();\n");
+      writeFileSync(join(packDir, "index.js"), "import { registerCloudTools } from '@hasna/cloud';\nregisterCloudTools();\n");
       execFileSync("tar", ["-czf", tarball, "-C", parent, "hasna-example-0.1.0"]);
       const result = runContracts(["no-cloud-scan", "--json", tarball]);
       expect(result.exitCode).toBe(1);
@@ -518,7 +519,8 @@ describe("contracts CLI", () => {
       writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@hasna/downstream", version: "0.1.0" }));
       writeFileSync(
         join(dir, "src", "schemas.ts"),
-        "const markerA = 'FORBIDDEN_SHARED_CLOUD_RUNTIMES';\nconst markerB = 'hasna.no_cloud_evidence_pack.v1';\nregisterCloudTools();\n"
+        "const markerA = 'FORBIDDEN_SHARED_CLOUD_RUNTIMES';\nconst markerB = 'hasna.no_cloud_evidence_pack.v1';\n" +
+          "import { registerCloudTools } from '@hasna/cloud';\nregisterCloudTools();\n"
       );
       const result = runContracts(["no-cloud-scan", "--json", dir]);
       expect(result.exitCode).toBe(1);
