@@ -21,13 +21,13 @@
 // address — and each must resolve to a name the specifications reserve as not-real
 // (RFC 2606 `.example`, `.invalid`, `.test`, `example.com|net|org`; RFC 6761
 // `.localhost`; RFC 5737 and RFC 3849 documentation addresses; loopback,
-// link-local, unique-local, CGNAT and private ranges) or its registrable domain
-// must appear in the allowlist below. Nothing in the rule names a Hasna domain, so
-// this file adds no protected string to the repository, which the apex-enumeration
-// approach cannot say of itself. For the same reason every positive control here
-// assembles its fixture host from fragments at run time: a guard whose own source
-// carries the shapes it hunts reports itself, and the obvious repair is to weaken
-// the guard.
+// link-local, unique-local, CGNAT and private ranges) or must appear EXACTLY — as
+// a whole hostname, not as a registrable domain — in the allowlist below. Nothing
+// in the rule names a Hasna domain, so this file adds no protected string to the
+// repository, which the apex-enumeration approach cannot say of itself. For the
+// same reason every positive control here assembles its fixture host from
+// fragments at run time: a guard whose own source carries the shapes it hunts
+// reports itself, and the obvious repair is to weaken the guard.
 //
 // MEASURED AGAINST THE INCIDENT, which is the only test of a rule like this that
 // means anything. Restoring the three pre-fix fixture trees into a working tree
@@ -53,10 +53,13 @@
 //   4. An authority that looks like an address but cannot be parsed as one is
 //      reported rather than left unjudged.
 //   5. The whole tree is re-scanned with an EMPTY allowlist, which must produce
-//      findings on exactly the allowlisted registrable domains. That control is
-//      what makes the green result mean something: every run proves the scan is
-//      still capable of firing on this tree, and that no allowlist entry has gone
-//      dead and quietly become a blanket permission.
+//      findings on exactly the allowlisted registrable domains, and the normal
+//      scan must additionally WITNESS every allowlist entry at host granularity.
+//      That pair is what makes the green result mean something: every run proves
+//      the scan is still capable of firing on this tree, and that no allowlist
+//      entry has gone dead and quietly become a blanket permission — including an
+//      entry that shares an apex with a live sibling, which the registrable-domain
+//      comparison alone cannot tell apart.
 //
 // RESIDUALS, STATED. A hostname assembled at run time from fragments is invisible
 // here, as it is to the apex scan — which is the point of writing internal names
@@ -69,6 +72,14 @@
 // a single-label authority names no registrable domain. Placeholder collapse is
 // applied to the two host rules but not to the email rule, so an address whose
 // LOCAL part is interpolated over a literal apex is not read — see `scanText`.
+// Two more, measured by an adversarial pass over this guard rather than assumed:
+// the schemeless rule requires the path's first character to be alphanumeric, so
+// a schemeless host followed by a path that opens on punctuation is not read
+// (the same endpoint written with a scheme still is, by the authority rule); and
+// the only decoding applied here is `decodeEscapes`, so unlike the bulk guard's
+// `decodedViews` this one does not decode a base64 or hex blob, and an endpoint
+// packed into one is invisible. Neither shape occurs in this tree; both are
+// recorded as decisions rather than left to be rediscovered.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -85,33 +96,50 @@ import { PROGRAMMING_COLLISION_TLDS, isRecognizedTld } from "../src/tlds.js";
 const root = join(import.meta.dir, "..");
 
 /**
- * Registrable domains a real endpoint literal in this repository may name.
+ * WHOLE HOSTNAMES a real endpoint literal in this repository may name.
  *
  * Every entry is either public infrastructure this project genuinely talks about
  * or a synthetic name a sibling guard's own controls require under a real TLD.
- * None is a Hasna asset, which is why this list can live in a public repository
- * while an apex denylist cannot.
+ * None is a Hasna asset — checked against the owned-domain registry, not by
+ * eye — which is why this list can live in a public repository while an apex
+ * denylist cannot.
+ *
+ * EXACT HOSTS, NOT REGISTRABLE DOMAINS, and the difference is the whole point of
+ * this list. An entry at registrable-domain granularity permits every name under
+ * it, so ONE entry for a hyperscaler's domain silently permits every account-,
+ * region- and instance-bearing hostname that provider generates on our behalf —
+ * which is the exact shape of a self-hosted deployment's own endpoints, and in
+ * one common form embeds the account identifier itself. An adversarial pass
+ * measured three such literals scoring zero findings under the registrable form.
+ * Matching the whole host costs nothing here: the entries below ARE, one for one,
+ * the complete set of hosts this tree names, so the registrable form was buying
+ * breadth nothing in the repository ever used.
  *
  * ADDING AN ENTRY IS THE POINT. A new real hostname cannot enter this repository
- * without a line here, and that line is what a reviewer sees in the diff. The
+ * without a line here, and that line is what a reviewer sees in the diff. A new
+ * SUB-host of something already listed needs its own line too. The
  * empty-allowlist control below fails if an entry stops being used, so the list
  * cannot rot into a wildcard.
  */
-const ALLOWED_REGISTRABLE_DOMAINS: ReadonlySet<string> = new Set([
+const ALLOWED_HOSTS: ReadonlySet<string> = new Set([
   // Public infrastructure this repository actually references.
-  "apache.org", //        the Apache-2.0 licence text and the FSL notice
-  "amazonaws.com", //     the RDS CA truststore a generated app downloads for TLS
-  "github.com", //        this repository, its issues, and example manifests
-  "gitlab.com", //        the fixture proving a repo URL need not be GitHub
-  "iana.org", //          provenance of the TLD snapshot in `src/tlds.ts`
-  "json-schema.org", //   the JSON Schema meta-schema every `$schema` declares
-  "npmjs.org", //         the registry `publishConfig` publishes to
+  "www.apache.org", // the Apache-2.0 licence text and the FSL notice
+  "github.com", // this repository, its issues, and example manifests
+  "gitlab.com", // the fixture proving a repo URL need not be GitHub
+  "data.iana.org", // provenance of the TLD snapshot in `src/tlds.ts`
+  "json-schema.org", // the JSON Schema meta-schema every `$schema` declares
+  "registry.npmjs.org", // the registry `publishConfig` publishes to
+  // The one entry whose apex would have been the widest hole, which is why it is
+  // pinned to the single host: the public CA bundle a generated app downloads to
+  // verify a managed database's TLS certificate.
+  "truststore.pki.rds.amazonaws.com",
 
   // Synthetic names the asset-inventory guard's own controls need under a REAL
   // TLD: a reserved name is not countable, so those controls could not tell the
   // rule under test from the plumbing. Fabricated, owned by nobody here.
-  "a.com",
-  "a-brand.com",
+  "svc-1.a.com",
+  "svc-1.a-brand.com",
+  "a-brand.com", // the mail-domain half of the same fixture family
   "agents.wiki",
   "config.wiki",
   "records.wiki",
@@ -119,6 +147,21 @@ const ALLOWED_REGISTRABLE_DOMAINS: ReadonlySet<string> = new Set([
   "session.wiki",
   "tenant.wiki",
 ]);
+
+/**
+ * The registrable domains those hosts sit under — what a FINDING names.
+ *
+ * A finding is reported as a registrable domain, never a full host, so that two
+ * sub-hosts of one leaked apex read as one disclosure. This set is therefore
+ * SMALLER than `ALLOWED_HOSTS` wherever two entries share an apex, which is why
+ * the anti-rot control below witnesses entries at HOST granularity as well:
+ * comparing only these would let a dead entry hide behind a live sibling.
+ * Derived, never written down twice — a second hand-maintained list is a second
+ * thing to forget.
+ */
+const ALLOWED_ASSETS: ReadonlySet<string> = new Set(
+  [...ALLOWED_HOSTS].map((host) => registrableDomain(host)),
+);
 
 /**
  * Files whose presence proves the scope actually resolved.
@@ -306,14 +349,27 @@ function describeFinding(finding: Finding): string {
  *
  * Null covers all four ways a token can fail to be a place: it is not shaped like
  * a hostname, the specifications reserve it, its last label is not a delegated
- * TLD, or its registrable domain is allowed here.
+ * TLD, or the WHOLE host is allowed here. The allowlist is consulted with the
+ * full host and never with the registrable domain — see `ALLOWED_HOSTS` for why
+ * that distinction is the difference between a list and a wildcard — while what
+ * is REPORTED stays the registrable domain.
  */
-function judgeHostname(host: string, allowed: ReadonlySet<string>): string | null {
+function judgeHostname(
+  host: string,
+  allowed: ReadonlySet<string>,
+  witnessed?: Set<string>,
+): string | null {
   if (!HOSTNAME_LITERAL.test(host)) return null;
   if (isReservedHostname(host)) return null;
   if (!isDelegatedTld(host.slice(host.lastIndexOf(".") + 1))) return null;
-  const registrable = registrableDomain(host);
-  return allowed.has(registrable) ? null : registrable;
+  if (allowed.has(host)) {
+    // Which entry did the work. The anti-rot control needs this at host
+    // granularity; a registrable-domain comparison cannot distinguish an entry
+    // that is still in use from a sibling under the same apex that is not.
+    witnessed?.add(host);
+    return null;
+  }
+  return registrableDomain(host);
 }
 
 /**
@@ -326,7 +382,12 @@ function judgeHostname(host: string, allowed: ReadonlySet<string>): string | nul
  * the only way the `${APP}.<apex>` occurrence is visible at all. A finding is
  * reported on the line that carried it, whichever view saw it.
  */
-function scanText(path: string, text: string, allowed: ReadonlySet<string>): Finding[] {
+function scanText(
+  path: string,
+  text: string,
+  allowed: ReadonlySet<string>,
+  witnessed?: Set<string>,
+): Finding[] {
   const findings: Finding[] = [];
   text.split("\n").forEach((rawLine, index) => {
     const line = index + 1;
@@ -359,18 +420,22 @@ function scanText(path: string, text: string, allowed: ReadonlySet<string>): Fin
           if (!isReservedIpv6(host)) report("ip", host);
           continue;
         }
-        const registrable = judgeHostname(host, allowed);
+        const registrable = judgeHostname(host, allowed, witnessed);
         if (registrable) report("host", registrable);
       }
       for (const match of view.matchAll(SCHEMELESS_HOST_PATH)) {
-        const registrable = judgeHostname(match[1]!.toLowerCase(), allowed);
+        const registrable = judgeHostname(match[1]!.toLowerCase(), allowed, witnessed);
         if (registrable) report("host", registrable);
       }
     }
     for (const view of written) {
       for (const match of view.matchAll(EMAIL_LITERAL)) {
         const address = match[0].toLowerCase();
-        const registrable = judgeHostname(address.slice(address.indexOf("@") + 1), allowed);
+        const registrable = judgeHostname(
+          address.slice(address.indexOf("@") + 1),
+          allowed,
+          witnessed,
+        );
         if (registrable) report("email", registrable);
       }
     }
@@ -405,10 +470,18 @@ function readMember(path: string): string {
   return utf8.includes("�") ? bytes.toString("latin1") : utf8;
 }
 
-function scanTrackedTree(allowed: ReadonlySet<string>): { findings: Finding[]; scanned: string[] } {
+function scanTrackedTree(allowed: ReadonlySet<string>): {
+  findings: Finding[];
+  scanned: string[];
+  /** Which allowlist entries actually suppressed something on this tree. */
+  witnessed: Set<string>;
+} {
   const scanned = trackedFiles();
-  const findings = scanned.flatMap((path) => scanText(path, readMember(path), allowed));
-  return { findings, scanned };
+  const witnessed = new Set<string>();
+  const findings = scanned.flatMap((path) =>
+    scanText(path, readMember(path), allowed, witnessed),
+  );
+  return { findings, scanned, witnessed };
 }
 
 /**
@@ -433,6 +506,20 @@ const PROBE = {
   reservedAddress6: ["2001", "db8", "", "1"].join(":"),
 };
 
+/**
+ * A host under a registrable domain that IS allowlisted, but which is not itself
+ * an allowlisted host.
+ *
+ * Derived from the list at run time rather than written down, for the same reason
+ * `PROBE` is assembled from fragments: spelling it out would put a reportable
+ * name into this file, and the guard scans this file. Deriving it also means the
+ * control keeps testing the real list instead of a copy of it that can drift.
+ */
+function siblingOfAllowedHost(): string {
+  const [first] = [...ALLOWED_HOSTS];
+  return ["not-a-real-sub", registrableDomain(first!)].join(".");
+}
+
 describe("source endpoint hostname guard", () => {
   test("the resolved scope is the tracked tree, not an empty set", () => {
     const scanned = trackedFiles();
@@ -441,18 +528,24 @@ describe("source endpoint hostname guard", () => {
   });
 
   test("the allowlist cannot silently widen", () => {
-    // A bare TLD (`"com"`) would permit an entire namespace and a sub-domain
-    // (`"a.github.com"`) would never match; both fail quietly. Every entry must
-    // be exactly the registrable unit, hostname-shaped, under a delegated TLD,
-    // and not a name the specifications already reserve.
-    for (const entry of ALLOWED_REGISTRABLE_DOMAINS) {
+    // A bare TLD (`"com"`) would permit an entire namespace and an upper-case or
+    // port-bearing entry would never match, because the extractor hands over a
+    // lower-cased, port-stripped host. Every entry must be a whole hostname,
+    // under a delegated TLD, and not a name the specifications already reserve.
+    for (const entry of ALLOWED_HOSTS) {
       expect(HOSTNAME_LITERAL.test(entry), `${entry} is not hostname-shaped`).toBe(true);
+      expect(entry, `${entry} is not the lower-cased form the extractor compares`).toBe(
+        entry.toLowerCase(),
+      );
       expect(isReservedHostname(entry), `${entry} is spec-reserved and needs no entry`).toBe(false);
       expect(
         isDelegatedTld(entry.slice(entry.lastIndexOf(".") + 1)),
         `${entry} has no delegated TLD`,
       ).toBe(true);
-      expect(registrableDomain(entry), `${entry} is not a registrable domain`).toBe(entry);
+      expect(
+        registrableDomain(entry).split(".").length,
+        `${entry} resolves to a bare TLD`,
+      ).toBeGreaterThanOrEqual(2);
     }
   });
 
@@ -475,9 +568,17 @@ describe("source endpoint hostname guard", () => {
         "an endpoint hidden in an escape",
         `const url = "https://console.${PROBE.apex.replace("b", "%62")}/v1";`,
       ],
+      // The regression control for the allowlist's granularity. Under a
+      // registrable-domain allowlist this scored zero, which is how an
+      // account-, region- or instance-bearing name generated under a listed
+      // provider domain would have entered unreported.
+      [
+        "a new sub-host of an already-allowlisted host's domain",
+        `const url = "https://${siblingOfAllowedHost()}/v1";`,
+      ],
     ];
     for (const [label, source] of fires) {
-      expect(scanText("fixture.ts", source, ALLOWED_REGISTRABLE_DOMAINS).length, label).toBe(1);
+      expect(scanText("fixture.ts", source, ALLOWED_HOSTS).length, label).toBe(1);
     }
   });
 
@@ -511,11 +612,13 @@ describe("source endpoint hostname guard", () => {
       ["a scoped module path", `import { readFile } from "node:fs/promises";`],
       ["a versioned module path", `import * as z from "zod/v4";`],
       ["a config filename", `const spec = "tsconfig.build.json";`],
+      // The allowlist still permits what it lists — the whole host, exactly.
+      ["an allowlisted host", `const url = "https://${[...ALLOWED_HOSTS][0]}/v1";`],
       // The stated residual, asserted so it stays a decision rather than a bug.
       ["a bare dotted name", `const host = "console.${PROBE.apex}";`],
     ];
     for (const [label, source] of quiet) {
-      expect(scanText("fixture.ts", source, ALLOWED_REGISTRABLE_DOMAINS).length, label).toBe(0);
+      expect(scanText("fixture.ts", source, ALLOWED_HOSTS).length, label).toBe(0);
     }
   });
 
@@ -525,26 +628,37 @@ describe("source endpoint hostname guard", () => {
   });
 
   test("no tracked file names a real endpoint outside the allowlist", () => {
-    const { findings, scanned } = scanTrackedTree(ALLOWED_REGISTRABLE_DOMAINS);
+    const { findings, scanned } = scanTrackedTree(ALLOWED_HOSTS);
     expect(scanned.length).toBeGreaterThan(SCOPE_SENTINELS.length);
     // Locations and kinds only. See the header: this repository's CI logs are public.
     expect(findings.map(describeFinding)).toEqual([]);
   }, 30_000);
 
-  test("with an empty allowlist the same scan still fires, on exactly the allowlisted domains", () => {
+  test("with an empty allowlist the same scan still fires, and every entry is still in use", () => {
     // THE CONTROL THAT MAKES THE GREEN RESULT MEAN SOMETHING. A guard that has
     // never produced a hit on the real tree cannot tell "nothing to find" from
     // "the extractor silently stopped working". With nothing allowed, this tree
     // must yield findings — and the distinct assets behind them must be exactly
     // the allowlist, so no entry can go dead and quietly become a wildcard.
+    // Compared against `ALLOWED_ASSETS`, because a finding names a registrable
+    // domain while an allowlist entry is a whole host.
     const { findings } = scanTrackedTree(new Set());
     expect(findings.length).toBeGreaterThan(0);
     const found = new Set(findings.map((finding) => finding.asset));
     // Allowlist entries are public by construction, so naming an unused one is safe.
-    const unused = [...ALLOWED_REGISTRABLE_DOMAINS].filter((entry) => !found.has(entry)).sort();
+    const unused = [...ALLOWED_ASSETS].filter((entry) => !found.has(entry)).sort();
     expect(unused).toEqual([]);
     // The other direction without printing a value: anything found here that is
     // NOT on the allowlist has already failed the test above.
-    expect(found.size).toBe(ALLOWED_REGISTRABLE_DOMAINS.size);
+    expect(found.size).toBe(ALLOWED_ASSETS.size);
+
+    // AND EVERY ENTRY AT HOST GRANULARITY, which the comparison above cannot do
+    // on its own: two entries may share one registrable domain, and then a dead
+    // entry hides behind its live sibling. The normal scan records which entry
+    // actually suppressed something, so an entry nothing matched is reported by
+    // name — the diff a reviewer needs, and safe to print.
+    const { witnessed } = scanTrackedTree(ALLOWED_HOSTS);
+    expect([...ALLOWED_HOSTS].filter((host) => !witnessed.has(host)).sort()).toEqual([]);
+    expect(witnessed.size).toBe(ALLOWED_HOSTS.size);
   }, 30_000);
 });
