@@ -2594,6 +2594,46 @@ describe("source-text: only bytes that were compared can be blanked", () => {
     const untouched = withoutInlinedDeclarations(unclaimed, "dist/bundle.js");
     expect(untouched, "an unattributed record is not blanked at all").toBe(unclaimed);
   });
+
+  test("withoutInlinedDeclarations blanks only the compared values in the DENYLIST ARRAY too", () => {
+    // WHY A SECOND ONE, and it is a gap a merge review MEASURED rather than
+    // inferred from the first test's shape.
+    //
+    // The caller claims TWO node kinds, not one: `region.root` when it is the bare
+    // denylist array, and each direct ELEMENT of a root array when it is a row
+    // record. The test above only exercises the record half — its fixture's root
+    // array holds one item, and the array branch of `ownPatternDeclarationSpans`
+    // requires exactly `FORBIDDEN_SHARED_CLOUD_RUNTIMES.length`, so the root is
+    // never claimed there and a widening confined to the array path is invisible
+    // to it.
+    //
+    // MEASURED on the branch that added that test, with the widening applied ONLY
+    // when `node.kind === "array"`: `bun test --timeout 60000` came back
+    // 795 pass / 7 skip / 0 fail, rc=0 — zero casts, `tsc` green, and the new
+    // call-site test passing. So half the call site shipped unpinned. This pins
+    // the other half, at the same decision point, the same way.
+    const RETIRED_ROW = ["@hasna/", "cloud"].join("");
+    const RETIRED_PACKAGE = ["open", "-cloud"].join("");
+    const source = `var d = ["${RETIRED_ROW}", "${RETIRED_PACKAGE}"];`;
+
+    const blanked = withoutInlinedDeclarations(source, "dist/bundle.js");
+    expect(blanked.length, "offsets still line up").toBe(source.length);
+    // Both values the comparison read are gone.
+    expect(blanked, "the first attributed element is blanked").not.toContain(RETIRED_ROW);
+    expect(blanked, "the second attributed element is blanked").not.toContain(RETIRED_PACKAGE);
+    // The array's own punctuation was never compared. Whole-node blanking here
+    // takes `[`, `,` and `]` with it — measured: `var d =` then spaces then `;`.
+    for (const survivor of ["var d = [", ",", "];"]) {
+      expect(blanked, `${survivor} was never compared, so the caller must leave it`).toContain(survivor);
+    }
+
+    // CONTROL, so "the brackets survived" cannot pass because nothing was
+    // attributed: a third element makes the length wrong, the array is not
+    // claimed, and then both values survive too.
+    const unclaimed = `var d = ["${RETIRED_ROW}", "${RETIRED_PACKAGE}", "x"];`;
+    const untouched = withoutInlinedDeclarations(unclaimed, "dist/bundle.js");
+    expect(untouched, "an unattributed array is not blanked at all").toBe(unclaimed);
+  });
 });
 
 describe("source-text: resolver callees the underscore rule cannot reach", () => {

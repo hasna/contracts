@@ -665,11 +665,27 @@ function ownPatternDeclarationSpans(text: string, node: InlineDataNode): Constan
  * EXPORTED FOR ONE REASON: so byte confinement can be pinned HERE, where the
  * decision is actually made, rather than only on the helpers this happens to
  * call. A review measured that gap — see the test named after this function.
- * The export widens this package's public surface, which is a real cost
- * and is called out in the PR that added it; the alternative is to move this
- * function and `ownPatternDeclarationSpans` into an internal module that
- * `src/index.ts` does not re-export, which is the better shape and a larger
- * change than a post-merge review pass should land unilaterally.
+ *
+ * `@internal`, AND THAT TAG IS LOAD-BEARING RATHER THAN DECORATIVE. A merge
+ * review measured what the bare `export` actually cost: `@hasna/contracts/no-cloud`
+ * is a declared subpath export, and on `main` it declared exactly ONE function,
+ * `scanNoCloudTarget`. Exporting this one doubled that entry point's declared
+ * function count and published an internal byte-blanking primitive to every
+ * consumer, in `dist/index.d.ts` too, via `src/index.ts`'s `export *`. Note that
+ * `export *` is not the whole route — the `./no-cloud` subpath in `exports` is an
+ * independent one, so narrowing `index.ts` alone would not have helped.
+ *
+ * `stripInternal` in `tsconfig.build.json` keeps the runtime export the test needs
+ * (the test imports from `src/`) while emitting no declaration for it, so there is
+ * no typed API and no semver commitment. Verify with
+ * `grep withoutInlinedDeclarations dist/no-cloud.d.ts dist/index.d.ts` — it must
+ * find nothing. The better shape is still moving this and
+ * `ownPatternDeclarationSpans` into an internal module, which also has to move
+ * `RUNTIME_PATTERNS` and re-anchor the `mutation-audit` `from`/`to` strings; that
+ * is its own change, and not one to land while the audit's own sentinel bug makes
+ * every run carry a +4 false-failure floor.
+ *
+ * @internal
  */
 export function withoutInlinedDeclarations(masked: string, path: string): string {
   if (commentSyntaxForPath(path) !== "c-like") return masked;
