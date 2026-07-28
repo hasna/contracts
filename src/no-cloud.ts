@@ -9,7 +9,7 @@ import {
   readArchiveMemberText
 } from "./packed-artifact";
 import {
-  blankSpans,
+  blankConstantSpans,
   commentSyntaxForPath,
   importedBindings,
   importsModule,
@@ -17,6 +17,8 @@ import {
   loadCallMentions,
   maskCommentsForPath,
   mentionsCannotLoad,
+  quotedConstantSpan,
+  type ConstantSpan,
   type InlineDataNode
 } from "./source-text";
 import {
@@ -77,9 +79,33 @@ interface ScanFile {
  *         another. Single-file text matching cannot follow it, by construction.
  *     `Module._load(DENY[0])` was a fourth and is now closed — see `LOAD_CALLEE`.
  *     All three need a hand-built fake denylist; the assembled-name case above
- *     needs nothing. All three are MODULE-class: the equality rules in
- *     `isOwnPatternDeclaration` leave no slot for a `config` pattern or a
- *     credential env key to ride along.
+ *     needs nothing. All three are MODULE-class in the sense that matters: no
+ *     ATTACKER-CHOSEN value can ride them, because the only array ever attributed
+ *     equals the denylist and holds package names, and the only bytes ever
+ *     blanked are verbatim copies of strings this table declares — see
+ *     `ownPatternDeclarationSpans` and `quotedConstantSpan`.
+ *
+ *     ONE CORRECTION TO THAT CLAIM, measured rather than reasoned, because the
+ *     earlier wording ("no `config` pattern or credential env key can ride them")
+ *     was too strong. The GENUINE rows are themselves a vehicle: the table's own
+ *     `config` rows spell the forbidden env keys, and attributing a row blanks
+ *     those spellings, so
+ *
+ *         var R = [<the genuine table>];
+ *         var secret = process.env[R[7].pattern];
+ *
+ *     reads a forbidden key through the inlined table and is NOT reported.
+ *     Measured at `9a51cca` and unchanged here: EXIT=0, against a control that
+ *     spells the key and fails at EXIT=1. It is a `config`-class route, so the
+ *     old wording was wrong.
+ *
+ *     It is also strictly WEAKER than a route already conceded three bullets up:
+ *     `process.env["HASNA_RDS" + "_PASSWORD"]` scans clean with no table present
+ *     at all, needs no inlined declaration and no indirection. So this adds no
+ *     capability — it is a second instance of the assembled-name blind spot, not
+ *     a new class — and closing it would require answering computed reads
+ *     generally, which text matching cannot do. Recorded so the bound is not
+ *     overstated a fourth time.
  *
  *     Two measurements about the alternatives, so this is not read as a
  *     regression. The path-scoped predecessor on `main` did not close the
@@ -88,7 +114,7 @@ interface ScanFile {
  *     scanned clean there too. Published 0.8.2 DOES catch it, because it
  *     attributes nothing at all — which is the same property that makes it report
  *     six unremovable findings against every consumer that bundles this package.
- *     See `isOwnPatternDeclaration` for the trade.
+ *     See `ownPatternDeclarationSpans` for the trade.
  */
 const SKIP_DIRS = new Set([".git", "node_modules", ".cache", ".next", ".turbo", "coverage", "docs", "examples", "tests"]);
 const LOCKFILES = new Set(["bun.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"]);
@@ -320,54 +346,129 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
  *
  * WHAT IS ACTUALLY DIFFERENT about the copied declaration is not where it lives
  * and not what surrounds it in the file. It is that the text IS this scanner's
- * own constant, still in the inert data shape the scanner wrote it in. So that
- * is what gets matched, and only the characters it spans are dropped:
+ * own constant, still in the inert data shape the scanner wrote it in.
  *
- *   - the array must equal `FORBIDDEN_SHARED_CLOUD_RUNTIMES` element for
- *     element, so an array holding anything else is not it;
- *   - a row must equal one `RUNTIME_PATTERNS` row ENTRY FOR ENTRY — same key
- *     count, every value equal — which is the record analogue of the array rule
- *     above. Partial versions of this were tried three times and each left one
- *     free slot: comparing three keys left the rest of the key set uncompared;
- *     bounding the key set to a union over all rows admitted `checkKind` on all
- *     eight while only ever checking it was A string, never the RIGHT one; and
- *     entry-for-entry equality by itself still counted an entry set that a
- *     REPEATED KEY had already collapsed, so a shadowed `message:` rode through
- *     a span the surviving one justified blanking. The comparison is complete
- *     only because `parseInlineData` now refuses a record with a duplicate key
- *     outright — that is the half of this rule that lives in `src/source-text.ts`,
- *     and removing it puts the free slot straight back;
- *   - the collection must sit where data sits and must not be read in place, and
- *     if it is bound to a name, no load call in the file may mention that name.
- *     That is what keeps `__require(DENY[0])` from becoming a way to launder a
- *     specifier through a copy of the denylist.
+ * TWO SEPARATE QUESTIONS, AND CONFLATING THEM IS WHAT FAILED FOUR TIMES.
  *
- * The consequence that matters, and the wording has been wrong three times so it
- * is worth reading precisely: no detector is turned off for any occurrence OUTSIDE
- * a blanked span, and a blanked span holds nothing but an exact copy of something
- * this table declares — a record equal to a row entry for entry, or an array equal
- * to the denylist element for element. Every character of the span was compared,
- * and that takes TWO rules rather than one: the comparator leaves no entry
- * uncompared, and the parser refuses to hand it a record whose text carries an
- * entry the entry set does not hold. Both halves are load-bearing. The comparator
- * on its own left exactly one admitted-but-uncompared slot, and a duplicate key
- * opened it.
+ *   1. WHICH SHAPES ARE RECOGNISED. A parse decides this: the collection must
+ *      sit where data sits, must not be read in place, and if it is bound to a
+ *      name no load call may mention that name — otherwise `__require(DENY[0])`
+ *      launders a specifier through a copy of the denylist. An array must equal
+ *      `FORBIDDEN_SHARED_CLOUD_RUNTIMES` element for element; a record must
+ *      carry exactly one table row's key set.
+ *   2. WHICH BYTES ARE SUPPRESSED. This used to be answered by the enclosing
+ *      node's `start .. end` — a span the comparison in (1) never read. Every
+ *      evasion so far lived in the difference between the two, and each round
+ *      answered it by making (1) stricter, which cannot close a gap that is not
+ *      in (1).
  *
- * It was not true before, and each time this comment overstated it, a review found
- * the slot it was overstating. The first version claimed "NO DETECTOR IS TURNED
- * OFF ANYWHERE" while three keys were compared and the rest of the key set was
- * not. The second claimed "nothing but a row this table emits" while `checkKind`
- * was admitted on every row and never compared — a module row carrying a
- * `checkKind` is a row this table never emits, and it was attributed. The third
- * claimed entry-for-entry equality had removed the class, while a record repeating
- * a key — `{pattern, kind, message: "<credential>", message: "<the real one>"}` —
- * was still attributed, because `Map.set` had dropped the shadowed value and
- * shrunk the count before the comparison ever ran. Measured as a tarball under a
- * third-party package name: EXIT=0 with zero findings against a control carrying
- * the same credential unwrapped that scored one critical. All three were caught by
- * review rather than by a test, which is the argument for writing the guarantee as
- * narrowly as the code earns it — and for testing each narrowing in both
- * directions, which the duplicate-key rule now is.
+ * SO (2) IS NOW ANSWERED INDEPENDENTLY OF (1): the only thing ever blanked is a
+ * span whose BYTES were compared, one at a time, against a constant from the
+ * table — see `quotedConstantSpan`. A record match blanks its three or four
+ * value literals, not the record. An array match blanks its elements, not the
+ * array. Everything else inside the collection — the keys, the punctuation, the
+ * whitespace, and anything a duplicate key shadowed — is left exactly as it was
+ * and is read by every detector.
+ *
+ * THE ALTERNATIVE THAT WAS CONSIDERED AND REJECTED, because it is the obvious
+ * other way to honour the same principle: require the ENCLOSING SPAN to
+ * round-trip — re-serialise the parsed record and refuse to attribute unless the
+ * result reproduces the bytes about to be blanked. It is sound in principle, and
+ * it was rejected for two reasons.
+ *
+ * First, it needs a serialiser that reproduces incidental formatting exactly:
+ * which of the three quote styles the emitter chose, whether keys are quoted,
+ * interior whitespace, a trailing comma, the newlines a non-minified build puts
+ * between rows. Every one of those is a bundler's choice, not ours. A serialiser
+ * that guesses wrong refuses to attribute — the safe direction, but it means the
+ * false-positive fix silently stops working the next time a bundler changes its
+ * output, and the failure is invisible until someone re-measures.
+ *
+ * A SECOND REASON WAS GIVEN HERE AND IT WAS WRONG, so it is corrected rather than
+ * deleted. It claimed a record round-trip "inherits the assumption the
+ * duplicate-key evasion broke, because it is built on the same parsed structure".
+ * That inverts the argument: a round-trip does not ASSUME the parse is faithful,
+ * it TESTS whether it is — re-serialising a collapsed three-entry `Map` cannot
+ * reproduce four written entries, so a whole-record round-trip would have refused
+ * the duplicate-key forge and IS one thing that would have caught the fourth
+ * evasion. Credit where due; the rejection rests on the formatting argument above,
+ * which stands on its own.
+ *
+ * At the LEAF, round-tripping is trivial and total: a string literal's only
+ * serialisation is quote + value + quote, with no formatting choices at all. So
+ * the round-trip idea is kept — it is the `raw !== quote + expected + quote` line
+ * in `quotedConstantSpan` — applied at the one level where it is exact rather than
+ * at the level where it would be a heuristic about somebody else's emitter.
+ *
+ * THE GUARANTEE. This clause has been wrong three times, every time by being read
+ * wider than it was meant, so it is scoped explicitly and stated as a property
+ * that can be checked rather than as a conclusion:
+ *
+ *     OF THE SPANS THIS FUNCTION BLANKS, every one satisfies
+ *     `text.slice(start, end) === q + c + q`, where `q` is one quote character and
+ *     `c` is a verbatim copy of a string this scanner declares as data — either a
+ *     `RUNTIME_PATTERNS` row's value or an element of
+ *     `FORBIDDEN_SHARED_CLOUD_RUNTIMES`.
+ *
+ * `blankConstantSpans` re-asserts exactly that against the text before it
+ * suppresses a single byte, so a span that does not satisfy it throws rather than
+ * scanning clean.
+ *
+ * WHAT THE SENTENCE DOES NOT SAY, because the previous wording — "nothing else is
+ * ever suppressed, anywhere, for any reason" — did say it and was false. This
+ * function is not the only thing in this file that stops a detector seeing text.
+ * `maskCommentsForPath` blanks every comment before this runs; `SKIP_DIRS` drops
+ * `tests`, `docs`, `examples` and `coverage` wholesale; `guardTestMentionsOnly`
+ * allowlists one filename. Those are separate, documented decisions with their own
+ * tests. The claim here is about THIS function's spans, and nothing more.
+ *
+ * TWO CONSTANTS, NOT ONE. The record branch compares against `RUNTIME_PATTERNS`
+ * and the array branch against `FORBIDDEN_SHARED_CLOUD_RUNTIMES`, which are
+ * different declarations that merely overlap today — see the note above
+ * `FORBIDDEN_LOCKFILE_PACKAGES` for a case where they already diverged
+ * (`cloud-mcp` is a table row and not in the schema constant). Adding a name to
+ * the schema constant without a matching row would make "a string this table
+ * declares" false in letter. It still could not admit an attacker-chosen value,
+ * because the string would be one this scanner ships.
+ *
+ * WHY A FIFTH SLOT CANNOT OPEN. A "slot" has always been the same thing: bytes
+ * that are blanked but not compared. The DERIVATION of that set no longer touches
+ * a parsed structure: a future field on a row, a future accepted shape, a future
+ * lossy corner of the parse — none of them can widen a blanked span, because spans
+ * come only from `quotedConstantSpan`. The parse decides WHETHER to look; the bytes
+ * decide what is dropped.
+ *
+ * "By construction" is the right description of the DERIVATION and would be too
+ * strong as a description of the ENFORCEMENT, which a review measured: widening the
+ * span array's type annotation and calling an unchecked blanker restores the
+ * vulnerability with no casts and a green `tsc`. Enforcement is three things, none
+ * of them the type alone — the runtime re-check in `blankConstantSpans`, the
+ * duplicate-key forges, and `M91`/`M94`/`M95`.
+ *
+ * THE HISTORY OF THIS CLAUSE, kept because it is what tells the next reader where
+ * the reasoning is load-bearing. Review caught all four evasions AND the three
+ * overstatements above; no test caught any of them — which is why the property is
+ * now asserted in code and pinned by `M91`, `M94` and `M95` rather than argued for
+ * here.
+ *
+ *   1. "NO DETECTOR IS TURNED OFF ANYWHERE" — false while three keys were
+ *      compared and the rest of the key set was not. Any extra key rode along.
+ *   2. "a blanked span may hold nothing but a row this table emits" — false while
+ *      `checkKind` was admitted on all eight rows by a union key set and checked
+ *      only for being A string, never the right one.
+ *   3. "there is no admitted-but-uncompared slot left" — false while a duplicate
+ *      key let the span carry a shadowed value the comparison never read.
+ *      `parseInlineData` stores entries in a `Map`, so a record spelling `pattern`
+ *      twice presented three entries to the comparison and 166 raw bytes to the
+ *      blanker. (Reported as 167 when first found; 166 is what the forge in
+ *      `tests/no-cloud-edge.test.ts` measures, and it is the one re-runnable
+ *      number.) Cost to an evader: repeat one key. This one
+ *      PREDATED the entry-for-entry rule — the union pre-filter iterated the same
+ *      collapsed `Map` and missed it identically — so it was never a regression,
+ *      it was the mechanism the whole time.
+ *   4. the current wording. What is different about it is that it is a statement
+ *      about bytes that the code re-checks, rather than a claim about how
+ *      thoroughly a structure was compared.
  *
  * Each occurrence is judged on its own, so the same file keeps every check for
  * every other occurrence in it — a consumer that bundles `@hasna/contracts` and
@@ -382,15 +483,38 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
  * re-export. `Module._load` was a fourth and is closed. The scope block at the top
  * of this file enumerates them with the controls that fail.
  *
- * They are MODULE-CLASS ONLY, and that bound comes from the two equality rules
- * rather than from an argument: the only array ever attributed equals the
- * denylist, which holds package names and nothing else, and the only record ever
- * attributed equals a table row entry for entry over an entry set the parser
- * guarantees describes the whole record, so it has no slot to carry a value in.
- * No `config` pattern and no credential env key can ride any of the three. That
- * bound is exactly as strong as the completeness of those two rules — when the
- * record rule was incomplete, a shadowed key carried all three `config` patterns
- * and a credential at once, on a plain assignment, with no aliasing needed.
+ * WHAT BOUNDS THOSE THREE, stated to the width the measurements support and no
+ * wider. It is the two equality rules rather than an argument: the only array ever
+ * attributed equals the denylist, which holds package names and nothing else, and
+ * the only record ever attributed equals a table row entry for entry over an entry
+ * set the parser guarantees describes the whole record. So no ATTACKER-CHOSEN value
+ * can ride any of the three. That bound is exactly as strong as the completeness of
+ * those two rules — when the record rule was incomplete, a shadowed key carried all
+ * three `config` patterns and a credential at once, on a plain assignment, with no
+ * aliasing needed.
+ *
+ * THIS CLAUSE PREVIOUSLY SAID "they are MODULE-CLASS ONLY … no `config` pattern and
+ * no credential env key can ride any of the three", AND THAT WAS FALSE. It is the
+ * same sentence the correction at the top of this file already retired as too
+ * strong, restated here, so the file asserted and refuted the same claim in two
+ * places. Corrected rather than deleted, because the fifth repetition of a wrong
+ * clause is the thing worth leaving a marker on.
+ *
+ * What is actually true: "no attacker-chosen value" is not "no `config` pattern".
+ * The table's own `config` rows SPELL the forbidden env keys, and attributing a row
+ * blanks those spellings, so a read through the inlined genuine table —
+ * `process.env[R[7].pattern]`, the shape written out at the top of this file —
+ * reaches a forbidden key and is not reported. Re-measured here: EXIT=0, 0 findings,
+ * against a control that spells the key literally and fails at EXIT=1. That is a
+ * `config`-class route, and it is available with no aliasing at all, which is also
+ * why it is not one of the three: it does not need them.
+ *
+ * It adds no capability. `process.env[<key assembled from two literals>]` scans
+ * clean with no table present at all, needs no inlined declaration and no
+ * indirection, and is conceded in the scope block above. The table-index read is a
+ * second instance of that same assembled-name blind spot. The honest bound is
+ * therefore about attacker-chosen VALUES, not about pattern CLASSES, and it should
+ * not be restated in class terms a sixth time.
  *
  * The earlier wording here said "bound to one name, rebound to a second", which
  * made the residual sound narrower and harder to reach than it is. Understating it
@@ -405,21 +529,34 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
  * made, deliberately, and it is reversible: the array and record equality rules are
  * where to tighten if the exchange ever looks wrong.
  */
-function isOwnPatternDeclaration(node: InlineDataNode): boolean {
+function ownPatternDeclarationSpans(text: string, node: InlineDataNode): ConstantSpan[] | null {
   if (node.kind === "array") {
-    return (
-      node.items.length === FORBIDDEN_SHARED_CLOUD_RUNTIMES.length &&
-      node.items.every((item, index) => item.kind === "string" && item.value === FORBIDDEN_SHARED_CLOUD_RUNTIMES[index])
-    );
+    if (node.items.length !== FORBIDDEN_SHARED_CLOUD_RUNTIMES.length) return null;
+    const spans: ConstantSpan[] = [];
+    for (const [index, item] of node.items.entries()) {
+      const span = quotedConstantSpan(text, item, FORBIDDEN_SHARED_CLOUD_RUNTIMES[index]!);
+      if (span === null) return null;
+      spans.push(span);
+    }
+    return spans;
   }
-  if (node.kind !== "record") return false;
-  // A ROW MUST EQUAL ONE TABLE ROW ENTRY FOR ENTRY. Same entry count, every value
-  // equal. Nothing in the entry set is left uncompared.
+  if (node.kind !== "record") return null;
+  // A ROW MUST CARRY EXACTLY ONE TABLE ROW'S KEY SET, and each of that row's
+  // values must be present as a literal whose BYTES are that value.
   //
-  // This is the record analogue of the array branch above, and it belongs beside
-  // it: an array is attributed only when it matches ELEMENT FOR ELEMENT, and a
-  // record only when it matches ENTRY FOR ENTRY. Three rounds of review were spent
-  // arriving at that symmetry, by three different partial versions of it:
+  // The key-count bound is now a SHAPE rule rather than a safety rule, and the
+  // difference is worth stating because it used to be the only thing standing
+  // between an extra key and a clean scan. Under byte-confined blanking an extra
+  // key is harmless — its bytes were never compared, so they are never blanked,
+  // so whatever it holds is read. The bound stays because a record with a key
+  // this table does not emit is not this table's record, and claiming only the
+  // shapes we emit is the property `M88` pins; it is no longer load-bearing for
+  // soundness. Its test asserts the FULL finding set for that reason — the
+  // smuggled credential alone was reported either way, so the weaker assertion
+  // let `M88` read as caught while proving nothing.
+  //
+  // Two rounds of review were spent on partial versions of the comparison, and
+  // both are recorded because the shape of the mistake recurs:
   //
   //   1. compare three keys, ignore the rest of the key set. A verbatim
   //      `{pattern, kind, message}` triple plus one more key carried anything at
@@ -449,26 +586,33 @@ function isOwnPatternDeclaration(node: InlineDataNode): boolean {
   //     credential env key                                          -> EXIT=0, 0 findings
   //     control: the same credential with no record around it       -> EXIT=1, 1 critical
   //
-  // Each narrowing removed one free slot and left the next. What removes the CLASS
-  // is completeness over the whole record, and this function only supplies half of
-  // it: it compares every entry, and `parseInlineData` refuses any record whose
-  // text holds something the entry set does not. Both halves are needed — #3 is
-  // what a complete comparison over an incomplete entry set looks like. That is
-  // the property to preserve: if this ever needs loosening, loosen the SHAPES
-  // matched, never the completeness of either half.
+  // Each narrowing removed one free slot and left the next, and a THIRD arrived
+  // the same way: a duplicate key. That is the point at which narrowing the
+  // comparison was abandoned as a strategy — see the clause above. What the
+  // comparison decides now is only WHETHER this record is one of ours; what gets
+  // dropped is decided by `quotedConstantSpan`, byte by byte, and a shadowed
+  // duplicate is simply never among the bytes it returns.
+  //
+  // The rule to preserve is unchanged in words and now true in structure: loosen
+  // the SHAPES matched if you must, never the completeness of the comparison —
+  // and note that loosening a shape can no longer widen a blanked span at all.
   //
   // It costs nothing real: the build emits `{pattern, kind, message}` seven times
-  // and `{pattern, kind, checkKind, message}` once, and full equality accepts
-  // every one of them. The keys come from the MATCHED ROW rather than from a union
-  // over all rows, so `checkKind` is admitted only on the row that declares it.
-  return RUNTIME_PATTERNS.some((row) => {
+  // and `{pattern, kind, checkKind, message}` once, and this accepts every one of
+  // them. The keys come from the MATCHED ROW rather than from a union over all
+  // rows, so `checkKind` is admitted only on the row that declares it.
+  for (const row of RUNTIME_PATTERNS) {
     const keys = Object.keys(row) as ReadonlyArray<keyof typeof row>;
-    if (keys.length !== node.entries.size) return false;
-    return keys.every((key) => {
-      const value = node.entries.get(key);
-      return value?.kind === "string" && value.value === row[key];
-    });
-  });
+    if (keys.length !== node.entries.size) continue;
+    const spans: ConstantSpan[] = [];
+    for (const key of keys) {
+      const span = quotedConstantSpan(text, node.entries.get(key), row[key]);
+      if (span === null) break;
+      spans.push(span);
+    }
+    if (spans.length === keys.length) return spans;
+  }
+  return null;
 }
 
 /**
@@ -485,7 +629,11 @@ function isOwnPatternDeclaration(node: InlineDataNode): boolean {
  */
 function withoutInlinedDeclarations(masked: string, path: string): string {
   if (commentSyntaxForPath(path) !== "c-like") return masked;
-  const spans: Array<{ start: number; end: number }> = [];
+  // `ConstantSpan`, not `{start, end}`, and that is the type doing the work:
+  // `tsc` will not let this array hold a span nobody verified the bytes of, so
+  // the edit that has been reverted four times — push the ENCLOSING node's span —
+  // no longer type-checks.
+  const spans: ConstantSpan[] = [];
   for (const region of inlineDataRegions(masked, RUNTIME_PATTERNS.map((entry) => entry.pattern))) {
     // A collection stored under a name that a load call also names is a
     // laundering route, not a declaration. Withdraw the whole region.
@@ -502,10 +650,11 @@ function withoutInlinedDeclarations(masked: string, path: string): string {
     // bound-name check above already covers a load through that name, so the
     // looser rule was not unsafe so much as unearned. Claim the shapes we emit.
     for (const node of [region.root, ...(region.root.kind === "array" ? region.root.items : [])]) {
-      if (isOwnPatternDeclaration(node)) spans.push({ start: node.start, end: node.end });
+      const verified = ownPatternDeclarationSpans(masked, node);
+      if (verified !== null) spans.push(...verified);
     }
   }
-  return blankSpans(masked, spans);
+  return blankConstantSpans(masked, spans);
 }
 
 function stableId(input: string) {
