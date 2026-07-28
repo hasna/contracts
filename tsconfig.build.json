@@ -4,6 +4,12 @@
     "noEmit": false,
     "emitDeclarationOnly": true,
     "declarationMap": false,
+    // A symbol a test has to import but no consumer should see is tagged
+    // `@internal` and omitted from the emitted `.d.ts`. Only the DECLARATION
+    // is stripped — the runtime export survives, and tests import from `src/`,
+    // so nothing in the suite depends on this being off. Scoped by that tag:
+    // grep `@internal` under `src/` to see everything this affects.
+    "stripInternal": true,
     "outDir": "dist",
     "rootDir": "src"
   },
