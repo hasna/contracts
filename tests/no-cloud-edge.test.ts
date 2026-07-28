@@ -16,7 +16,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { scanNoCloudTarget } from "../src/no-cloud";
+import { scanNoCloudTarget, withoutInlinedDeclarations } from "../src/no-cloud";
 import {
   isLinkedResolution,
   lockfileEdges,
@@ -2552,6 +2552,87 @@ describe("source-text: only bytes that were compared can be blanked", () => {
         expect(report.verdict).toBe("passed");
       },
     );
+  });
+
+  test("withoutInlinedDeclarations blanks only the compared values — the CALLER, not just the helpers", () => {
+    // WHY THIS EXISTS, and it is the gap a review measured rather than argued.
+    //
+    // The test above is not vacuous, but it builds its own spans and calls
+    // `quotedConstantSpan` / `blankConstantSpans` directly. That pins the HELPERS.
+    // It cannot see a caller that stops using them — and the caller is exactly
+    // where the edit this mechanism has been burned by four times lives: push the
+    // ENCLOSING node's span, hand it to the unchecked blanker.
+    //
+    // MEASURED: with `withoutInlinedDeclarations` changed to
+    // `spans.push({ start: node.start, end: node.end })` over a widened array type
+    // and `blankSpans` in place of `blankConstantSpans`, the whole suite came back
+    // 794 pass / 7 skip / 0 fail, rc=0. Not one test failed. Neither the forges,
+    // nor `M91`/`M94`/`M95` (all three keep the checked blanker in the path, so one
+    // throw catches all three), nor the byte-reading test above.
+    //
+    // So this reads the same bytes at the call site. It is the only assertion in
+    // the file that fails when the CALLER widens a span.
+    const RETIRED_ROW = ["@hasna/", "cloud"].join("");
+    const message = `Shared ${RETIRED_ROW} runtime reference is forbidden`;
+    const source = `var t = [{ pattern: "${RETIRED_ROW}", kind: "module", message: "${message}" }];`;
+
+    const blanked = withoutInlinedDeclarations(source, "dist/bundle.js");
+    expect(blanked.length, "offsets still line up").toBe(source.length);
+    // The values the comparison read are gone.
+    expect(blanked, "the attributed pattern value is blanked").not.toContain(RETIRED_ROW);
+    expect(blanked, "the attributed kind value is blanked").not.toContain("module");
+    // Every byte it never read survives verbatim. This is the half that whole-node
+    // blanking at the call site destroys, and nothing else in the suite notices.
+    for (const survivor of ["var t = [{", "pattern:", "kind:", "message:", "}];"]) {
+      expect(blanked, `${survivor} was never compared, so the caller must leave it`).toContain(survivor);
+    }
+
+    // CONTROL, so "the keys survived" cannot pass because nothing was attributed
+    // at all: the same record with one extra key is NOT claimed, and then the
+    // pattern value survives too.
+    const unclaimed = `var t = [{ pattern: "${RETIRED_ROW}", kind: "module", message: "${message}", note: "x" }];`;
+    const untouched = withoutInlinedDeclarations(unclaimed, "dist/bundle.js");
+    expect(untouched, "an unattributed record is not blanked at all").toBe(unclaimed);
+  });
+
+  test("withoutInlinedDeclarations blanks only the compared values in the DENYLIST ARRAY too", () => {
+    // WHY A SECOND ONE, and it is a gap a merge review MEASURED rather than
+    // inferred from the first test's shape.
+    //
+    // The caller claims TWO node kinds, not one: `region.root` when it is the bare
+    // denylist array, and each direct ELEMENT of a root array when it is a row
+    // record. The test above only exercises the record half — its fixture's root
+    // array holds one item, and the array branch of `ownPatternDeclarationSpans`
+    // requires exactly `FORBIDDEN_SHARED_CLOUD_RUNTIMES.length`, so the root is
+    // never claimed there and a widening confined to the array path is invisible
+    // to it.
+    //
+    // MEASURED on the branch that added that test, with the widening applied ONLY
+    // when `node.kind === "array"`: `bun test --timeout 60000` came back
+    // 795 pass / 7 skip / 0 fail, rc=0 — zero casts, `tsc` green, and the new
+    // call-site test passing. So half the call site shipped unpinned. This pins
+    // the other half, at the same decision point, the same way.
+    const RETIRED_ROW = ["@hasna/", "cloud"].join("");
+    const RETIRED_PACKAGE = ["open", "-cloud"].join("");
+    const source = `var d = ["${RETIRED_ROW}", "${RETIRED_PACKAGE}"];`;
+
+    const blanked = withoutInlinedDeclarations(source, "dist/bundle.js");
+    expect(blanked.length, "offsets still line up").toBe(source.length);
+    // Both values the comparison read are gone.
+    expect(blanked, "the first attributed element is blanked").not.toContain(RETIRED_ROW);
+    expect(blanked, "the second attributed element is blanked").not.toContain(RETIRED_PACKAGE);
+    // The array's own punctuation was never compared. Whole-node blanking here
+    // takes `[`, `,` and `]` with it — measured: `var d =` then spaces then `;`.
+    for (const survivor of ["var d = [", ",", "];"]) {
+      expect(blanked, `${survivor} was never compared, so the caller must leave it`).toContain(survivor);
+    }
+
+    // CONTROL, so "the brackets survived" cannot pass because nothing was
+    // attributed: a third element makes the length wrong, the array is not
+    // claimed, and then both values survive too.
+    const unclaimed = `var d = ["${RETIRED_ROW}", "${RETIRED_PACKAGE}", "x"];`;
+    const untouched = withoutInlinedDeclarations(unclaimed, "dist/bundle.js");
+    expect(untouched, "an unattributed array is not blanked at all").toBe(unclaimed);
   });
 });
 

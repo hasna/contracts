@@ -445,6 +445,41 @@ function guardTestMentionsOnly(file: ScanFile, masked: string): boolean {
  * of them the type alone — the runtime re-check in `blankConstantSpans`, the
  * duplicate-key forges, and `M91`/`M94`/`M95`.
  *
+ * AND THAT LIST OF THREE WAS ITSELF TOO STRONG, corrected here rather than
+ * rewritten because a count of enforcement mechanisms has now been wrong twice.
+ * A later review MEASURED all three against the edit they are supposed to stop —
+ * whole-node blanking at the CALL SITE, i.e. pushing the enclosing node's span and
+ * blanking it without the checked blanker, the same three-line edit
+ * `blankSpans`'s own comment records — and the suite came back
+ * `794 pass / 7 skip / 0 fail`, rc=0, with ZERO tests failing. Not "green `tsc`",
+ * which that comment already concedes: green SUITE.
+ *
+ *   - the duplicate-key forges cannot fail if byte confinement is removed. This
+ *     file already says so one block down; they pin the UPSTREAM refusal.
+ *   - `M91`/`M94`/`M95` all keep `blankConstantSpans` in the path, so all three
+ *     are caught by that ONE throw. They pin the helper, not its caller.
+ *   - the test that reads the bytes builds its spans itself and calls the helpers
+ *     directly, so it cannot see a caller that stops calling them.
+ *
+ * So the honest count was ONE — the runtime re-check — and it only binds a caller
+ * that still uses it. `withoutInlinedDeclarations` is exported now so the property
+ * is asserted where the widening would happen, and that test is what makes this
+ * list true rather than three.
+ *
+ * NO MUTATION PINS IT YET, AND THAT IS DELIBERATE RATHER THAN UNFINISHED. The
+ * obvious `M96` — the same edit as a from/to — was written, measured, and WITHDRAWN:
+ * `scripts/mutation-audit.ts` writes `.mutation-audit-inflight.json` into the repo
+ * root carrying the pristine text of the file it is mutating, so during every
+ * mutation run a root-level `.json` holds the denylist and the forbidden config
+ * keys. The repo-conformance and CLI tests scan it and fail. Measured on a
+ * PRISTINE tree with no mutation at all: dropping that file in takes
+ * `tests/conformance.test.ts` + `tests/cli.test.ts` from 96 pass / 0 fail to
+ * 92 pass / 4 fail. So every mutation carries a +4 false-failure floor, and a
+ * mutation nothing really catches is still reported "caught" on those four alone —
+ * which is exactly what `M96` did before this test existed. Adding a mutation whose
+ * green reading survives deleting its own test is a booby trap; the sentinel is
+ * fixed first, in its own change, and then `M96` is worth having.
+ *
  * THE HISTORY OF THIS CLAUSE, kept because it is what tells the next reader where
  * the reasoning is load-bearing. Review caught all four evasions AND the three
  * overstatements above; no test caught any of them — which is why the property is
@@ -626,8 +661,33 @@ function ownPatternDeclarationSpans(text: string, node: InlineDataNode): Constan
  * a JavaScript constant into. A `package.json` is read structurally by
  * `manifestEdges` and a lockfile by the graph walk, and neither should have its
  * text quietly edited on the strength of a shape match.
+ *
+ * EXPORTED FOR ONE REASON: so byte confinement can be pinned HERE, where the
+ * decision is actually made, rather than only on the helpers this happens to
+ * call. A review measured that gap — see the test named after this function.
+ *
+ * `@internal`, AND THAT TAG IS LOAD-BEARING RATHER THAN DECORATIVE. A merge
+ * review measured what the bare `export` actually cost: `@hasna/contracts/no-cloud`
+ * is a declared subpath export, and on `main` it declared exactly ONE function,
+ * `scanNoCloudTarget`. Exporting this one doubled that entry point's declared
+ * function count and published an internal byte-blanking primitive to every
+ * consumer, in `dist/index.d.ts` too, via `src/index.ts`'s `export *`. Note that
+ * `export *` is not the whole route — the `./no-cloud` subpath in `exports` is an
+ * independent one, so narrowing `index.ts` alone would not have helped.
+ *
+ * `stripInternal` in `tsconfig.build.json` keeps the runtime export the test needs
+ * (the test imports from `src/`) while emitting no declaration for it, so there is
+ * no typed API and no semver commitment. Verify with
+ * `grep withoutInlinedDeclarations dist/no-cloud.d.ts dist/index.d.ts` — it must
+ * find nothing. The better shape is still moving this and
+ * `ownPatternDeclarationSpans` into an internal module, which also has to move
+ * `RUNTIME_PATTERNS` and re-anchor the `mutation-audit` `from`/`to` strings; that
+ * is its own change, and not one to land while the audit's own sentinel bug makes
+ * every run carry a +4 false-failure floor.
+ *
+ * @internal
  */
-function withoutInlinedDeclarations(masked: string, path: string): string {
+export function withoutInlinedDeclarations(masked: string, path: string): string {
   if (commentSyntaxForPath(path) !== "c-like") return masked;
   // `ConstantSpan`, not `{start, end}`, and that is the type doing the work:
   // `tsc` will not let this array hold a span nobody verified the bytes of, so
