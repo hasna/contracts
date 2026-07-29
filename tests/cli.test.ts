@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CONTRACTS_PACKAGE_VERSION, ContractSchemaRegistry } from "../src/schemas";
 
 function runContracts(args: string[]) {
   return Bun.spawnSync(["bun", "run", "src/cli/index.ts", ...args], {
@@ -26,6 +27,15 @@ describe("contracts CLI", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toContain("hasna.proof_bundle.v1");
     expect(result.stdout.toString()).toContain("hasna.secure_local_store_policy.v1");
+  });
+
+  test("lists every schema with the package version as JSON", () => {
+    const result = runContracts(["schemas", "--json"]);
+    expect(result.exitCode).toBe(0);
+    expect(parseStdoutJson(result)).toEqual({
+      version: CONTRACTS_PACKAGE_VERSION,
+      schemas: Object.keys(ContractSchemaRegistry)
+    });
   });
 
   test("prints secure local-store policy JSON", () => {

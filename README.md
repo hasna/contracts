@@ -176,6 +176,17 @@ contracts schemas
 contracts schemas --json
 ```
 
+JSON output is an object containing the installed package `version` and the
+complete `schemas` id array. Consumers can compare `version` with the expected
+release before relying on the registry contents:
+
+```json
+{
+  "version": "0.8.5",
+  "schemas": ["hasna.actor_ref.v1", "..."]
+}
+```
+
 Validate a file using its embedded `schema` field:
 
 ```bash

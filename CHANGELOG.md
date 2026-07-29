@@ -2,6 +2,16 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.8.5] - 2026-07-29
+
+### `schemas --json` identifies the installed CLI version
+
+- Changed `contracts schemas --json` from a bare schema-id array to an object
+  with `version` and `schemas` fields, so fleet audits can detect stale global
+  installations before relying on their registry contents.
+- The `schemas` field contains every id in `ContractSchemaRegistry`; schema ids
+  and the human-readable `contracts schemas` output are unchanged.
+
 ## [0.8.4] - 2026-07-29
 
 ### BREAKING: the deployment-mode axis is removed; storage is a `sqlite | postgres` backend switch
