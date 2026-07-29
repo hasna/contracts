@@ -149,13 +149,13 @@ Rules:
   files are read only when they are regular files under a size cap, so a FIFO
   or a character device planted in the credential directory cannot wedge a
   per-request read.
-- **Every credential is built by one of exactly two constructors** —
-  `resolveCredential()` for the chain, `explicitCredential()` for a key a caller
-  passes directly as a string to `createHasnaHttpTransport({ apiKey })`. Both
-  validate and seal. A construction site that skips them is a bypass of this
-  whole section, and the string branch WAS one: it built a plain object literal,
-  so the single most-used public entry point ran neither the header-byte check
-  nor the seal.
+- **Every credential entering the transport is validated and sealed.**
+  `resolveCredential()` protects values from the chain, `explicitCredential()`
+  protects a key passed directly as a string to
+  `createHasnaHttpTransport({ apiKey })`, and the transport revalidates and
+  reseals every value returned by a caller-supplied `CredentialProvider`. A
+  construction or provider boundary that skips those protections is a bypass of
+  this whole section.
 - Errors name **which source** supplied the rejected key, and say what to do
   about it. Where two sources disagree, the report names the **paths** only: a
   digest of a secret is still a derived encoding of it, and a truncated one is a
