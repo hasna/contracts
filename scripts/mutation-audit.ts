@@ -13,8 +13,9 @@
 // A mutation that leaves the suite green is a rule with no test. That is a
 // defect in this file's terms, not a curiosity.
 
-import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { MutationRecordRefusal, openInFlightRecordStore } from "./mutation-audit-record";
 
 interface Mutation {
   /** Short id used in reports. */
@@ -838,106 +839,74 @@ function runSuite(): { pass: number; fail: number; failed: string[] } {
 }
 
 /**
- * Crash-surviving record of the file currently holding a mutation.
+ * Turn a refusal from the record store into the rc=2 every caller of this script
+ * already expects.
  *
- * WHY THIS EXISTS. This script edits tracked source in place and restores it on
- * the next line. Anything that stops the process between those two lines leaves
- * the mutation on disk looking exactly like someone's edit — that is how
- * `if (false) roots.push(...)` reached a commit in this repo.
- *
- * SIGNAL HANDLERS DO NOT CLOSE IT, and the reason is specific to this script
- * rather than general: it spends essentially all of its life inside a blocking
- * `Bun.spawnSync`, which does not yield to the event loop, so a queued handler
- * gets no turn until the suite returns. Measured during this change — SIGTERM to
- * the audit process was delivered and the process kept going through two more
- * mutations with the handler never running. SIGKILL cannot be caught at all.
- *
- * So the original text is ALSO written to disk before the mutation, and the next
- * run repairs from it. That path is the one that works, and it was verified the
- * only honest way: SIGKILL the audit mid-mutation, confirm the mutation is left
- * on disk, then confirm the next run prints RECOVERED and restores the file. The
- * handlers below are kept as a cheap best effort for the idle case, not as the
- * guarantee.
- *
- * The sentinel lives in the repo root, gitignored, so a human or agent looking
- * at a confusing diff can SEE it.
+ * The store throws instead of exiting so its rules can be asserted without
+ * spawning a process. This is the single place that converts, so the exit code
+ * and the message on stderr are unchanged from before the split.
  */
-const SENTINEL = join(repoRoot, ".mutation-audit-inflight.json");
-
-let inFlight: { path: string; original: string } | null = null;
-
-function beginMutation(path: string, original: string): void {
-  inFlight = { path, original };
-  writeFileSync(SENTINEL, JSON.stringify({ pid: process.pid, path, original }));
-}
-
-function endMutation(): void {
-  if (inFlight) {
-    const { path, original } = inFlight;
-    inFlight = null;
-    writeFileSync(path, original);
+function refuseWith<T>(work: () => T): T {
+  try {
+    return work();
+  } catch (error) {
+    if (!(error instanceof MutationRecordRefusal)) throw error;
+    console.error(error.message);
+    process.exit(2);
   }
-  if (existsSync(SENTINEL)) rmSync(SENTINEL, { force: true });
 }
 
 /**
- * Repair a previous run that was killed before it could restore.
+ * The crash-surviving in-flight record, which lives in `mutation-audit-record.ts`.
  *
- * REFUSES TO RUN CONCURRENTLY, and that guard is not hygiene — without it this
- * function is a corruption source. Two audits in the same worktree share one
- * tree: the second one's recovery restores the file the first one is actively
- * mutating, so the first then measures an unmutated tree and reports SURVIVED
- * for rules that are fine. Reproduced by starting a second run by accident during
- * this change.
+ * WHY IT IS NOT IN THIS FILE. This one runs the suite on import, so nothing can
+ * import it to check anything — and the record handling is where the mistakes are
+ * expensive: it writes the pristine text of a tracked source file to disk and, on
+ * the next run, writes that text back. Both halves are now testable in
+ * milliseconds by `tests/mutation-audit-record.test.ts`, which is the point.
  *
- * The sentinel carries the owning pid, so "abandoned" can be told from "someone
- * else is working". A stale pid that has been recycled onto an unrelated process
- * is possible and would make this refuse instead of recover — the safe direction,
- * and the message says what to do.
+ * WHY THE RECORD LIVES OUTSIDE THE SCANNED TREE, and it is not tidiness. It used to
+ * sit in the repo root as `.mutation-audit-inflight.json`, gitignored so that a
+ * human looking at a confusing diff could SEE it. But its payload is the FULL
+ * pristine text of the file being mutated, and for `src/no-cloud.ts` that text is
+ * the denylist itself — every module name and config key the no-cloud gate exists
+ * to find. This suite scans this repo with its own scanner, and the scanner does
+ * not consult `.gitignore`, so the record was evidence against the repo that wrote
+ * it.
+ *
+ * MEASURED on a pristine tree with NO mutation applied: `tests/conformance.test.ts`
+ * plus `tests/cli.test.ts` went from 96 pass / 0 fail to 92 pass / 4 fail on the
+ * record's presence alone. The baseline is taken BEFORE the record exists, so every
+ * mutation then ran against a +4 false-failure floor the baseline never saw, and a
+ * mutation nothing genuinely catches still reported `caught` on those four alone. A
+ * comment-only insertion in `src/no-cloud.ts` — a semantic no-op — was measured
+ * `caught 790/4` by this script, while the same edit hand-applied to a clean tree
+ * gave 794 pass / 7 skip / 0 fail. The audit manufactured the kill.
+ *
+ * The store's own guards keep the location honest; the floor probe further down
+ * then MEASURES that it worked, because a construction argument is not a reading.
+ *
+ * Opening the store is what applies those guards — the private directory, the
+ * outside-the-tree assertion, and recovery's refusal to restore a path this tree
+ * does not own — so a refusal here stops the run before a single test is spent.
  */
-function recoverAbandonedMutation(): void {
-  if (!existsSync(SENTINEL)) return;
-  const record = JSON.parse(readFileSync(SENTINEL, "utf8")) as { pid?: number; path: string; original: string };
-  if (record.pid !== undefined && record.pid !== process.pid && processIsAlive(record.pid)) {
-    console.error(
-      `Refusing to run: pid ${record.pid} holds a mutation in ${record.path}. ` +
-        `Wait for it, or kill that pid and re-run to recover.`,
-    );
-    process.exit(2);
-  }
-  if (readFileSync(record.path, "utf8") !== record.original) {
-    writeFileSync(record.path, record.original);
-    console.error(`RECOVERED: a previous run left ${record.path} mutated. Restored it.`);
-  }
-  rmSync(SENTINEL, { force: true });
-}
-
-/** `kill -0`: does this pid exist and are we allowed to signal it? */
-function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    // EPERM means it exists and belongs to somebody else, which still counts.
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
+const record = refuseWith(() => openInFlightRecordStore(repoRoot));
 
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"] as const) {
   process.on(signal, () => {
-    endMutation();
+    record.end();
     console.error(`\n${signal} — restored the mutated file before exiting.`);
     process.exit(130);
   });
 }
 process.on("uncaughtException", (error) => {
-  endMutation();
+  record.end();
   console.error(error);
   process.exit(1);
 });
-process.on("exit", endMutation);
+process.on("exit", () => record.end());
 
-recoverAbandonedMutation();
+for (const line of refuseWith(() => record.recover())) console.error(line);
 
 // Flags are not filters. `bun scripts/mutation-audit.ts --anchors` used to be
 // read as "select mutations whose id contains `--anchors`", i.e. none of them.
@@ -984,6 +953,7 @@ if (cli.flags.has("--anchors")) {
   process.exit(stale === 0 ? 0 : 1);
 }
 
+console.log(`in-flight record: ${record.sentinel}`);
 const baseline = runSuite();
 console.log(`baseline: ${baseline.pass} pass / ${baseline.fail} fail\n`);
 // A baseline of zero passes is not a green suite, it is no reading at all — the
@@ -1000,6 +970,52 @@ if (baseline.fail !== 0) {
   process.exit(2);
 }
 
+/**
+ * THE FLOOR PROBE: the tree with this script's own scratch state in place and
+ * NOTHING mutated, which must read exactly like the pristine baseline.
+ *
+ * WHY THE BASELINE ALONE IS NOT ENOUGH. It is taken with no record on disk, so it
+ * can only ever say the tree is green — it cannot see a cost the audit itself adds
+ * a moment later. That gap is what let a +4 false-failure floor sit under every
+ * `N/N caught` figure this repo has published: the record's presence failed four
+ * tests, and those four were then reported as a mutation's kill. Relocating the
+ * record fixes the known instance; the probe is what makes the NEXT one impossible
+ * to mistake for a kill, whatever it turns out to be — a leftover build artifact, a
+ * temp file a scanner does reach, an env var the harness sets.
+ *
+ * Per file, not once per run, because the record's payload IS that file's pristine
+ * text: a probe over `src/no-cloud.ts` says nothing about what a record holding
+ * `src/source-text.ts` would do. One extra suite run per distinct file, against a
+ * run that spends one per mutation.
+ *
+ * ABORT, not a warning. A floor mis-attributed to a mutation is worse than no
+ * audit, because it reports coverage that is not there — so the run stops before it
+ * can attribute anything.
+ *
+ * NO RETRY on a mismatch, only on a suite that gave no reading at all. Retrying a
+ * mismatch and accepting the second answer is exactly how an intermittent floor
+ * becomes a green audit.
+ */
+for (const file of [...new Set(selected.map((mutation) => mutation.file))]) {
+  const path = join(repoRoot, file);
+  const original = readFileSync(path, "utf8");
+  record.begin(path, original);
+  let probe = runSuite();
+  if (probe.pass === 0 && probe.fail === 0) probe = runSuite();
+  record.end();
+  if (probe.pass !== baseline.pass || probe.fail !== 0) {
+    console.error(
+      `Refusing to audit: with NO mutation applied, the in-flight record for ${file} moves the suite ` +
+        `from ${baseline.pass} pass / ${baseline.fail} fail to ${probe.pass} pass / ${probe.fail} fail. ` +
+        `Every verdict in this run would carry that as a floor, so no verdict is attributable.` +
+        (probe.failed.length > 0 ? `\nFailing: ${probe.failed.join(", ")}` : ""),
+    );
+    process.exit(2);
+  }
+  console.log(`floor probe ${file.padEnd(26)} clean ${probe.pass}/${probe.fail}`);
+}
+console.log();
+
 let survivors = 0;
 for (const mutation of selected) {
   const path = join(repoRoot, mutation.file);
@@ -1009,7 +1025,7 @@ for (const mutation of selected) {
     survivors += 1;
     continue;
   }
-  beginMutation(path, original);
+  record.begin(path, original);
   writeFileSync(path, original.replace(mutation.from, mutation.to));
   let result = runSuite();
   // A suite that reported NOTHING did not survive the mutation — it failed to
@@ -1017,7 +1033,7 @@ for (const mutation of selected) {
   // review saw `M21 SURVIVED 0/0` that re-ran clean in isolation. Retry once,
   // then say "no result" rather than blame the rule.
   if (result.pass === 0 && result.fail === 0) result = runSuite();
-  endMutation();
+  record.end();
   const ranAtAll = result.pass > 0 || result.fail > 0;
   const caught = result.fail > 0;
   if (!caught) survivors += 1;
