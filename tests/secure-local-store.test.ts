@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_SECURE_LOCAL_STORE_POLICY,
-  SCHEMA_IDS,
   secureLocalStorePolicy,
-  validateContract
-} from "../src";
+} from "../src/secure-local-store";
+import { SCHEMA_IDS } from "../src/schemas";
+import { validateContract } from "../src/validators";
 
 describe("secure local-store declarative contract", () => {
   test("default policy validates and inventories required stores", () => {

@@ -1,0 +1,920 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "hasna.contracts.schema_bundle.v1",
+  "release": "1.0.0-rc.1",
+  "schemas": {
+    "hasna.contracts.error.v1": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "hasna.contracts.error.v1",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "hasna.contracts.error.v1"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "validation",
+            "authentication",
+            "authorization",
+            "not_found",
+            "conflict",
+            "rate_limit",
+            "upstream",
+            "internal"
+          ]
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "details": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "correlationId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "schema",
+        "code",
+        "message",
+        "category",
+        "retryable"
+      ],
+      "additionalProperties": false,
+      "x-hasna-runtime-validator": "validateCoreContract"
+    },
+    "hasna.contracts.principal.v1": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "hasna.contracts.principal.v1",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "hasna.contracts.principal.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "human",
+            "service",
+            "agent",
+            "system"
+          ]
+        },
+        "tenantId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+          },
+          "default": []
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+          },
+          "default": []
+        },
+        "claims": {
+          "type": "object",
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "schema",
+        "id",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "x-hasna-runtime-validator": "validateCoreContract"
+    },
+    "hasna.contracts.tenant_context.v1": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "hasna.contracts.tenant_context.v1",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "hasna.contracts.tenant_context.v1"
+        },
+        "tenantId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "principal": {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "type": "string",
+              "const": "hasna.contracts.principal.v1"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "human",
+                "service",
+                "agent",
+                "system"
+              ]
+            },
+            "tenantId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "displayName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "roles": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+              },
+              "default": []
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+              },
+              "default": []
+            },
+            "claims": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "schema",
+            "id",
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "traceparent": {
+          "type": "string",
+          "pattern": "^[\\da-f]{2}-[\\da-f]{32}-[\\da-f]{16}-[\\da-f]{2}$"
+        }
+      },
+      "required": [
+        "schema",
+        "tenantId",
+        "principal",
+        "requestId"
+      ],
+      "additionalProperties": false,
+      "x-hasna-runtime-validator": "validateCoreContract"
+    },
+    "hasna.contracts.idempotency.v1": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "hasna.contracts.idempotency.v1",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "hasna.contracts.idempotency.v1"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+        },
+        "requestDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "schema",
+        "key",
+        "operationId",
+        "requestDigest",
+        "createdAt"
+      ],
+      "additionalProperties": false,
+      "x-hasna-runtime-validator": "validateCoreContract"
+    },
+    "hasna.contracts.event_envelope.v1": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "hasna.contracts.event_envelope.v1",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "hasna.contracts.event_envelope.v1"
+        },
+        "specVersion": {
+          "type": "string",
+          "const": "1.0"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+        },
+        "source": {
+          "type": "string",
+          "format": "uri"
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "dataSchema": {
+          "type": "string",
+          "format": "uri"
+        },
+        "dataContentType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "tenant": {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "type": "string",
+              "const": "hasna.contracts.tenant_context.v1"
+            },
+            "tenantId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "principal": {
+              "type": "object",
+              "properties": {
+                "schema": {
+                  "type": "string",
+                  "const": "hasna.contracts.principal.v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "human",
+                    "service",
+                    "agent",
+                    "system"
+                  ]
+                },
+                "tenantId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "displayName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "roles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+                  },
+                  "default": []
+                },
+                "scopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+                  },
+                  "default": []
+                },
+                "claims": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "schema",
+                "id",
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "traceparent": {
+              "type": "string",
+              "pattern": "^[\\da-f]{2}-[\\da-f]{32}-[\\da-f]{16}-[\\da-f]{2}$"
+            }
+          },
+          "required": [
+            "schema",
+            "tenantId",
+            "principal",
+            "requestId"
+          ],
+          "additionalProperties": false
+        },
+        "principal": {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "type": "string",
+              "const": "hasna.contracts.principal.v1"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "human",
+                "service",
+                "agent",
+                "system"
+              ]
+            },
+            "tenantId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "displayName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "roles": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+              },
+              "default": []
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+              },
+              "default": []
+            },
+            "claims": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "schema",
+            "id",
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        "correlationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "causationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "idempotency": {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "type": "string",
+              "const": "hasna.contracts.idempotency.v1"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "operationId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+            },
+            "requestDigest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": [
+            "schema",
+            "key",
+            "operationId",
+            "requestDigest",
+            "createdAt"
+          ],
+          "additionalProperties": false
+        },
+        "data": {}
+      },
+      "required": [
+        "schema",
+        "specVersion",
+        "id",
+        "type",
+        "source",
+        "time"
+      ],
+      "additionalProperties": false,
+      "x-hasna-runtime-validator": "validateCoreContract"
+    },
+    "hasna.contracts.blob_ref.v1": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "hasna.contracts.blob_ref.v1",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "hasna.contracts.blob_ref.v1"
+        },
+        "uri": {
+          "type": "string",
+          "format": "uri"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "etag": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "schema",
+        "uri",
+        "digest",
+        "sizeBytes",
+        "mediaType"
+      ],
+      "additionalProperties": false,
+      "x-hasna-runtime-validator": "validateCoreContract"
+    },
+    "hasna.contracts.secret_ref.v1": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "hasna.contracts.secret_ref.v1",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "hasna.contracts.secret_ref.v1"
+        },
+        "uri": {
+          "type": "string",
+          "pattern": "^(?:secret|vault|aws-sm|gcp-sm|azure-kv):\\/\\/[A-Za-z0-9][A-Za-z0-9._~!$&'()*+,;=:@/-]*$"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "schema",
+        "uri"
+      ],
+      "additionalProperties": false,
+      "x-hasna-runtime-validator": "validateCoreContract"
+    },
+    "hasna.contracts.compatibility.v1": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "hasna.contracts.compatibility.v1",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "hasna.contracts.compatibility.v1"
+        },
+        "contract": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+        },
+        "currentVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "minimumVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "supportedVersions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+          },
+          "minItems": 1
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "exact",
+            "additive"
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "contract",
+        "currentVersion",
+        "minimumVersion",
+        "supportedVersions",
+        "strategy"
+      ],
+      "additionalProperties": false,
+      "x-hasna-runtime-validator": "validateCoreContract"
+    },
+    "hasna.contracts.operation_descriptor.v1": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "hasna.contracts.operation_descriptor.v1",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "hasna.contracts.operation_descriptor.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "inputSchema": {
+          "type": "string",
+          "minLength": 1
+        },
+        "outputSchema": {
+          "type": "string",
+          "minLength": 1
+        },
+        "errorSchemas": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
+        },
+        "idempotency": {
+          "type": "string",
+          "enum": [
+            "forbidden",
+            "optional",
+            "required"
+          ]
+        },
+        "authorization": {
+          "type": "string",
+          "enum": [
+            "none",
+            "principal",
+            "tenant"
+          ]
+        },
+        "effect": {
+          "type": "string",
+          "enum": [
+            "none",
+            "read",
+            "write",
+            "external"
+          ]
+        },
+        "stability": {
+          "type": "string",
+          "enum": [
+            "experimental",
+            "stable",
+            "deprecated"
+          ],
+          "default": "stable"
+        }
+      },
+      "required": [
+        "schema",
+        "id",
+        "version",
+        "summary",
+        "inputSchema",
+        "outputSchema",
+        "idempotency",
+        "authorization",
+        "effect"
+      ],
+      "additionalProperties": false,
+      "x-hasna-runtime-validator": "validateCoreContract"
+    },
+    "hasna.contracts.capability_descriptor.v1": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "hasna.contracts.capability_descriptor.v1",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "hasna.contracts.capability_descriptor.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "schema": {
+                "type": "string",
+                "const": "hasna.contracts.operation_descriptor.v1"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "inputSchema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "outputSchema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "errorSchemas": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "default": []
+              },
+              "idempotency": {
+                "type": "string",
+                "enum": [
+                  "forbidden",
+                  "optional",
+                  "required"
+                ]
+              },
+              "authorization": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "principal",
+                  "tenant"
+                ]
+              },
+              "effect": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "read",
+                  "write",
+                  "external"
+                ]
+              },
+              "stability": {
+                "type": "string",
+                "enum": [
+                  "experimental",
+                  "stable",
+                  "deprecated"
+                ],
+                "default": "stable"
+              }
+            },
+            "required": [
+              "schema",
+              "id",
+              "version",
+              "summary",
+              "inputSchema",
+              "outputSchema",
+              "idempotency",
+              "authorization",
+              "effect"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
+        "compatibility": {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "type": "string",
+              "const": "hasna.contracts.compatibility.v1"
+            },
+            "contract": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+            },
+            "currentVersion": {
+              "type": "string",
+              "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+            },
+            "minimumVersion": {
+              "type": "string",
+              "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+            },
+            "supportedVersions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+              },
+              "minItems": 1
+            },
+            "strategy": {
+              "type": "string",
+              "enum": [
+                "exact",
+                "additive"
+              ]
+            }
+          },
+          "required": [
+            "schema",
+            "contract",
+            "currentVersion",
+            "minimumVersion",
+            "supportedVersions",
+            "strategy"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schema",
+        "id",
+        "version",
+        "summary",
+        "operations"
+      ],
+      "additionalProperties": false,
+      "x-hasna-runtime-validator": "validateCoreContract"
+    }
+  }
+}

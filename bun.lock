@@ -5,18 +5,43 @@
     "": {
       "name": "@hasna/contracts",
       "dependencies": {
-        "commander": "^13.1.0",
         "zod": "^3.25.76",
       },
       "devDependencies": {
         "@types/bun": "^1.2.4",
         "@types/pg": "^8.11.10",
+        "commander": "^13.1.0",
         "pg": "^8.13.1",
         "typescript": "^5.7.3",
+        "zod-to-json-schema": "^3.25.1",
       },
+    },
+    "packages/auth": {
+      "name": "@hasna/contracts-auth",
+      "version": "1.0.0-rc.1",
+    },
+    "packages/client": {
+      "name": "@hasna/contracts-client",
+      "version": "1.0.0-rc.1",
+    },
+    "packages/sdk-generator": {
+      "name": "@hasna/contracts-sdk-generator",
+      "version": "1.0.0-rc.1",
+    },
+    "packages/vendor-kit": {
+      "name": "@hasna/contracts-vendor-kit",
+      "version": "1.0.0-rc.1",
     },
   },
   "packages": {
+    "@hasna/contracts-auth": ["@hasna/contracts-auth@workspace:packages/auth"],
+
+    "@hasna/contracts-client": ["@hasna/contracts-client@workspace:packages/client"],
+
+    "@hasna/contracts-sdk-generator": ["@hasna/contracts-sdk-generator@workspace:packages/sdk-generator"],
+
+    "@hasna/contracts-vendor-kit": ["@hasna/contracts-vendor-kit@workspace:packages/vendor-kit"],
+
     "@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 
     "@types/node": ["@types/node@26.0.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-vf2YFi1iY9lHGwNJMs01biZFbKJkrZR1T6/MlzjhJLPdntOHLhTrDSnSVcdtvjihi4VQNlrFRIxLsDBlQpAipA=="],
@@ -60,5 +85,7 @@
     "xtend": ["xtend@4.0.2", "", {}, "sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ=="],
 
     "zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
+
+    "zod-to-json-schema": ["zod-to-json-schema@3.25.2", "", { "peerDependencies": { "zod": "^3.25.28 || ^4" } }, "sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA=="],
   }
 }

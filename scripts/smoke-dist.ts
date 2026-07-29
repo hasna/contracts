@@ -1,223 +1,51 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import {
-  LOOPBACK_SKIP_ENV,
-  loopbackUnavailableMessage,
-  resolveLoopbackRequirement,
-} from "../src/testing/loopback.js";
-
-// This script is `smoke:dist`, which `verify:release` runs, which is both
-// `prepack` and `prepublishOnly`. It is therefore the last thing standing
-// between a credential-forwarding regression and npm, so it is fail-closed:
-// it refuses to run at all unless it can bind the servers the
-// authenticated-redirect smoke needs. A skip is not a pass. CONTRACTS_ALLOW_-
-// LOOPBACK_SKIP names the skip for the test suites; here it only changes the
-// wording of the refusal, because the publish gate never reports success on a
-// run that did not exercise the credential boundary.
-const REDIRECT_SMOKE_LABEL = "dist authenticated-redirect credential smoke";
-const redirectSmoke = resolveLoopbackRequirement(["loopback", "wildcard"]);
-if (redirectSmoke.decision === "skip") {
-  console.error(
-    `dist smoke UNVERIFIED: ${REDIRECT_SMOKE_LABEL} cannot run on this runtime `
-    + `(missing ${redirectSmoke.missing.join(", ")} bind) and ${LOOPBACK_SKIP_ENV} `
-    + "does not apply to the publish gate.",
-  );
-  process.exit(2);
-}
-if (redirectSmoke.decision === "fail") {
-  throw new Error(loopbackUnavailableMessage(REDIRECT_SMOKE_LABEL, redirectSmoke.missing));
-}
 
 const root = join(import.meta.dir, "..");
-const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { version: string };
-const { CONTRACTS_PACKAGE_VERSION } = await import("../dist/schemas.js");
-const { scanNoCloudTarget } = await import("../dist/no-cloud.js");
-const { createHasnaHttpTransport, HasnaHttpError } = await import("../dist/client/transport.js");
-const todos = await import("../dist/todos/index.js");
-const { secureLocalStorePolicy } = await import("../dist/secure-local-store.js");
+const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+  version: string;
+};
+const core = await import("../dist/index.js");
+const primitives = await import("../dist/primitives.js");
 
-if (typeof scanNoCloudTarget !== "function") {
-  throw new Error("dist/no-cloud.js did not export scanNoCloudTarget");
+if (core.CONTRACTS_PACKAGE_VERSION !== packageJson.version) {
+  throw new Error(`Version mismatch: ${core.CONTRACTS_PACKAGE_VERSION} !== ${packageJson.version}`);
 }
-if (typeof createHasnaHttpTransport !== "function") {
-  throw new Error("dist/client/transport.js did not export createHasnaHttpTransport");
-}
-if (typeof secureLocalStorePolicy !== "function") {
-  throw new Error("dist/secure-local-store.js did not export secureLocalStorePolicy");
+if (Object.keys(primitives.CORE_SCHEMA_REGISTRY).length !== 10) {
+  throw new Error("dist core schema registry is incomplete");
 }
 
-type CommandResult = ReturnType<typeof Bun.spawnSync>;
-
-function run(args: string[]): CommandResult {
-  return Bun.spawnSync(["bun", "dist/cli/index.js", ...args], {
-    cwd: root,
-    stdout: "pipe",
-    stderr: "pipe"
-  });
-}
-
-function text(bytes: Uint8Array) {
-  return new TextDecoder().decode(bytes);
-}
-
-function requireExit(result: CommandResult, expected: number, label: string) {
-  if (result.exitCode !== expected) {
-    throw new Error(`${label} exited ${result.exitCode}, expected ${expected}\nstdout:\n${text(result.stdout)}\nstderr:\n${text(result.stderr)}`);
+for (const fixture of ["n-minus-one.principal.valid.json", "n.principal.valid.json"]) {
+  const value = JSON.parse(
+    readFileSync(join(root, "fixtures", "compatibility", fixture), "utf8"),
+  );
+  if (!primitives.validateCoreContract(primitives.CORE_SCHEMA_IDS.principal, value).success) {
+    throw new Error(`dist rejected compatibility fixture ${fixture}`);
   }
 }
 
-function parseJson(result: CommandResult, label: string) {
-  try {
-    return JSON.parse(text(result.stdout)) as Record<string, unknown>;
-  } catch (error) {
-    throw new Error(`${label} did not emit valid JSON: ${error instanceof Error ? error.message : String(error)}\n${text(result.stdout)}`);
-  }
+const files = readdirSync(join(root, "dist")).sort();
+const expected = [
+  "index.d.ts",
+  "index.js",
+  "primitives.d.ts",
+  "primitives.js",
+  "schemas.d.ts",
+  "schemas.js",
+  "validators.d.ts",
+  "validators.js",
+];
+if (JSON.stringify(files) !== JSON.stringify(expected)) {
+  throw new Error(`dist leaked a non-core surface: ${files.join(", ")}`);
+}
+for (const removed of [
+  "scanNoCloudTarget",
+  "createHasnaHttpTransport",
+  "generateKit",
+  "generateSdkFromOpenApi",
+  "verifyApiKeyToken",
+]) {
+  if (removed in core) throw new Error(`runtime helper leaked through dist root: ${removed}`);
 }
 
-if (CONTRACTS_PACKAGE_VERSION !== packageJson.version) {
-  throw new Error(`Version mismatch: package.json=${packageJson.version} dist=${CONTRACTS_PACKAGE_VERSION}`);
-}
-
-if (todos.TodosModeSchema.parse("local") !== "local" || todos.TodosModeSchema.parse("cloud") !== "cloud") {
-  throw new Error("dist/todos did not expose the strict Todos mode schema");
-}
-if (todos.TODOS_OPERATION_MANIFEST.operations.length !== 125) {
-  throw new Error("dist/todos operation manifest is incomplete");
-}
-if (todos.TODOS_CONTRACT_DESCRIPTOR.rootExported !== false) {
-  throw new Error("dist/todos contract root-export invariant changed");
-}
-
-const version = run(["--version"]);
-requireExit(version, 0, "version");
-if (text(version.stdout).trim() !== packageJson.version) {
-  throw new Error(`CLI version mismatch: ${text(version.stdout).trim()} !== ${packageJson.version}`);
-}
-
-const schemas = run(["schemas", "--json"]);
-requireExit(schemas, 0, "schemas --json");
-const schemaIds = parseJson(schemas, "schemas --json");
-if (!Array.isArray(schemaIds) || !schemaIds.includes("hasna.proof_bundle.v1")) {
-  throw new Error("schemas --json did not include hasna.proof_bundle.v1");
-}
-
-const explicitValidate = run(["validate", "--json", "--schema", "hasna.evidence_ref.v1", "examples/evidence-ref.valid.json"]);
-requireExit(explicitValidate, 0, "explicit validate");
-if (parseJson(explicitValidate, "explicit validate").ok !== true) {
-  throw new Error("explicit validate did not return ok=true");
-}
-
-const invalidValidate = run(["validate", "--json", "examples/proof-bundle.invalid.json"]);
-requireExit(invalidValidate, 1, "invalid validate");
-const invalidPayload = parseJson(invalidValidate, "invalid validate");
-if (invalidPayload.ok !== false || !Array.isArray(invalidPayload.issues)) {
-  throw new Error("invalid validate did not return structured issues");
-}
-
-const conformance = run(["conformance", "--json", "examples"]);
-requireExit(conformance, 0, "conformance");
-const conformancePayload = parseJson(conformance, "conformance");
-if (conformancePayload.ok !== true || conformancePayload.failed !== 0 || Number(conformancePayload.checked) <= 0) {
-  throw new Error("conformance did not report a non-empty passing fixture set");
-}
-
-const secureStore = run(["secure-local-store", "--json", "--store", "todos"]);
-requireExit(secureStore, 0, "secure-local-store");
-const secureStorePayload = parseJson(secureStore, "secure-local-store");
-if (secureStorePayload.schema !== "hasna.secure_local_store_policy.v1") {
-  throw new Error("secure-local-store did not emit the secure local-store policy schema");
-}
-
-const noCloudDir = mkdtempSync(join(tmpdir(), "contracts-no-cloud-dist-"));
-try {
-  writeFileSync(join(noCloudDir, "package.json"), JSON.stringify({ name: "@hasna/dist-smoke", version: packageJson.version }));
-  const noCloud = run(["no-cloud-scan", "--json", noCloudDir]);
-  requireExit(noCloud, 0, "no-cloud-scan");
-  const noCloudPayload = parseJson(noCloud, "no-cloud-scan");
-  if (noCloudPayload.schema !== "hasna.no_cloud_evidence_pack.v1" || noCloudPayload.verdict !== "passed") {
-    throw new Error("no-cloud-scan did not emit a passing evidence pack");
-  }
-} finally {
-  rmSync(noCloudDir, { recursive: true, force: true });
-}
-
-const redirectTargetRequests: Array<{
-  method: string;
-  apiKey: string | null;
-  authorization: string | null;
-  body: string;
-}> = [];
-const redirectTarget = Bun.serve({
-  hostname: "0.0.0.0",
-  port: 0,
-  async fetch(req) {
-    redirectTargetRequests.push({
-      method: req.method,
-      apiKey: req.headers.get("x-api-key"),
-      authorization: req.headers.get("authorization"),
-      body: await req.text(),
-    });
-    return Response.json({ reached: true });
-  },
-});
-let redirectStatus: 301 | 302 | 303 | 307 | 308 = 301;
-const redirectSource = Bun.serve({
-  hostname: "127.0.0.1",
-  port: 0,
-  fetch() {
-    return new Response(null, {
-      status: redirectStatus,
-      headers: { Location: `http://0.0.0.0:${redirectTarget.port}/capture` },
-    });
-  },
-});
-
-try {
-  const redirectFixtureCredential = ["fixture", "redirect", "value"].join("-");
-  const redirectTransport = createHasnaHttpTransport({
-    name: "dist-redirect-smoke",
-    baseUrl: `http://127.0.0.1:${redirectSource.port}`,
-    apiKey: redirectFixtureCredential,
-    retry: false,
-  });
-  const redirectCases = [
-    { status: 301 as const, method: "GET", body: undefined },
-    { status: 302 as const, method: "POST", body: { marker: "post-body" } },
-    { status: 303 as const, method: "PATCH", body: { marker: "patch-body" } },
-    { status: 307 as const, method: "PUT", body: { marker: "put-body" } },
-    { status: 308 as const, method: "DELETE", body: { marker: "delete-body" } },
-  ];
-
-  for (const redirectCase of redirectCases) {
-    redirectStatus = redirectCase.status;
-    let thrown: unknown;
-    try {
-      await redirectTransport.request(
-        redirectCase.method,
-        `/redirect-${redirectCase.status}`,
-        redirectCase.body,
-      );
-    } catch (error) {
-      thrown = error;
-    }
-    if (
-      !(thrown instanceof HasnaHttpError) ||
-      thrown.status !== redirectCase.status ||
-      thrown.method !== redirectCase.method ||
-      thrown.path !== `/redirect-${redirectCase.status}`
-    ) {
-      throw new Error(
-        `dist redirect ${redirectCase.status} did not fail closed with the expected HasnaHttpError`,
-      );
-    }
-  }
-  if (redirectTargetRequests.length !== 0) {
-    throw new Error("dist authenticated transport followed a redirect and exposed a request");
-  }
-} finally {
-  redirectSource.stop(true);
-  redirectTarget.stop(true);
-}
-
-console.log("dist smoke passed");
+console.log("pure dist smoke passed");

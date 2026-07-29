@@ -47,7 +47,7 @@ export function findPackageRoot(start: string = moduleDir()): string {
     if (existsSync(pkgPath)) {
       try {
         const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { name?: string };
-        if (pkg.name === "@hasna/contracts") return dir;
+        if (pkg.name === "@hasna/contracts" || pkg.name === "@hasna/contracts-vendor-kit") return dir;
       } catch {
         // keep walking
       }
@@ -56,7 +56,7 @@ export function findPackageRoot(start: string = moduleDir()): string {
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error("Could not locate the @hasna/contracts package root.");
+  throw new Error("Could not locate the @hasna/contracts-vendor-kit package root.");
 }
 
 /** Resolve the templates directory. */

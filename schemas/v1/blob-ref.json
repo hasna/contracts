@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "hasna.contracts.blob_ref.v1",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "hasna.contracts.blob_ref.v1"
+    },
+    "uri": {
+      "type": "string",
+      "format": "uri"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "sizeBytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "mediaType": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "fileName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "etag": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    }
+  },
+  "required": [
+    "schema",
+    "uri",
+    "digest",
+    "sizeBytes",
+    "mediaType"
+  ],
+  "additionalProperties": false,
+  "x-hasna-runtime-validator": "validateCoreContract"
+}

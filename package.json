@@ -1,7 +1,7 @@
 {
   "name": "@hasna/contracts",
-  "version": "0.8.4",
-  "description": "Shared schemas and validators for Hasna open-source agent infrastructure contracts.",
+  "version": "1.0.0-rc.1",
+  "description": "Side-effect-free schemas, inferred types, and validators for Hasna contracts.",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
@@ -16,10 +16,9 @@
     "registry": "https://registry.npmjs.org",
     "access": "public"
   },
-  "bin": {
-    "contracts": "dist/cli/index.js",
-    "contracts-cli": "dist/cli/contracts-cli.js"
-  },
+  "workspaces": [
+    "packages/*"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -33,85 +32,42 @@
       "types": "./dist/validators.d.ts",
       "import": "./dist/validators.js"
     },
-    "./no-cloud": {
-      "types": "./dist/no-cloud.d.ts",
-      "import": "./dist/no-cloud.js"
+    "./primitives": {
+      "types": "./dist/primitives.d.ts",
+      "import": "./dist/primitives.js"
     },
-    "./mode": {
-      "types": "./dist/mode.d.ts",
-      "import": "./dist/mode.js"
-    },
-    "./service-contract": {
-      "types": "./dist/service-contract.d.ts",
-      "import": "./dist/service-contract.js"
-    },
-    "./secure-local-store": {
-      "types": "./dist/secure-local-store.d.ts",
-      "import": "./dist/secure-local-store.js"
-    },
-    "./conformance": {
-      "types": "./dist/conformance.d.ts",
-      "import": "./dist/conformance.js"
-    },
-    "./vendor-kit": {
-      "types": "./dist/kit/generate.d.ts",
-      "import": "./dist/kit/generate.js"
-    },
-    "./auth": {
-      "types": "./dist/auth/index.d.ts",
-      "import": "./dist/auth/index.js"
-    },
-    "./sdk": {
-      "types": "./dist/sdk/generate.d.ts",
-      "import": "./dist/sdk/generate.js"
-    },
-    "./client": {
-      "types": "./dist/client/transport.d.ts",
-      "import": "./dist/client/transport.js"
-    },
-    "./client/storage": {
-      "types": "./dist/client/storage.d.ts",
-      "import": "./dist/client/storage.js"
-    },
-    "./todos": {
-      "types": "./dist/todos/index.d.ts",
-      "import": "./dist/todos/index.js"
-    },
-    "./todos/artifacts/*": "./generated/todos/v1/*",
-    "./hasna.contract.schema.json": "./dist/hasna.contract.schema.json",
-    "./artifact-scan": {
-      "types": "./dist/artifact-scan.d.ts",
-      "import": "./dist/artifact-scan.js"
-    }
+    "./json-schemas/*": "./schemas/v1/*"
   },
   "files": [
     "dist",
-    "src/kit",
+    "schemas/v1",
     "src/hasna.contract.schema.json",
-    "docs",
-    "examples",
-    "generated/todos/v1",
-    "CONTRACT.md",
-    "docker-compose.yml",
+    "fixtures/compatibility/*.json",
+    "docs/CORE_RELEASE_CANDIDATE.md",
+    "docs/release",
     "hasna.contract.json",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun run todos:check && rm -rf dist && bun build src/index.ts src/schemas.ts src/validators.ts src/no-cloud.ts src/mode.ts src/service-contract.ts src/secure-local-store.ts src/conformance.ts src/artifact-scan.ts src/kit/generate.ts src/auth/index.ts src/sdk/generate.ts src/client/transport.ts src/client/storage.ts --root src --outdir dist --target bun && bun build src/todos/index.ts --root src --outdir dist --target bun --packages external && bun build src/cli/index.ts --outdir dist/cli --target bun && cp src/cli/contracts-cli.ts dist/cli/contracts-cli.js && cp src/hasna.contract.schema.json dist/hasna.contract.schema.json && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
+    "build": "bun run schemas:check && rm -rf dist && bun build src/index.ts src/schemas.ts src/validators.ts src/primitives.ts --root src --outdir dist --target bun --packages external && tsc -p tsconfig.core.json",
     "typecheck": "tsc --noEmit",
     "test": "bun test --timeout 120000",
     "lint": "tsc --noEmit",
     "conformance": "bun run src/cli/index.ts conformance examples",
-    "verify:release": "rm -rf dist && bun run todos:hygiene && bun run typecheck && bun run test && bun run conformance && bun run build && bun run src/cli/index.ts repo-conformance . && bun run smoke:dist && bun run smoke:todos-pack && bun run pack:check && bun run scan:artifact",
+    "verify:release": "rm -rf dist && bun run schemas:check && bun run typecheck && bun run test && bun run build && bun run smoke:dist && bun run matrix:compile && bun run candidate:verify",
     "smoke:dist": "bun scripts/smoke-dist.ts",
-    "smoke:todos-pack": "bun scripts/smoke-todos-pack.ts",
-    "pack:check": "bun pm pack --dry-run --ignore-scripts",
+    "matrix:compile": "bun scripts/compile-reverse-dependency-matrix.ts",
+    "candidate:build": "bun scripts/build-release-candidate.ts",
+    "candidate:verify": "bun scripts/build-release-candidate.ts --check",
+    "schemas:generate": "bun scripts/generate-core-schemas.ts",
+    "schemas:check": "bun scripts/generate-core-schemas.ts --check",
     "todos:generate": "bun scripts/generate-todos-contract.ts",
     "todos:check": "bun scripts/generate-todos-contract.ts --check",
     "todos:hygiene": "bun scripts/check-todos-text-hygiene.ts",
-    "dev:cli": "bun run src/cli/index.ts",
-    "prepack": "bun run verify:release",
+    "dev:cli": "bun run --filter @hasna/contracts-cli dev",
+    "prepack": "bun run schemas:check && bun run build && bun run smoke:dist",
     "prepublishOnly": "bun run verify:release",
     "scan:artifact": "bun scripts/scan-artifact.ts"
   },
@@ -127,13 +83,14 @@
     "bun": ">=1.0.0"
   },
   "dependencies": {
-    "commander": "^13.1.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/bun": "^1.2.4",
     "@types/pg": "^8.11.10",
+    "commander": "^13.1.0",
     "pg": "^8.13.1",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "zod-to-json-schema": "^3.25.1"
   }
 }

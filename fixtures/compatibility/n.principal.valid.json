@@ -1,0 +1,12 @@
+{
+  "schema": "hasna.contracts.principal.v1",
+  "id": "service:current-consumer",
+  "kind": "service",
+  "tenantId": "tenant-example",
+  "displayName": "Current consumer",
+  "roles": ["operator"],
+  "scopes": ["example:read"],
+  "claims": {
+    "region": "test"
+  }
+}

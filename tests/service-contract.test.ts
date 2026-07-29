@@ -8,16 +8,18 @@ import {
   allowedBinsForName,
   databaseUrlSecretRefFor,
   defaultSqlitePathFor,
-  serviceContractSpec,
-  validateServiceContractManifest,
-  loadServiceContractManifest,
-  SERVICE_CONTRACT_JSON_SCHEMA,
   ContractSchemaRegistry,
   SERVICE_SURFACE_KINDS,
   STORAGE_ENGINES,
   WAIVABLE_STORAGE_ENGINES,
   HOSTING_MODES
-} from "../src";
+} from "../src/schemas";
+import {
+  serviceContractSpec,
+  validateServiceContractManifest,
+  loadServiceContractManifest,
+  SERVICE_CONTRACT_JSON_SCHEMA,
+} from "../src/service-contract";
 
 const repoRoot = join(import.meta.dir, "..");
 

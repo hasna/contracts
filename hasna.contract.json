@@ -4,12 +4,9 @@
   "name": "contracts",
   "class": "library",
   "contractVersion": "v1",
-  "kitVersion": "0.8.4",
-  "description": "Shared schemas, validators, and conformance kit for Hasna open-source agent infrastructure. Ships types and CLI checks only; no store.",
-  "bins": [
-    "contracts",
-    "contracts-cli"
-  ],
+  "kitVersion": "1.0.0-rc.1",
+  "description": "Side-effect-free shared schemas, inferred types, validators, and JSON Schema artifacts. Ships no CLI, store, network client, or code generator.",
+  "bins": [],
   "hosting": [
     "user-hosted"
   ],
@@ -20,13 +17,6 @@
       "status": "supported",
       "authMode": "none",
       "exportSubpath": "."
-    },
-    {
-      "name": "contract-cli",
-      "kind": "cli",
-      "status": "supported",
-      "bin": "contracts",
-      "authMode": "local-only"
     }
   ],
   "metadata": {

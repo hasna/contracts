@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   normalizeStorageMode,
   resolveStorageMode,
-  storageEnvKeys,
-  envToken,
-  STORAGE_MODES
-} from "../src";
+  storageEnvKeys
+} from "../src/mode";
+import { envToken } from "../src/env-token";
+import { STORAGE_MODES } from "../src/schemas";
 
 describe("storage backend normalizer", () => {
   test("enum is sqlite|postgres only", () => {

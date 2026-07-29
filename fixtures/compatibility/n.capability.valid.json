@@ -1,0 +1,29 @@
+{
+  "schema": "hasna.contracts.capability_descriptor.v1",
+  "id": "example.echo",
+  "version": "1.0.0-rc.1",
+  "summary": "Synthetic compile-matrix capability; it is not a product operation.",
+  "operations": [
+    {
+      "schema": "hasna.contracts.operation_descriptor.v1",
+      "id": "example.echo.invoke",
+      "version": "1.0.0-rc.1",
+      "summary": "Return synthetic fixture input.",
+      "inputSchema": "https://example.invalid/schemas/echo-input.v1.json",
+      "outputSchema": "https://example.invalid/schemas/echo-output.v1.json",
+      "errorSchemas": ["hasna.contracts.error.v1"],
+      "idempotency": "optional",
+      "authorization": "principal",
+      "effect": "none",
+      "stability": "experimental"
+    }
+  ],
+  "compatibility": {
+    "schema": "hasna.contracts.compatibility.v1",
+    "contract": "example.echo",
+    "currentVersion": "1.0.0-rc.1",
+    "minimumVersion": "0.8.4",
+    "supportedVersions": ["1.0.0-rc.1", "0.8.4"],
+    "strategy": "additive"
+  }
+}

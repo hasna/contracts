@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declarationMap": false,
+    "rootDir": "../../src",
+    "outDir": "dist"
+  },
+  "include": ["../../src/client/**/*.ts", "../../src/env-token.ts", "../../src/mode.ts"],
+  "exclude": ["../../src/client/**/*.test.ts"]
+}

@@ -1,0 +1,5 @@
+{
+  "schema": "hasna.contracts.principal.v1",
+  "id": "service:legacy-consumer",
+  "kind": "service"
+}

@@ -1,0 +1,54 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "hasna-contracts-1.0.0-rc.1.tgz",
+      "digest": {
+        "sha256": "40e8a10a0308f48e37789ef5dcfa09e1d479e2b846994cca657cba0c84c9ea67"
+      }
+    }
+  ],
+  "predicateType": "https://slsa.dev/provenance/v1",
+  "predicate": {
+    "buildDefinition": {
+      "buildType": "https://github.com/hasna/contracts/reproducible-tar/v1",
+      "externalParameters": {
+        "package": "@hasna/contracts",
+        "version": "1.0.0-rc.1",
+        "sourceDateEpoch": 0,
+        "tar": [
+          "--sort=name",
+          "--mtime=@0",
+          "--owner=0",
+          "--group=0",
+          "--numeric-owner",
+          "--format=ustar"
+        ],
+        "gzip": [
+          "-n",
+          "-9"
+        ]
+      },
+      "internalParameters": {},
+      "resolvedDependencies": [
+        {
+          "uri": "git+https://github.com/hasna/contracts.git",
+          "digest": {
+            "sha256": "56273942975ceb71c9a340ce5c301e36056a98d54c7f00a33e68ba2f5321fc9e"
+          }
+        }
+      ]
+    },
+    "runDetails": {
+      "builder": {
+        "id": "https://github.com/hasna/contracts/scripts/build-release-candidate.ts"
+      },
+      "metadata": {
+        "invocationId": "sha256:56273942975ceb71c9a340ce5c301e36056a98d54c7f00a33e68ba2f5321fc9e",
+        "startedOn": "1970-01-01T00:00:00Z",
+        "finishedOn": "1970-01-01T00:00:00Z"
+      },
+      "byproducts": []
+    }
+  }
+}

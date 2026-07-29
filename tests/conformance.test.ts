@@ -5,9 +5,9 @@ import { join } from "node:path";
 import {
   SCHEMA_IDS,
   SERVICE_CONTRACT_VERSION,
-  runRepoConformance,
   type ServiceContractManifestInput
-} from "../src";
+} from "../src/schemas";
+import { runRepoConformance } from "../src/conformance";
 
 const repoRoot = join(import.meta.dir, "..");
 

@@ -2,6 +2,23 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [1.0.0-rc.1] - 2026-07-29
+
+### BREAKING: restore a pure generic contract boundary
+
+- Added immutable v1 JSON Schemas, Zod validators, and inferred types for
+  errors, principals/tenant context, idempotency, event envelopes, `BlobRef`,
+  `SecretRef`, compatibility, and operation/capability descriptors.
+- Removed every executable surface from the published core. Auth, HTTP/storage
+  clients, the CLI, vendor-kit source writing, and SDK generation now have
+  separately versioned owner packages. Todos and Mailery product operations are
+  not exported by core.
+- Added additive N/N-1 fixtures, an exact-pin migration/rollback plan, the
+  current reverse-dependency inventory, and a compile matrix for generic and
+  split-package consumers.
+- Added deterministic candidate creation and verification with a normalized
+  tarball, SHA-256, SPDX SBOM, and SLSA-shaped provenance.
+
 ## [0.8.4] - 2026-07-29
 
 ### BREAKING: the deployment-mode axis is removed; storage is a `sqlite | postgres` backend switch

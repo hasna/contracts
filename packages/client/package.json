@@ -1,0 +1,22 @@
+{
+  "name": "@hasna/contracts-client",
+  "version": "1.0.0-rc.1",
+  "description": "Opt-in HTTP and storage clients split from the pure contracts core.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "publishConfig": { "registry": "https://registry.npmjs.org", "access": "public", "tag": "next" },
+  "exports": {
+    ".": {
+      "types": "./dist/client/transport.d.ts",
+      "import": "./dist/client/transport.js"
+    },
+    "./storage": {
+      "types": "./dist/client/storage.d.ts",
+      "import": "./dist/client/storage.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "rm -rf dist && bun build ../../src/client/transport.ts ../../src/client/storage.ts --root ../../src --outdir dist --target bun --packages external && tsc -p tsconfig.json"
+  }
+}

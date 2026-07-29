@@ -1,0 +1,18 @@
+{
+  "name": "@hasna/contracts-auth",
+  "version": "1.0.0-rc.1",
+  "description": "Opt-in API-key, tenant, and database-auth helpers split from the pure contracts core.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "publishConfig": { "registry": "https://registry.npmjs.org", "access": "public", "tag": "next" },
+  "exports": {
+    ".": {
+      "types": "./dist/auth/index.d.ts",
+      "import": "./dist/auth/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "rm -rf dist && bun build ../../src/auth/index.ts --root ../../src --outdir dist --target bun --packages external && tsc -p tsconfig.json"
+  }
+}

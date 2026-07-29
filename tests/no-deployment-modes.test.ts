@@ -18,14 +18,20 @@ import { join } from "node:path";
 import {
   SCHEMA_IDS,
   SERVICE_CONTRACT_VERSION,
-  SERVICE_CONTRACT_JSON_SCHEMA,
   STORAGE_MODES,
   STORAGE_ENGINES,
+} from "../src/schemas";
+import {
+  SERVICE_CONTRACT_JSON_SCHEMA,
   validateServiceContractManifest,
+} from "../src/service-contract";
+import {
   normalizeStorageMode,
   resolveStorageMode,
+} from "../src/mode";
+import {
   resolveClientTransport,
-} from "../src";
+} from "../src/client/transport";
 import * as contractsExports from "../src";
 
 const repoRoot = join(import.meta.dir, "..");

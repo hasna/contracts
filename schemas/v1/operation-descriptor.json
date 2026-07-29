@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "hasna.contracts.operation_descriptor.v1",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "hasna.contracts.operation_descriptor.v1"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "inputSchema": {
+      "type": "string",
+      "minLength": 1
+    },
+    "outputSchema": {
+      "type": "string",
+      "minLength": 1
+    },
+    "errorSchemas": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "default": []
+    },
+    "idempotency": {
+      "type": "string",
+      "enum": [
+        "forbidden",
+        "optional",
+        "required"
+      ]
+    },
+    "authorization": {
+      "type": "string",
+      "enum": [
+        "none",
+        "principal",
+        "tenant"
+      ]
+    },
+    "effect": {
+      "type": "string",
+      "enum": [
+        "none",
+        "read",
+        "write",
+        "external"
+      ]
+    },
+    "stability": {
+      "type": "string",
+      "enum": [
+        "experimental",
+        "stable",
+        "deprecated"
+      ],
+      "default": "stable"
+    }
+  },
+  "required": [
+    "schema",
+    "id",
+    "version",
+    "summary",
+    "inputSchema",
+    "outputSchema",
+    "idempotency",
+    "authorization",
+    "effect"
+  ],
+  "additionalProperties": false,
+  "x-hasna-runtime-validator": "validateCoreContract"
+}

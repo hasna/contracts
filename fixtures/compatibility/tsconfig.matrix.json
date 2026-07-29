@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "baseUrl": "../..",
+    "paths": {
+      "@hasna/contracts": ["dist/index.d.ts"],
+      "@hasna/contracts/json-schemas/*": ["schemas/v1/*"],
+      "@hasna/contracts-auth": ["packages/auth/dist/auth/index.d.ts"],
+      "@hasna/contracts-client": ["packages/client/dist/client/transport.d.ts"],
+      "@hasna/contracts-sdk-generator": ["packages/sdk-generator/dist/sdk/generate.d.ts"],
+      "@hasna/contracts-vendor-kit": ["packages/vendor-kit/dist/kit/generate.d.ts"]
+    }
+  },
+  "include": ["consumers/*.ts"]
+}
