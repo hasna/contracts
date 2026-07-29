@@ -1,20 +1,17 @@
-// Reference storage-mode normalizer for the Hasna Service Contract v1.
+// Reference storage-backend normalizer for the Hasna Service Contract v1.
 //
-// Extracted and generalized from open-mailery's `src/lib/mode.ts`
-// (`normalizeMaileryMode`), which is the canonical two-mode implementation.
-// Every Hasna repo with a store should resolve its mode through this module so
-// the runtime enum, the deprecated-alias handling, and the env-key spec stay
-// identical across the fleet.
+// The runtime-placement axis was removed entirely (owner directive
+// 2026-07-29): there are no placement "modes" and no aliases for them. The
+// only switch a repo carries is its server's DATA BACKEND:
+//   - `sqlite`   : SQLite at ~/.hasna/<name>/<name>.db is authoritative.
+//   - `postgres` : reads AND writes go to a PostgreSQL server (DATABASE_URL).
+// The long spelling `postgresql` normalizes to `postgres`. Every removed
+// placement word is rejected with a migration hint, never silently mapped.
 //
-// Amendment A1 (PURE REMOTE): there are exactly two runtime modes.
-//   - `local`  : SQLite at ~/.hasna/<name>/<name>.db is authoritative.
-//   - `cloud`  : reads AND writes go directly to the app's cloud Postgres.
-// There is NO sync engine, NO cache-as-mode, and NO hybrid/remote/self_hosted
-// runtime. The legacy words `remote`, `hybrid`, and `self_hosted` are accepted
-// only as deprecated *aliases* that normalize to `cloud` (a self-hosted server
-// is just `cloud` pointed at a private database URL).
+// The OSS CLIENT never opens PostgreSQL directly — it is sqlite-or-http; see
+// `./client/transport.ts` for the client seam.
 
-import { DEPRECATED_STORAGE_MODE_ALIASES, type StorageMode } from "./schemas";
+import { type StorageMode } from "./schemas";
 import { envToken } from "./env-token";
 
 // `STORAGE_MODES` and the `StorageMode` type are the canonical exports from
@@ -24,23 +21,22 @@ export type Env = Record<string, string | undefined>;
 
 export interface StorageModeNormalization {
   mode: StorageMode;
-  /** The deprecated alias that was normalized to `cloud`, if any. */
-  deprecatedAlias: string | null;
 }
 
 /**
- * Normalize a raw storage-mode string to the `local | cloud` runtime enum.
- * Accepts deprecated aliases (`remote`, `hybrid`, `self_hosted`) and maps them
- * to `cloud`. Throws on any other value.
+ * Normalize a raw storage-backend string to the `sqlite | postgres` enum.
+ * `postgresql` is accepted as the long spelling of `postgres`. Everything
+ * else — including every removed placement word — throws the same migration
+ * hint; nothing is silently mapped.
  */
 export function normalizeStorageMode(value: string): StorageModeNormalization {
   const normalized = value.trim().toLowerCase().replace(/-/g, "_");
-  if (normalized === "local") return { mode: "local", deprecatedAlias: null };
-  if (normalized === "cloud") return { mode: "cloud", deprecatedAlias: null };
-  if ((DEPRECATED_STORAGE_MODE_ALIASES as readonly string[]).includes(normalized)) {
-    return { mode: "cloud", deprecatedAlias: normalized };
-  }
-  throw new Error(`Unknown storage mode: ${value}. Use local or cloud.`);
+  if (normalized === "sqlite") return { mode: "sqlite" };
+  if (normalized === "postgres" || normalized === "postgresql") return { mode: "postgres" };
+  throw new Error(
+    `Unknown storage mode '${value}'. The runtime-placement axis was removed; ` +
+      `set sqlite for the on-box SQLite file or postgres for a PostgreSQL server (DATABASE_URL).`
+  );
 }
 
 // The derivation itself lives in a leaf module so `src/auth/*` can share it
@@ -73,9 +69,8 @@ function firstEnv(env: Env, keys: readonly string[]): { key: string; value: stri
 
 export interface StorageModeResolution {
   mode: StorageMode;
-  /** Env key the mode came from, or `"default"`. */
+  /** Env key the backend came from, or `"default"`. */
   source: string;
-  deprecatedAlias: string | null;
   databaseUrlPresent: boolean;
   /** Env key the database URL came from, or `null`. */
   databaseUrlSource: string | null;
@@ -83,9 +78,10 @@ export interface StorageModeResolution {
 }
 
 /**
- * Resolve an app's storage mode from the environment per the contract env spec.
- * Precedence: `HASNA_<NAME>_STORAGE_MODE`, then `<NAME>_STORAGE_MODE`, else
- * `local`. Never reads secret values — only detects DATABASE_URL presence.
+ * Resolve an app's storage backend from the environment per the contract env
+ * spec. Precedence: `HASNA_<NAME>_STORAGE_MODE`, then `<NAME>_STORAGE_MODE`;
+ * absent both, a present `DATABASE_URL` selects `postgres`, else `sqlite`.
+ * Never reads secret values — only detects DATABASE_URL presence.
  */
 export function resolveStorageMode(name: string, env: Env = process.env): StorageModeResolution {
   const { modeKeys, databaseUrlKeys } = storageEnvKeys(name);
@@ -96,24 +92,18 @@ export function resolveStorageMode(name: string, env: Env = process.env): Storag
   const modeHit = firstEnv(env, modeKeys);
   if (!modeHit) {
     return {
-      mode: "local",
-      source: "default",
-      deprecatedAlias: null,
+      mode: databaseUrlPresent ? "postgres" : "sqlite",
+      source: databaseUrlPresent ? databaseUrlSource! : "default",
       databaseUrlPresent,
       databaseUrlSource,
       warning: null
     };
   }
 
-  const { mode, deprecatedAlias } = normalizeStorageMode(modeHit.value);
+  const { mode } = normalizeStorageMode(modeHit.value);
   const warnings: string[] = [];
-  if (deprecatedAlias) {
-    warnings.push(
-      `Deprecated storage mode '${deprecatedAlias}' from ${modeHit.key} is treated as 'cloud'. Set ${modeKeys[0]}=cloud instead.`
-    );
-  }
-  if (mode === "cloud" && !databaseUrlPresent) {
-    warnings.push(`cloud mode needs ${databaseUrlKeys[0]} (PURE REMOTE: reads and writes go to cloud Postgres).`);
+  if (mode === "postgres" && !databaseUrlPresent) {
+    warnings.push(`postgres storage needs ${databaseUrlKeys[0]} (reads and writes go to PostgreSQL).`);
   }
   if (modeHit.key !== modeKeys[0]) {
     warnings.push(`Using alias env ${modeHit.key}; the canonical key is ${modeKeys[0]}.`);
@@ -122,7 +112,6 @@ export function resolveStorageMode(name: string, env: Env = process.env): Storag
   return {
     mode,
     source: modeHit.key,
-    deprecatedAlias,
     databaseUrlPresent,
     databaseUrlSource,
     warning: warnings.length > 0 ? warnings.join(" ") : null

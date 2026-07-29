@@ -5,9 +5,15 @@
   "contractVersion": "v1",
   "kitVersion": "0.6.0",
   "description": "Universal task management for AI coding agents.",
-  "bins": ["todos", "todos-mcp", "todos-serve"],
-  "hosting": ["user-hosted", "hasna-saas"],
-  "deploymentModes": ["local", "self_hosted", "cloud"],
+  "bins": [
+    "todos",
+    "todos-mcp",
+    "todos-serve"
+  ],
+  "hosting": [
+    "user-hosted",
+    "hasna-saas"
+  ],
   "serviceSurfaces": [
     {
       "name": "http-api",
@@ -15,10 +21,21 @@
       "status": "supported",
       "bin": "todos-serve",
       "authMode": "api-key",
-      "deploymentModes": ["local", "self_hosted", "cloud"],
-      "health": { "method": "GET", "path": "/health", "public": true },
-      "readiness": { "method": "GET", "path": "/ready", "public": false },
-      "version": { "method": "GET", "path": "/version", "public": true },
+      "health": {
+        "method": "GET",
+        "path": "/health",
+        "public": true
+      },
+      "readiness": {
+        "method": "GET",
+        "path": "/ready",
+        "public": false
+      },
+      "version": {
+        "method": "GET",
+        "path": "/version",
+        "public": true
+      },
       "apiBasePath": "/v1",
       "openApiPath": "/openapi.json",
       "readinessGates": [
@@ -28,7 +45,7 @@
           "required": true,
           "command": "todos serve --port 0 && curl /v1/tasks",
           "status": "pending",
-          "summary": "Unauthenticated non-health routes must fail closed before self-hosted readiness."
+          "summary": "Unauthenticated non-health routes must fail closed before server readiness."
         },
         {
           "id": "redacted-output-scan",
@@ -44,7 +61,6 @@
       "kind": "sdk",
       "status": "supported",
       "authMode": "api-key",
-      "deploymentModes": ["local", "self_hosted", "cloud"],
       "exportSubpath": "./sdk",
       "generatedFrom": "/openapi.json",
       "clientClassName": "TodosClient"
@@ -54,21 +70,22 @@
       "kind": "mcp",
       "status": "supported",
       "mcpBin": "todos-mcp",
-      "authMode": "api-key",
-      "deploymentModes": ["local", "self_hosted", "cloud"]
+      "authMode": "api-key"
     },
     {
       "name": "cli",
       "kind": "cli",
       "status": "supported",
       "bin": "todos",
-      "authMode": "local-only",
-      "deploymentModes": ["local", "self_hosted"]
+      "authMode": "local-only"
     }
   ],
   "storage": {
-    "mode": "local",
-    "engines": ["sqlite", "postgres"],
+    "mode": "sqlite",
+    "engines": [
+      "sqlite",
+      "postgres"
+    ],
     "envPrefix": "HASNA_TODOS_",
     "aliasEnvPrefix": "TODOS_",
     "sqlitePath": "~/.hasna/todos/todos.db",

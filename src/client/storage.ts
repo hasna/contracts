@@ -1,7 +1,9 @@
 // HTTP storage client for the Hasna Service Contract v1.
 //
-// This is the piece that makes `mode=self_hosted` real for a client. It sits on
-// top of `createHasnaHttpTransport` and implements the generic resource CRUD
+// This is the http half of the `sqlite | http` client seam: a client whose
+// data lives in the server's PostgreSQL reaches it here, over the API — never
+// by opening the database directly. It sits on top of
+// `createHasnaHttpTransport` and implements the generic resource CRUD
 // vocabulary every Hasna serve app exposes under `/v1`:
 //
 //   list   -> GET    /v1/<resource>            -> { items, total, ... }
@@ -11,8 +13,8 @@
 //   delete -> DELETE /v1/<resource>/<id>       -> void       (204/404 => ok)
 //
 // An app's storage resolver selects this client when the client-flip contract
-// resolves to `cloud-http` (mode=cloud/self_hosted AND API_URL+API_KEY set), and
-// falls through to the local store otherwise. See `resolveClientTransport` /
+// resolves to `http` (backend postgres AND API_URL+API_KEY set), and falls
+// through to the local sqlite store otherwise. See `resolveClientTransport` /
 // `createClientTransport` in ./transport.ts.
 //
 // Guarantees carried up from the transport: JSON in/out, per-request timeout,
@@ -206,16 +208,16 @@ export function createHasnaStorageClient(name: string, transport: HasnaHttpTrans
 
 /** Result of {@link resolveStorageClient}. */
 export type ResolveStorageClientResult =
-  | { transport: "local"; client: null }
-  | { transport: "cloud-http"; client: HasnaStorageClient };
+  | { transport: "sqlite"; client: null }
+  | { transport: "http"; client: HasnaStorageClient };
 
 /**
  * The one call an app's storage resolver makes. Reads the client-flip env for
- * `name`; when it resolves to `cloud-http` (mode=cloud/self_hosted + API_URL +
- * API_KEY), returns a ready {@link HasnaStorageClient}. Otherwise returns
- * `{ transport: 'local', client: null }` so the app uses its local store.
- * Throws if cloud was requested but is misconfigured (so callers never silently
- * read the wrong dataset).
+ * `name`; when it resolves to `http` (backend postgres + API_URL + API_KEY),
+ * returns a ready {@link HasnaStorageClient}. Otherwise returns
+ * `{ transport: 'sqlite', client: null }` so the app uses its local store.
+ * Throws if server data was requested but is misconfigured (so callers never
+ * silently read the wrong dataset).
  */
 export function resolveStorageClient(
   name: string,
@@ -223,8 +225,8 @@ export function resolveStorageClient(
   overrides?: Parameters<typeof createClientTransport>[2],
 ): ResolveStorageClientResult {
   const wired = createClientTransport(name, env, overrides);
-  if (wired.transport === "cloud-http") {
-    return { transport: "cloud-http", client: createHasnaStorageClient(name, wired.client) };
+  if (wired.transport === "http") {
+    return { transport: "http", client: createHasnaStorageClient(name, wired.client) };
   }
-  return { transport: "local", client: null };
+  return { transport: "sqlite", client: null };
 }

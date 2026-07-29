@@ -81,7 +81,7 @@ describe("SDK from OpenAPI generator", () => {
     const fakeFetch = (async (url: string, init: any) => {
       calls.push({ url: String(url), method: init.method, headers: init.headers, body: init.body ? JSON.parse(init.body) : undefined });
       if (String(url).includes("/health")) {
-        return new Response(JSON.stringify({ status: "ok", version: "1.0.0", mode: "self_hosted" }), { status: 200 });
+        return new Response(JSON.stringify({ status: "ok", version: "1.0.0", mode: "postgres" }), { status: 200 });
       }
       return new Response(JSON.stringify({ id: "t1", title: "hello" }), { status: 200 });
     }) as unknown as typeof fetch;

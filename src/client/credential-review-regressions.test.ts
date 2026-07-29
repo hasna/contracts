@@ -53,8 +53,8 @@ afterEach(() => {
 // people straight into it.
 // ---------------------------------------------------------------------------
 
-describe("the recommended steady state is not a silent local read", () => {
-  test("URL in env + credential on disk resolves to cloud, not silently to local", () => {
+describe("the recommended steady state is not a silent sqlite read", () => {
+  test("URL in env + credential on disk resolves to http, not silently to sqlite", () => {
     const home = makeHome();
     const diskPath = writeCloudEnv(home, "todos", "HASNA_TODOS_API_KEY=good-disk-key\n");
 
@@ -63,12 +63,12 @@ describe("the recommended steady state is not a silent local read", () => {
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
     });
 
-    expect(r.transport).toBe("cloud-http");
+    expect(r.transport).toBe("http");
     expect(r.apiKeyTier).toBe("disk");
     expect(r.modeSource).toBe(`HASNA_TODOS_API_URL+${diskPath}`);
   });
 
-  test("BOUNDARY: a URL alone, with no credential anywhere, stays local and not misconfigured", () => {
+  test("BOUNDARY: a URL alone, with no credential anywhere, stays sqlite and not misconfigured", () => {
     const home = makeHome();
 
     const r = resolveClientTransport("todos", {
@@ -76,7 +76,7 @@ describe("the recommended steady state is not a silent local read", () => {
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
     });
 
-    expect(r.transport).toBe("local");
+    expect(r.transport).toBe("sqlite");
     expect(r.misconfigured).toBe(false);
   });
 
@@ -84,7 +84,7 @@ describe("the recommended steady state is not a silent local read", () => {
     const home = makeHome();
     writeCloudEnv(home, "todos", "HASNA_TODOS_API_KEY=good-disk-key\n");
 
-    expect(resolveClientTransport("todos", { HOME: home }).transport).toBe("local");
+    expect(resolveClientTransport("todos", { HOME: home }).transport).toBe("sqlite");
   });
 
   test("a 401 on the legacy tier never advises unsetting the variable", async () => {
@@ -185,8 +185,8 @@ describe("the secret cannot be enumerated or serialized", () => {
   });
 });
 
-describe("local mode has no credential side effects at all", () => {
-  test("a local client emits no deprecation and consults no credential source", () => {
+describe("the sqlite backend has no credential side effects at all", () => {
+  test("a sqlite client emits no deprecation and consults no credential source", () => {
     // A surviving mutant: injecting resolveCredential() into the local branch
     // left all 104 tests green. Local is the default mode for most fleet CLIs,
     // so a refactor there would spray deprecation banners across every ordinary
@@ -200,21 +200,21 @@ describe("local mode has no credential side effects at all", () => {
       { credentials: { onDeprecation: (message) => messages.push(message) } },
     );
 
-    expect(r.transport).toBe("local");
+    expect(r.transport).toBe("sqlite");
     expect(r.apiKeyTier).toBeNull();
     expect(messages).toEqual([]);
   });
 
-  test("an explicit local mode ignores a deliberate override without throwing", () => {
+  test("an explicit sqlite backend ignores a deliberate override without throwing", () => {
     const home = makeHome();
 
     const r = resolveClientTransport("todos", {
       HOME: home,
-      HASNA_TODOS_STORAGE_MODE: "local",
+      HASNA_TODOS_STORAGE_MODE: "sqlite",
       HASNA_TODOS_API_KEY_OVERRIDE: "   ",
     });
 
-    expect(r.transport).toBe("local");
+    expect(r.transport).toBe("sqlite");
   });
 });
 

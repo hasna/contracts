@@ -29,10 +29,17 @@ nondeterministic per call and, the correctness bug, SILENTLY RESCUES A REVOKED
 DELIBERATE OVERRIDE as the wrong principal. A deliberate tier therefore never
 falls through, and `401`/`403` are terminal regardless of retry policy.
 
-THE MODE DECISION IS UNCHANGED and stays env-only, so a credential file on disk
-can never flip a client that reads its local store into reading the network.
-`HOME` is read from the same env object the caller passes, so an env without
-`HOME` performs no disk read at all and the behaviour stays hermetic.
+THE BACKEND DECISION STAYS ENDPOINT-GATED. A client routes to the network only
+when an API URL is configured in the environment, so a credential file on disk
+can never by itself flip a client that reads its sqlite store. What the chain
+DOES supply is the credential half of the fleet flip signal: with a URL set and
+no explicit `HASNA_<APP>_STORAGE_MODE`, a key resolved from ANY tier — including
+one that exists only on disk — infers the `postgres` backend. Resolving that half
+from `HASNA_<APP>_API_KEY` alone would have left the exact migration this change
+recommends (endpoint in the environment, credential on disk) reading the local
+dataset with `misconfigured: false` and no warning. `HOME` is read from the same
+env object the caller passes, so an env without `HOME` performs no disk read at
+all and the behaviour stays hermetic.
 
 Also fixed: `createClientTransport()` re-read the API key straight out of `env`,
 a second resolution path that diverged from `resolveClientTransport()` on the
@@ -46,6 +53,51 @@ a client credential by hand. It derives the names it polices from
 `clientTransportEnvKeys()` so it cannot drift from the seam, matches read
 expressions only, and structurally excludes server-side `*_SERVE_API_KEY` /
 `*_BOOTSTRAP_API_KEY` reads and third-party keys wearing the `HASNA_` prefix.
+
+## [0.8.4] - 2026-07-29
+
+### BREAKING: the deployment-mode axis is removed; storage is a `sqlite | postgres` backend switch
+
+Owner directive 2026-07-29. The three-way runtime placement
+(`local | self_hosted | cloud`, plus the `remote` / `hybrid` / `self-hosted`
+aliases) is gone from the whole contract surface — schema, types, validators,
+manifests, templates, docs. This repo was originally scoped N/A by the
+modes-simplify stream; that was wrong: it is the propagation source, and the
+vendored kit template (`src/kit/templates/mode.ts`) copied the old normalizer
+into every scaffolded repo.
+
+- **A manifest carrying `deploymentMode(s)` now FAILS validation** — zod
+  `.strict()` plus `additionalProperties: false` in both JSON-Schema copies —
+  rather than the field being ignored. Both value spellings (`self_hosted`,
+  `self-hosted`) are covered, and surface-level `deploymentModes` fails too.
+  Omission now validates (the old schema *required* the field per surface);
+  both directions are pinned red-first in `tests/no-deployment-modes.test.ts`.
+- **`STORAGE_MODES` becomes `["sqlite", "postgres"]`** — the SERVER's internal
+  storage, matching `STORAGE_ENGINES`. `postgresql` normalizes to `postgres`;
+  every removed placement word throws a migration hint, never silently maps.
+  `DEPRECATED_STORAGE_MODE_ALIASES`, `DEPLOYMENT_MODES`,
+  `DEPRECATED_DEPLOYMENT_MODE_ALIASES`, `DeploymentModeSchema`, and the
+  `DeploymentMode` type are deleted from the export surface.
+- **The client seam is `sqlite | http`** and never opens PostgreSQL directly:
+  `ClientTransportKind` is now `"sqlite" | "http"`, the fleet env-flip
+  (URL+key, no mode env) infers `postgres`-over-HTTP, and
+  `resolveStorageMode` defaults to `postgres` when a `DATABASE_URL` is present,
+  else `sqlite`.
+- **Waiver eligibility** drops the placement input; a postgres backend or a
+  `hasna-saas` story still refuses storage waivers. saas repos must declare
+  `storage.mode: "postgres"`.
+- `createCloudPoolFromEnv` is renamed `createServerPoolFromEnv` in the vendored
+  kit; regenerate kits to pick it up.
+- Migration for consumers: delete `deploymentModes` from `hasna.contract.json`,
+  set `storage.mode` to `sqlite` or `postgres`, and update
+  `HASNA_<APP>_STORAGE_MODE` values (`local`→`sqlite`;
+  `cloud`/`self_hosted`/`remote`/`hybrid`→`postgres` on servers, or drop the
+  variable on clients and rely on URL+key). Do NOT bump `@hasna/contracts`
+  inside an in-flight modes-removal PR; land the repo's own removal first.
+
+Note: 0.8.3 exists as a release commit on main but was never published to npm
+(the registry ends at 0.8.2); this release ships as 0.8.4 so one version string
+never names two different contents.
 
 ## [0.8.3] - 2026-07-27
 

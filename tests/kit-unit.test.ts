@@ -19,29 +19,33 @@ import type { TypedQueryClient } from "../src/kit/templates/query";
 // --- mode.ts -------------------------------------------------------------
 
 describe("kit mode resolution", () => {
-  test("normalizes canonical + deprecated aliases", () => {
-    expect(normalizeStorageMode("local")).toEqual({ mode: "local", deprecatedAlias: null });
-    expect(normalizeStorageMode("CLOUD")).toEqual({ mode: "cloud", deprecatedAlias: null });
-    expect(normalizeStorageMode("self-hosted")).toEqual({ mode: "cloud", deprecatedAlias: "self_hosted" });
-    expect(normalizeStorageMode("remote").mode).toBe("cloud");
+  test("normalizes the two backends and rejects removed placement words", () => {
+    expect(normalizeStorageMode("sqlite")).toEqual({ mode: "sqlite" });
+    expect(normalizeStorageMode("POSTGRES")).toEqual({ mode: "postgres" });
+    expect(normalizeStorageMode("postgresql")).toEqual({ mode: "postgres" });
+    for (const word of ["local", "cloud", "remote", "hybrid", "self-hosted"]) {
+      expect(() => normalizeStorageMode(word), `${word} must throw`).toThrow(
+        /runtime-placement axis was removed/,
+      );
+    }
     expect(() => normalizeStorageMode("bogus")).toThrow(/Unknown storage mode/);
   });
 
-  test("env-key precedence and cloud warning", () => {
+  test("env-key precedence and postgres warning", () => {
     const keys = storageEnvKeys("todos");
     expect(keys.modeKeys[0]).toBe("HASNA_TODOS_STORAGE_MODE");
     expect(keys.databaseUrlKeys[0]).toBe("HASNA_TODOS_DATABASE_URL");
 
     const def = resolveStorageMode("todos", {});
-    expect(def.mode).toBe("local");
+    expect(def.mode).toBe("sqlite");
     expect(def.source).toBe("default");
 
-    const cloudNoUrl = resolveStorageMode("todos", { HASNA_TODOS_STORAGE_MODE: "cloud" });
-    expect(cloudNoUrl.mode).toBe("cloud");
-    expect(cloudNoUrl.warning).toContain("cloud mode needs");
+    const pgNoUrl = resolveStorageMode("todos", { HASNA_TODOS_STORAGE_MODE: "postgres" });
+    expect(pgNoUrl.mode).toBe("postgres");
+    expect(pgNoUrl.warning).toContain("postgres storage needs");
 
-    const aliasEnv = resolveStorageMode("todos", { TODOS_STORAGE_MODE: "cloud", TODOS_DATABASE_URL: "postgres://x" });
-    expect(aliasEnv.mode).toBe("cloud");
+    const aliasEnv = resolveStorageMode("todos", { TODOS_STORAGE_MODE: "postgres", TODOS_DATABASE_URL: "postgres://x" });
+    expect(aliasEnv.mode).toBe("postgres");
     expect(aliasEnv.databaseUrlPresent).toBe(true);
     expect(aliasEnv.warning).toContain("canonical key");
   });

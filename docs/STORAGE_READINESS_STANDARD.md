@@ -1,30 +1,30 @@
 # Durable Storage Readiness Standard
 
 This standard defines the minimum durable-storage evidence required before a
-built `open-*` or `iapp-*` package can claim shared, self-hosted, cloud,
-provider-live, finance, or production readiness.
+built `open-*` or `iapp-*` package can claim shared, operator-run,
+multi-tenant, provider-live, finance, or production readiness.
 
-Static source presence is not enough. Each supported data mode must have
+Static source presence is not enough. Each supported data backend must have
 runtime evidence.
 
-## Deployment Mode Mapping
+## Data Backend Mapping
 
-| Deployment mode | Source of truth | Required proof |
+| Data backend | Source of truth | Required proof |
 | --- | --- | --- |
-| `local` | Local SQLite or local files on the operator machine. | Isolated data-dir smoke, migration/schema version check, backup/export path, local delete behavior. |
-| `self-hosted` | Hasna-owned AWS service stack for internal apps, or app-owned Postgres/S3 in the declared self-hosted contract for OSS packages. | Postgres migrations, readiness, TLS, backup/restore, RLS/boundary checks when shared, and operator runbook. |
-| `cloud` | Managed multi-tenant SaaS service. | All self-hosted proofs plus tenant isolation, RLS, PITR/restore evidence, retention/export/delete, support/audit access, and live provider reconciliation where applicable. |
+| `sqlite` | Local SQLite or local files on the operator machine. | Isolated data-dir smoke, migration/schema version check, backup/export path, local delete behavior. |
+| `postgres` (operator-run) | App-owned Postgres/S3 run by the operator — a user's own infra or Hasna's internal AWS. | Postgres migrations, readiness, TLS, backup/restore, RLS/boundary checks when shared, and operator runbook. |
+| `postgres` (Hasna SaaS) | Managed multi-tenant SaaS service. | All operator-run proofs plus tenant isolation, RLS, PITR/restore evidence, retention/export/delete, support/audit access, and live provider reconciliation where applicable. |
 
-`remote` is not a deployment mode. It only means the runtime is on another
-machine. Do not use `remote` to make readiness claims.
+`remote` is not a backend. It only means the runtime is on another machine.
+Do not use `remote` to make readiness claims.
 
 ## Source Of Truth Declaration
 
 Every repo must declare:
 
-- Supported modes: `local`, `self-hosted`, `cloud`, or explicit unsupported
-  reason per mode.
-- Authoritative store per mode.
+- Supported backends: `sqlite`, `postgres`, or explicit unsupported reason
+  per backend.
+- Authoritative store per backend.
 - Derived stores and caches.
 - Object/blob stores and ownership rules.
 - Search indexes and rebuild rules.
@@ -154,8 +154,8 @@ evidence.
 
 ## Readiness Checklist
 
-- Mode declaration uses `local`, `self-hosted`, and `cloud` correctly.
-- Source of truth is declared for each mode.
+- Backend declaration uses `sqlite` and `postgres` correctly.
+- Source of truth is declared for each backend.
 - Derived stores and caches are declared.
 - Fresh-database migration test passes.
 - Migration drift/checksum test passes.

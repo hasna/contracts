@@ -160,8 +160,7 @@ describe("contracts CLI", () => {
               kind: "cli",
               status: "supported",
               bin: "demo",
-              authMode: "local-only",
-              deploymentModes: ["local"]
+              authMode: "local-only"
             }
           ]
         })

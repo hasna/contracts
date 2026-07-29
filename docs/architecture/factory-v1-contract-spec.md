@@ -270,7 +270,7 @@ Invariants:
 
 - unique `(name, version)` identity and immutable per schema.
 - all declared faces map to one canonical operation and one set of semantics.
-- `supportedModes` is closed and explicit (`local` and `self_hosted` only in current scope).
+- `supportedModes` is closed and explicit (`local` and `cloud` only in current scope — the frozen todos mode-authority axis, not a placement).
 - idempotency subject is deterministic for retry-safe operations and explicit for all writes.
 
 ### 7) `hasna.factory_api_envelope.v1`
@@ -352,7 +352,7 @@ This document is implementation-shaped only; it does not execute code changes.
   - attestation subject drift rejection
   - closed-set enforcement for the `15` effects / `8` git publish stages
   - no merge mutation behavior
-  - cross-face and local/self_hosted parity
+  - cross-face and local/cloud parity
 - add fixture coverage in `tests/examples.test.ts` for the above contracts and examples.
 - add focused property and cross-schema tests where invariants cross types (attempt-event linkage, attestation-subject linkage, and generation/fence monotonicity).
 - add nine Factory-schema registry/embedded/strictness tests plus `task_to_pr_projection`

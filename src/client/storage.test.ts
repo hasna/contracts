@@ -199,16 +199,16 @@ describe("resolveStorageClient — the resolver an app wires", () => {
   });
   afterAll(() => server.stop(true));
 
-  test("no env => local (client null)", () => {
+  test("no env => sqlite (client null)", () => {
     const r = resolveStorageClient("demo", {});
-    expect(r.transport).toBe("local");
+    expect(r.transport).toBe("sqlite");
     expect(r.client).toBeNull();
   });
 
-  test("self_hosted + url + key => cloud-http, full CRUD lands in cloud store", async () => {
-    const env = { HASNA_DEMO_STORAGE_MODE: "self_hosted", HASNA_DEMO_API_URL: baseUrl, HASNA_DEMO_API_KEY: KEY };
+  test("postgres + url + key => http, full CRUD lands in the server store", async () => {
+    const env = { HASNA_DEMO_STORAGE_MODE: "postgres", HASNA_DEMO_API_URL: baseUrl, HASNA_DEMO_API_KEY: KEY };
     const r = resolveStorageClient("demo", env);
-    expect(r.transport).toBe("cloud-http");
+    expect(r.transport).toBe("http");
     const store = r.client!;
     const created = await store.create<{ id: string; title: string }>("things", { title: "first" });
     expect(created.id).toBeTruthy();
@@ -224,7 +224,7 @@ describe("resolveStorageClient — the resolver an app wires", () => {
     expect(cloud.size).toBe(0);
   });
 
-  test("cloud requested but no key => throws (never silent local drift)", () => {
-    expect(() => resolveStorageClient("demo", { HASNA_DEMO_STORAGE_MODE: "cloud" })).toThrow();
+  test("postgres requested but no key => throws (never silent local drift)", () => {
+    expect(() => resolveStorageClient("demo", { HASNA_DEMO_STORAGE_MODE: "postgres" })).toThrow();
   });
 });

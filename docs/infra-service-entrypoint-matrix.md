@@ -11,7 +11,7 @@ Source tasks:
 
 This matrix is intentionally conservative. A `*-serve` package bin is only
 `supported` when the repo already exposes a service boundary that can declare
-health/version routes, auth behavior, deployment modes, and readiness gates in
+health/version routes, auth behavior, data backends, and readiness gates in
 `hasna.contract.json`. Repos with raw secret values, undefined hosted auth, or
 missing state ownership must use `deferred` instead of publishing a broad server
 bin.
@@ -20,7 +20,7 @@ bin.
 | --- | --- | --- | --- | --- |
 | `open-backup` | `@hasna/backup@0.1.2` | `backup`, `backup-mcp` | `deferred` | Define hosted state owner, backup target credential refs, `/health`, `/ready`, redacted inventory output, and restore-smoke evidence before `backup-serve`. |
 | `open-bridge` | `@hasna/bridge@0.2.1` | `bridge`, `bridge-mcp` | `deferred` | Define bridge auth scopes, connector secret refs, event replay boundaries, and no-secret output gates before `bridge-serve`. |
-| `open-domains` | `@hasna/domains@0.0.27` | `domains`, `domains-mcp`, `domains-serve` | `supported` | Add/refresh `hasna.contract.json` service surface with `local` and `self_hosted` support, `/health`, `/ready`, `/version`, `/v1`, provider-credential readiness gates, dry-run DNS mutation gates, and redaction tests. Keep concrete secret refs in private deployment config. |
+| `open-domains` | `@hasna/domains@0.0.27` | `domains`, `domains-mcp`, `domains-serve` | `supported` | Add/refresh `hasna.contract.json` service surface with `/health`, `/ready`, `/version`, `/v1`, provider-credential readiness gates, dry-run DNS mutation gates, and redaction tests. Keep concrete secret refs in private deployment config. |
 | `open-hooks` | `@hasna/hooks@0.2.20` | `hooks` | `deferred` | Decide whether hooks is CLI-only, MCP-capable, or service-capable; service mode needs webhook signature/replay gates and operator-visible DLQ before `hooks-serve`. |
 | `open-machines` | `@hasna/machines@0.0.63` | `machines`, `machines-mcp`, `machines-agent`, `machines-serve` | `supported` | Add/refresh service surface with lease/claim auth scopes, private metadata redaction, `/v1` ownership boundaries, and fleet dry-run fixture gates. |
 | `open-releases` | `@hasna/releases@0.1.0` | `releases`, `releases-mcp` | `deferred` | Promote release evidence schema and append-only ledger first; then add `releases-serve` with package/version/gate/evidence APIs and unauthorized mutation denial. |
@@ -36,9 +36,9 @@ Use `hasna.service_contract.v1` with:
 
 - `hosting`: `user-hosted` and, only when a managed control plane exists,
   `hasna-saas`.
-- `deploymentModes`: one or more of `local`, `self_hosted`, `cloud`. The old
-  `self-hosted` spelling is parse-only migration input. Do not use `remote` as a
-  deployment mode.
+- `storage.mode`: the server's data backend, `sqlite` or `postgres`. The
+  removed placement vocabulary fails validation in any spelling. Do not use
+  `remote` as a backend.
 - `serviceSurfaces[]`: typed API, SDK, MCP, and CLI records.
 - `serviceSurfaces[].kind`: `api`, `sdk`, `mcp`, or `cli`.
 - `serviceSurfaces[].status`: `supported`, `deferred`, or `unsupported`.

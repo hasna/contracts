@@ -37,7 +37,7 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
   $id: "https://github.com/hasna/contracts/schema/hasna.service_contract.v1.json",
   title: "Hasna Service Contract v1",
   description:
-    "Repo self-description (hasna.contract.json) for the Hasna Service Contract v1. Hosting story, runtime placement, product surfaces, and storage capabilities are separate declarations.",
+    "Repo self-description (hasna.contract.json) for the Hasna Service Contract v1. Hosting story, product surfaces, and storage capabilities are separate declarations; the storage backend (sqlite | postgres) is the only runtime switch.",
   type: "object",
   additionalProperties: false,
   required: ["schema", "name", "class", "contractVersion", "kitVersion"],
@@ -55,7 +55,7 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
           storage: {
             required: ["mode", "envPrefix"],
             properties: {
-              mode: { const: "cloud" }
+              mode: { const: "postgres" }
             }
           }
         }
@@ -84,13 +84,6 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
       description:
         "Declared bins. Allowlisted: <name>, <name>-cli, <name>-mcp, <name>-serve, <name>-worker, <name>-runner, <name>-daemon, <name>-migrate, <name>-doctor."
     },
-    deploymentModes: {
-      type: "array",
-      items: { enum: ["local", "self_hosted", "cloud", "self-hosted"] },
-      uniqueItems: true,
-      description:
-        "Runtime placements. Write self_hosted; self-hosted is a deprecated input alias. local = this machine, self_hosted = any operator-run server including internal dogfood, cloud = Hasna SaaS control plane."
-    },
     hosting: {
       type: "array",
       items: { enum: ["user-hosted", "hasna-saas"] },
@@ -104,7 +97,7 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["name", "status", "authMode", "deploymentModes"],
+        required: ["name", "status", "authMode"],
         allOf: [
           {
             if: {
@@ -126,12 +119,6 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
           bin: { type: "string", minLength: 1 },
           mcpBin: { type: "string", minLength: 1 },
           authMode: { enum: ["none", "local-only", "api-key", "session", "service-token", "custom"] },
-          deploymentModes: {
-            type: "array",
-            items: { enum: ["local", "self_hosted", "cloud", "self-hosted"] },
-            minItems: 1,
-            uniqueItems: true
-          },
           health: {
             type: "object",
             additionalProperties: false,
@@ -212,15 +199,15 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
       required: ["mode"],
       properties: {
         mode: {
-          enum: ["local", "cloud"],
-          description: "Runtime storage enum. local|cloud ONLY (Amendment A1: PURE REMOTE)."
+          enum: ["sqlite", "postgres"],
+          description: "Active data backend. sqlite|postgres ONLY — the single runtime switch."
         },
         engines: {
           type: "array",
           items: { enum: ["sqlite", "postgres"] },
           minItems: 1,
           uniqueItems: true,
-          description: "Supported storage engines; capability metadata independent of the active storage mode."
+          description: "Supported storage engines; capability metadata independent of the active backend."
         },
         envPrefix: {
           type: "string",
@@ -312,7 +299,7 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
                 }
               },
               description:
-                "Explicit storage-engine exceptions, at most one per engine. Only a CLI-only cli-with-store repo (no <name>-serve bin, storage.mode local, no cloud placement, no hasna-saas story) may waive postgres; sqlite is never waivable, expiresAt is a UTC RFC 3339 timestamp, and conformance stops honouring a waiver once it has passed."
+                "Explicit storage-engine exceptions, at most one per engine. Only a CLI-only cli-with-store repo (no <name>-serve bin, storage.mode sqlite, no hasna-saas story) may waive postgres; sqlite is never waivable, expiresAt is a UTC RFC 3339 timestamp, and conformance stops honouring a waiver once it has passed."
             }
           }
         }

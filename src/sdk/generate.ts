@@ -6,7 +6,7 @@
 // helper turns it into the typed exports every consumer imports.
 //
 // The generated client speaks the Hasna auth convention out of the box: it sends
-// the API key as `x-api-key` (configurable) so a self_hosted client only needs
+// the API key as `x-api-key` (configurable) so an API client only needs
 // `<APP>_API_URL` + `<APP>_API_KEY`.
 //
 // Design notes: this is a pragmatic generator for the shapes real Hasna serve
