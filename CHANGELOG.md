@@ -4,6 +4,11 @@ All notable changes to `@hasna/contracts` are documented here.
 
 ## Unreleased
 
+### CI
+
+- Enforce the Bun lockfile and run typechecking and tests explicitly in the
+  pull-request gate before the broader release verification.
+
 ### Credential resolution: env holds a pointer, disk holds the secret, resolved at call time
 
 MEASURED FAILURE THIS KILLS. A tmux shell started before a key rotation held the
