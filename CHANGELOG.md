@@ -2,6 +2,51 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.8.4] - 2026-07-29
+
+### BREAKING: the deployment-mode axis is removed; storage is a `sqlite | postgres` backend switch
+
+Owner directive 2026-07-29. The three-way runtime placement
+(`local | self_hosted | cloud`, plus the `remote` / `hybrid` / `self-hosted`
+aliases) is gone from the whole contract surface — schema, types, validators,
+manifests, templates, docs. This repo was originally scoped N/A by the
+modes-simplify stream; that was wrong: it is the propagation source, and the
+vendored kit template (`src/kit/templates/mode.ts`) copied the old normalizer
+into every scaffolded repo.
+
+- **A manifest carrying `deploymentMode(s)` now FAILS validation** — zod
+  `.strict()` plus `additionalProperties: false` in both JSON-Schema copies —
+  rather than the field being ignored. Both value spellings (`self_hosted`,
+  `self-hosted`) are covered, and surface-level `deploymentModes` fails too.
+  Omission now validates (the old schema *required* the field per surface);
+  both directions are pinned red-first in `tests/no-deployment-modes.test.ts`.
+- **`STORAGE_MODES` becomes `["sqlite", "postgres"]`** — the SERVER's internal
+  storage, matching `STORAGE_ENGINES`. `postgresql` normalizes to `postgres`;
+  every removed placement word throws a migration hint, never silently maps.
+  `DEPRECATED_STORAGE_MODE_ALIASES`, `DEPLOYMENT_MODES`,
+  `DEPRECATED_DEPLOYMENT_MODE_ALIASES`, `DeploymentModeSchema`, and the
+  `DeploymentMode` type are deleted from the export surface.
+- **The client seam is `sqlite | http`** and never opens PostgreSQL directly:
+  `ClientTransportKind` is now `"sqlite" | "http"`, the fleet env-flip
+  (URL+key, no mode env) infers `postgres`-over-HTTP, and
+  `resolveStorageMode` defaults to `postgres` when a `DATABASE_URL` is present,
+  else `sqlite`.
+- **Waiver eligibility** drops the placement input; a postgres backend or a
+  `hasna-saas` story still refuses storage waivers. saas repos must declare
+  `storage.mode: "postgres"`.
+- `createCloudPoolFromEnv` is renamed `createServerPoolFromEnv` in the vendored
+  kit; regenerate kits to pick it up.
+- Migration for consumers: delete `deploymentModes` from `hasna.contract.json`,
+  set `storage.mode` to `sqlite` or `postgres`, and update
+  `HASNA_<APP>_STORAGE_MODE` values (`local`→`sqlite`;
+  `cloud`/`self_hosted`/`remote`/`hybrid`→`postgres` on servers, or drop the
+  variable on clients and rely on URL+key). Do NOT bump `@hasna/contracts`
+  inside an in-flight modes-removal PR; land the repo's own removal first.
+
+Note: 0.8.3 exists as a release commit on main but was never published to npm
+(the registry ends at 0.8.2); this release ships as 0.8.4 so one version string
+never names two different contents.
+
 ## [0.8.3] - 2026-07-27
 
 ### `no-cloud-scan` stops scoring its own inlined declaration, without switching a detector off

@@ -477,7 +477,9 @@ describe("published package hostname and provenance boundary", () => {
     packedArchivePath = archive;
     run(["tar", "-xzf", archive, "-C", extracted]);
     extractedPackageRoot = join(extracted, "package");
-  }, 30_000);
+    // The full build + pack measured 98s wall on a loaded shared box; a 30s
+    // budget made this suite fail on machine load rather than on substance.
+  }, 600_000);
 
   afterAll(() => {
     if (temporaryRoot) rmSync(temporaryRoot, { recursive: true, force: true });
