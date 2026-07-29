@@ -132,7 +132,7 @@ Rules:
 
   This matters because the steady state this section tells operators to migrate
   to — endpoint in the environment, credential on disk — would otherwise resolve
-  to `local` with `misconfigured: false` and no warning, silently serving the
+  to `sqlite` with `misconfigured: false` and no warning, silently serving the
   local dataset while a valid credential sat on disk. That is the false green
   this section forbids, so the inference has to see the whole chain.
 - **`HOME` comes from the same env object** the caller passes. An env with no
@@ -149,12 +149,31 @@ Rules:
   files are read only when they are regular files under a size cap, so a FIFO
   or a character device planted in the credential directory cannot wedge a
   per-request read.
+- **Every credential is built by one of exactly two constructors** —
+  `resolveCredential()` for the chain, `explicitCredential()` for a key a caller
+  passes directly as a string to `createHasnaHttpTransport({ apiKey })`. Both
+  validate and seal. A construction site that skips them is a bypass of this
+  whole section, and the string branch WAS one: it built a plain object literal,
+  so the single most-used public entry point ran neither the header-byte check
+  nor the seal.
 - Errors name **which source** supplied the rejected key, and say what to do
-  about it. A key value is never logged, embedded, or serialized — the field is
-  non-enumerable, so serializing a resolution omits it rather than relying on
-  every caller to remember. Where two sources disagree, the report names the
-  **paths** only: a digest of a secret is still a derived encoding of it, and a
-  truncated one is a confirmation oracle.
+  about it. Where two sources disagree, the report names the **paths** only: a
+  digest of a secret is still a derived encoding of it, and a truncated one is a
+  confirmation oracle.
+- **A key value is never logged, embedded, serialized, or printed**, and each of
+  those is enforced separately because one mechanism does not cover them all:
+
+  | Channel | Enforcement |
+  | --- | --- |
+  | `Object.keys`, `{ ...resolution }`, `JSON.stringify` | the field is **non-enumerable** |
+  | `console.log`, `Bun.inspect` | a **non-enumerable `Symbol.for("nodejs.util.inspect.custom")` hook** that renders `apiKey: "[redacted]"` |
+
+  Non-enumerability alone is NOT sufficient: under Bun — the engine this package
+  declares — an inspector prints own non-enumerable properties, so
+  `console.log(resolution)` spilled the key in plaintext while this section
+  claimed it could not. A redacting `toJSON` is not an alternative; a
+  non-enumerable one is never invoked by `JSON.stringify` in this runtime, and an
+  enumerable one would put a function into `Object.keys` and into every spread.
 
 ---
 

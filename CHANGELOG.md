@@ -54,6 +54,37 @@ a client credential by hand. It derives the names it polices from
 expressions only, and structurally excludes server-side `*_SERVE_API_KEY` /
 `*_BOOTSTRAP_API_KEY` reads and third-party keys wearing the `HASNA_` prefix.
 
+#### Fixed: a plaintext key leak on the most-used public entry point
+
+`createHasnaHttpTransport({ apiKey })` accepts a bare string, and that branch
+built its credential as a plain object literal — running NEITHER the
+header-byte check NOR the seal. A key carrying a CR therefore reached `fetch`,
+which rejects it with a `TypeError` that quotes the whole header value:
+
+```
+TypeError: Header 'x-api-key' has invalid value: 'AAAA\nhasna_todos_SUPERSECRET-VALUE'
+```
+
+That is the exact failure `ILLEGAL_IN_HEADER_VALUE` and CONTRACT.md §3a were
+added to close; the first test round only ever exercised `resolveCredential()`,
+so the public constructor was unprotected and untested. Credentials are now
+built by exactly two constructors — `resolveCredential()` for the chain and the
+new exported `explicitCredential()` for a caller-supplied string — and both
+validate and seal. There is no third construction site.
+
+#### Fixed: CONTRACT.md §3a promised `console.log` safety the runtime did not honour
+
+Non-enumerability keeps the key out of `Object.keys`, spreads, and
+`JSON.stringify`, but it does NOT hide an own property from an inspector: under
+Bun — the declared engine — `console.log(resolution)` printed
+`apiKey: "sk-..."` verbatim. A non-enumerable
+`Symbol.for("nodejs.util.inspect.custom")` hook IS honoured by both
+`console.log` and `Bun.inspect` (unlike `toJSON`, which this runtime never
+invokes when non-enumerable), and adds nothing to `Object.keys` or to any
+spread. The redacted form keeps `tier` and `source`, so a diagnostic dump stays
+useful. §3a now states the two enforcement mechanisms separately rather than
+implying one covers both.
+
 ## [0.8.4] - 2026-07-29
 
 ### BREAKING: the deployment-mode axis is removed; storage is a `sqlite | postgres` backend switch

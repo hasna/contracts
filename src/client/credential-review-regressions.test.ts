@@ -356,3 +356,176 @@ describe("the legacy deprecation tells the truth about the disk", () => {
     expect(messages[0]).toContain("no HOME");
   });
 });
+
+// ---------------------------------------------------------------------------
+// P0 — the SECOND review round. `currentCredential()` built the explicit-string
+// branch as a plain object literal, so a key passed as a STRING to the exported
+// `createHasnaHttpTransport` bypassed BOTH protections this change added: no
+// `assertUsableCredential`, no `sealCredential`. `ILLEGAL_IN_HEADER_VALUE` and
+// the CONTRACT.md §3a clause exist precisely to close that, and the first suite
+// only ever exercised `resolveCredential` — the public constructor was untested.
+// ---------------------------------------------------------------------------
+
+describe("an explicit apiKey STRING gets the same protections as a resolved one", () => {
+  const PLAINTEXT = "hasna_todos_SUPERSECRET-VALUE";
+
+  function transportWithKey(apiKey: string, onFetch: () => void) {
+    return createHasnaHttpTransport({
+      name: "todos",
+      baseUrl: "https://todos.your-deployment.example/v1",
+      apiKey,
+      fetchImpl: async (_url, init) => {
+        onFetch();
+        // Exactly what a real fetch does with these headers, and where the
+        // plaintext key used to surface: the runtime throws a TypeError whose
+        // message embeds the WHOLE header value — i.e. the key — into logs and
+        // stack traces.
+        new Headers(init!.headers as Record<string, string>);
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+  }
+
+  test("a mid-value CR throws, and the message never contains the key", async () => {
+    let fetchCalls = 0;
+    const client = transportWithKey(`AAAA\r${PLAINTEXT}`, () => {
+      fetchCalls += 1;
+    });
+
+    let thrown: unknown;
+    try {
+      await client.get("/items");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(CredentialResolutionError);
+    expect((thrown as Error).message).not.toContain(PLAINTEXT);
+    // The value is rejected BEFORE anything is handed to fetch, so there is no
+    // header for a runtime to quote back.
+    expect(fetchCalls).toBe(0);
+  });
+
+  test("the rejection names the source instead of the value", async () => {
+    const client = transportWithKey(`AAAA\r${PLAINTEXT}`, () => {});
+
+    await expect(client.get("/items")).rejects.toThrow(/explicit apiKey option/);
+  });
+
+  test("a NUL byte in an explicit key is rejected too, not just CR", async () => {
+    const client = transportWithKey(`AAAA\u0000${PLAINTEXT}`, () => {});
+
+    let thrown: unknown;
+    try {
+      await client.get("/items");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(CredentialResolutionError);
+    expect((thrown as Error).message).not.toContain(PLAINTEXT);
+  });
+
+  test("a clean explicit key still works and is still sent", async () => {
+    const seen: string[] = [];
+    const client = createHasnaHttpTransport({
+      name: "todos",
+      baseUrl: "https://todos.your-deployment.example/v1",
+      apiKey: PLAINTEXT,
+      fetchImpl: async (_url, init) => {
+        seen.push(String((init!.headers as Record<string, string>)["x-api-key"]));
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+
+    await client.get("/items");
+    expect(seen).toEqual([PLAINTEXT]);
+  });
+
+  test("the explicit-string credential is sealed, so a 401 report cannot serialize it", async () => {
+    const client = createHasnaHttpTransport({
+      name: "todos",
+      baseUrl: "https://todos.your-deployment.example/v1",
+      apiKey: PLAINTEXT,
+      retry: false,
+      fetchImpl: async () => new Response("", { status: 401 }),
+    });
+
+    let thrown: unknown;
+    try {
+      await client.get("/items");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(JSON.stringify(thrown)).not.toContain(PLAINTEXT);
+    expect((thrown as Error).message).not.toContain(PLAINTEXT);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P0 — CONTRACT.md §3a and `sealCredential`'s own comment promise that
+// `console.log` cannot spill the key. Under Bun — the declared engine — it can:
+// non-enumerability does NOT hide an own property from Bun's inspector, so
+// `console.log(resolved)` printed `apiKey: "..."` verbatim. A normative
+// guarantee the runtime does not honour is worse than no guarantee.
+// ---------------------------------------------------------------------------
+
+describe("the inspector cannot spill the key either", () => {
+  test("Bun.inspect of a resolved credential excludes the key", () => {
+    const home = makeHome();
+    writeCloudEnv(home, "accounts", `HASNA_ACCOUNTS_API_KEY=${SECRET}\n`);
+
+    const resolved = resolveCredential("accounts", { HOME: home })!;
+
+    expect(Bun.inspect(resolved)).not.toContain(SECRET);
+  });
+
+  test("console.log of a resolved credential excludes the key", () => {
+    const home = makeHome();
+    writeCloudEnv(home, "accounts", `HASNA_ACCOUNTS_API_KEY=${SECRET}\n`);
+    const resolved = resolveCredential("accounts", { HOME: home })!;
+
+    const written: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => {
+      written.push(args.map((arg) => (typeof arg === "string" ? arg : Bun.inspect(arg))).join(" "));
+    };
+    try {
+      console.log(resolved);
+    } finally {
+      console.log = original;
+    }
+
+    expect(written.join("\n")).not.toContain(SECRET);
+  });
+
+  test("nesting the credential inside another object does not defeat the hook", () => {
+    const home = makeHome();
+    writeCloudEnv(home, "accounts", `HASNA_ACCOUNTS_API_KEY=${SECRET}\n`);
+    const resolved = resolveCredential("accounts", { HOME: home })!;
+
+    expect(Bun.inspect({ credential: resolved, note: "diagnostic dump" })).not.toContain(SECRET);
+  });
+
+  test("the redacted form still names the tier and source, so it stays diagnostic", () => {
+    const home = makeHome();
+    const diskPath = writeCloudEnv(home, "accounts", `HASNA_ACCOUNTS_API_KEY=${SECRET}\n`);
+    const resolved = resolveCredential("accounts", { HOME: home })!;
+
+    const rendered = Bun.inspect(resolved);
+    expect(rendered).toContain("disk");
+    expect(rendered).toContain(diskPath);
+  });
+
+  test("the inspect hook stays invisible to Object.keys, spreads, and property access", () => {
+    const home = makeHome();
+    writeCloudEnv(home, "accounts", `HASNA_ACCOUNTS_API_KEY=${SECRET}\n`);
+    const resolved = resolveCredential("accounts", { HOME: home })!;
+
+    expect(Object.keys(resolved)).not.toContain("apiKey");
+    expect(Object.keys({ ...resolved })).toEqual(Object.keys(resolved));
+    // And the secret is still readable by the code that legitimately needs it.
+    expect(resolved.apiKey).toBe(SECRET);
+  });
+});

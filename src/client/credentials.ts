@@ -51,11 +51,14 @@ export interface ResolvedCredential {
   /**
    * The secret.
    *
-   * NON-ENUMERABLE on purpose: `JSON.stringify(resolution)`, a structured
-   * logger, or `console.log` must not be able to spill it, and CONTRACT.md §3a
-   * promises exactly that. Property access (`resolved.apiKey`) and destructuring
-   * both still work; only enumeration and serialization are blocked. Note that
-   * `{ ...resolved }` therefore DROPS the key — which is the safe direction.
+   * NON-ENUMERABLE on purpose, so `Object.keys`, `{ ...resolved }`, and
+   * `JSON.stringify(resolution)` cannot spill it; and separately REDACTED by a
+   * custom-inspect hook, because non-enumerability alone does not stop an
+   * inspector — `console.log` printed it verbatim under Bun until the hook was
+   * added. CONTRACT.md §3a promises both. Property access (`resolved.apiKey`)
+   * and destructuring still work; only enumeration, serialization, and printing
+   * are blocked. Note that `{ ...resolved }` therefore DROPS the key — which is
+   * the safe direction.
    */
   apiKey: string;
   tier: CredentialTier;
@@ -269,7 +272,21 @@ function assertUsableCredential(appName: string, source: string, value: string):
 }
 
 /**
- * Build a resolution whose secret cannot be enumerated or serialized.
+ * The runtime's custom-inspect hook.
+ *
+ * Non-enumerability keeps the key out of `Object.keys`, spreads, and
+ * `JSON.stringify`, but it does NOT hide an own property from an INSPECTOR:
+ * under Bun — the engine this package declares — `console.log(resolved)` printed
+ * `apiKey: "..."` verbatim, so the CONTRACT.md §3a promise about `console.log`
+ * was unenforced. Both `console.log` and `Bun.inspect` honour this hook even
+ * when it is defined non-enumerably, which is what lets the guarantee be met
+ * without putting anything into `Object.keys` or into a `{ ...resolved }`
+ * spread. (A redacting `toJSON` is NOT an alternative — see below.)
+ */
+const INSPECT_CUSTOM = Symbol.for("nodejs.util.inspect.custom");
+
+/**
+ * Build a resolution whose secret cannot be enumerated, serialized, or printed.
  *
  * CONTRACT.md §3a states the key value is never logged, embedded, or
  * serialized. An ordinary property makes that claim unenforceable — one
@@ -293,7 +310,8 @@ function sealCredential(fields: {
     writable: false,
     configurable: false,
   });
-  // Non-enumerability alone is the guarantee, and it is enforced by the
+  // Non-enumerability covers enumeration and serialization: `Object.keys`,
+  // `{ ...resolution }`, and `JSON.stringify` all omit the key, enforced by the
   // language rather than by a method a caller could strip or forget.
   //
   // A redacting `toJSON` was tried here and REMOVED: a NON-ENUMERABLE `toJSON`
@@ -302,7 +320,50 @@ function sealCredential(fields: {
   // function into `Object.keys` and into every `{ ...resolution }` spread. So
   // the serialized form simply omits the key, which is the outcome that
   // matters. Do not re-add a non-enumerable `toJSON` expecting it to run.
+  //
+  // INSPECTION is a separate channel, and non-enumerability does not close it:
+  // Bun's inspector prints own non-enumerable properties, so `console.log` spilled
+  // the key in plaintext. Unlike `toJSON`, a NON-ENUMERABLE custom-inspect hook IS
+  // honoured — by `console.log` and `Bun.inspect` alike — so the redaction happens
+  // without the hook ever appearing in `Object.keys` or in a spread. The redacted
+  // form keeps `tier` and `source`, which are the fields a diagnostic dump is
+  // actually for.
+  Object.defineProperty(sealed, INSPECT_CUSTOM, {
+    value: () => ({ ...visible, apiKey: "[redacted]" }),
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
   return sealed;
+}
+
+/**
+ * Build the credential for a key a caller handed in DIRECTLY as a string.
+ *
+ * `createHasnaHttpTransport({ apiKey })` accepts a bare string, and that branch
+ * used to construct its resolution as an object literal — reaching the request
+ * having run NEITHER {@link assertUsableCredential} NOR {@link sealCredential},
+ * so the one public constructor most consumers call bypassed both protections
+ * this module exists to provide. A key carrying a CR then travelled all the way
+ * into `fetch`, which rejects it with a `TypeError` whose message quotes THE
+ * WHOLE HEADER VALUE — putting the plaintext key into logs and stack traces,
+ * which is the exact failure `ILLEGAL_IN_HEADER_VALUE` was added to prevent.
+ *
+ * Every credential in this system is now built here or by
+ * {@link resolveCredential}. There is deliberately no third construction site.
+ */
+export function explicitCredential(appName: string, apiKey: string): ResolvedCredential {
+  const source = "explicit apiKey option";
+  assertUsableCredential(appName, source, apiKey);
+  return sealCredential({
+    apiKey,
+    tier: "argument",
+    source,
+    deliberate: true,
+    deprecated: false,
+    diskCandidates: [],
+    warning: null,
+  });
 }
 
 function firstEnvValue(env: Env, keys: readonly string[]): { key: string; value: string } | null {

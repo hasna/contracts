@@ -60,6 +60,7 @@ import type { StorageMode } from "../schemas.js";
 import { isIP } from "node:net";
 import { clientTransportEnvKeys } from "./env-keys.js";
 import {
+  explicitCredential,
   resolveCredential,
   type CredentialChainOptions,
   type CredentialTier,
@@ -74,6 +75,7 @@ import { credentialDiskSources } from "./credentials.js";
 export {
   CredentialResolutionError,
   credentialDiskSources,
+  explicitCredential,
   resolveCredential,
   __resetCredentialDeprecationNotices,
 } from "./credentials.js";
@@ -610,17 +612,12 @@ export class HasnaHttpError extends Error {
  */
 export type CredentialProvider = () => ResolvedCredential;
 
-function currentCredential(apiKey: string | CredentialProvider): ResolvedCredential {
+function currentCredential(name: string, apiKey: string | CredentialProvider): ResolvedCredential {
   if (typeof apiKey === "function") return apiKey();
-  return {
-    apiKey,
-    tier: "argument",
-    source: "explicit apiKey option",
-    deliberate: true,
-    deprecated: false,
-    diskCandidates: [],
-    warning: null,
-  };
+  // A bare string goes through the SAME constructor as a resolved one. Building
+  // it as an object literal here is what let a key with a CR in it reach `fetch`,
+  // whose TypeError quotes the whole header value and so leaks the plaintext key.
+  return explicitCredential(name, apiKey);
 }
 
 /**
@@ -931,7 +928,7 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
     // attempt would let a rotation land mid-request and send two attempts of the
     // same logical call under two different principals, which is precisely the
     // audit-log confusion that makes retry-on-401 the wrong pattern here.
-    const credential = currentCredential(options.apiKey);
+    const credential = currentCredential(options.name, options.apiKey);
 
     let last: { retryable: boolean; error: Error } | null = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
