@@ -86,6 +86,51 @@ An app **MUST NOT** read secret *values* to decide the mode; it only detects
 `DATABASE_URL` presence. Selecting `cloud` without a database URL is a
 misconfiguration and MUST warn.
 
+### 3a. Credential resolution — env holds a pointer, disk holds the secret
+
+Environment variables are a snapshot taken at process start; credentials are
+mutable state. Storing a rotating secret in a frozen snapshot is a defect, and
+it has a measured failure mode: a shell started before a key rotation keeps
+sending the old key for its entire life, so every command from that shell fails
+`401` while a fresh shell on the same machine in the same second succeeds.
+
+Apps **MUST NOT** read `HASNA_<NAME>_API_KEY` from `process.env` themselves.
+The credential is resolved by the transport, at call time, through
+`resolveCredential()` (re-exported from `@hasna/contracts/client`). Precedence:
+
+| # | Tier | Source | Notes |
+| --- | --- | --- | --- |
+| 1 | argument | `--api-key` / `--profile` passed by the caller | Deliberate. |
+| 2 | override | `HASNA_<NAME>_API_KEY_OVERRIDE`, or the `HASNA_PROFILE` pointer | Deliberate. Nothing sets these automatically. |
+| 3 | **disk** | `$HOME/.hasna/cloud/<name>.env`, then `$HOME/.config/hasna/<name>-cloud.env` | **The default path.** Re-read on every call. |
+| 4 | legacy env | `HASNA_<NAME>_API_KEY` / `<NAME>_API_KEY` | Deprecated fallback, used only when the disk yields nothing. Warns once per app. |
+
+Rules:
+
+- **A deliberate tier never falls through.** If tier 1 or 2 selects a
+  credential, the chain stops there. An override that is revoked MUST surface
+  as a `401`; silently continuing to the next tier would authenticate as a
+  different principal than the operator named. There is **no retry-on-401**:
+  with a single static key, a retry makes identity nondeterministic per call
+  and is precisely what rescues a revoked override as the wrong tenant.
+- **Tier 3 is re-read per request**, not cached and not resolved once when the
+  client is built — a cache is the same snapshot defect at a smaller timescale.
+  This is what makes a rotation heal in any shell, however old.
+- **The credential never decides the mode.** Section 3's mode resolution is
+  unchanged and stays env-only, so a credential file on disk can never flip a
+  client that reads its local store into reading the network.
+- **`HOME` comes from the same env object** the caller passes. An env with no
+  `HOME` performs no disk read, which is what keeps the behaviour hermetic and
+  test suites independent of the machine running them.
+- **Never fall back to local data on an auth failure.** Offline reads are a
+  legitimate feature, but they MUST be a deliberate mode chosen *before* the
+  request. A `401`-to-local fallback prints healthy output while authentication
+  is broken — a false green, strictly worse than the loud failure.
+- Errors name **which source** supplied the rejected key, and say what to do
+  about it. A key value is never logged, embedded, or serialized; where two
+  sources must be compared, they are compared by length and a truncated
+  SHA-256, never by any fragment of the secret.
+
 ---
 
 ## 4. Health endpoints (services)
@@ -458,6 +503,37 @@ Checks:
 14. `published_artifact_gate` — a repo that publishes declares
    `metadata.release.artifactScan.script` and its `prepack` script transitively
    reaches it. See clause C.
+15. `credential_seam_compliance` — no source file resolves a Hasna client
+   credential by hand. Reading `HASNA_<NAME>_API_KEY` (or the `<NAME>_API_KEY`
+   alias) out of `process.env` keeps the stale-snapshot defect that §3a exists
+   to remove, so it fails. The rule asks `clientTransportEnvKeys()` for the
+   names it polices rather than approximating them, so it cannot drift from the
+   seam.
+
+   It is deliberately narrow, because a mandatory gate that fires on compliant
+   code gets switched off — and then it protects nothing, the same end state as
+   a check that cannot fail. It matches **read expressions only**: writing the
+   variable, naming it in an error message, listing it in a redaction
+   allowlist, or forwarding it to a child process are all compliant. Comments
+   and JSDoc are masked. Tests, `dist/`, and shipped `bin/` bundles are
+   excluded. `HASNA_<APP>_SERVE_API_KEY` and `HASNA_<APP>_BOOTSTRAP_API_KEY`
+   are a server reading the key it expects *inbound*, and third-party keys
+   wearing the prefix (`HASNA_BRAIN_ANTHROPIC_API_KEY`) are not ours to
+   resolve; both fall outside the single-segment client-flip grammar and are
+   structurally excluded rather than allowlisted.
+
+   The pressure valve is an explicit waiver comment on the read or the line
+   above it:
+
+   ```ts
+   // hasna-credential-seam-waiver: server-side validation of the inbound key, not a client resolve
+   const expected = process.env.HASNA_FACTORY_API_KEY;
+   ```
+
+   A waiver with no usable justification is **rejected**, not honoured — it
+   would silence the gate while recording nothing a reviewer can weigh. Every
+   accepted waiver is echoed into the report, so it stays a thing a human
+   reads.
 
 The kit is dev-dependency friendly: `@hasna/contracts` can be a `devDependency`
 and the checks run under `bun test` with no runtime footprint in the app.

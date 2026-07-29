@@ -31,6 +31,7 @@ import { loadServiceContractManifest, type LoadServiceContractResult } from "./s
 import { normalizeStorageMode, storageEnvKeys, type Env } from "./mode";
 import { API_KEY_TOKEN_PATTERN } from "./auth/keys";
 import { scanNoCloudTarget } from "./no-cloud";
+import { scanCredentialSeam } from "./credential-seam";
 
 export type ConformanceStatus = "pass" | "fail" | "skip";
 
@@ -55,6 +56,8 @@ export interface RepoConformanceOptions {
   healthSample?: unknown;
   /** Skip the no-cloud scan (useful when a caller runs it separately). */
   skipNoCloudScan?: boolean;
+  /** Skip the credential-seam scan (useful when a caller runs it separately). */
+  skipCredentialSeamScan?: boolean;
   /** Public manifests are checked for private infrastructure references. */
   manifestTier?: "public" | "private";
   /** Clock used for time-boxed checks such as storage-waiver expiry. */
@@ -610,6 +613,54 @@ function publishedArtifactGateCheck(repoRoot: string, manifest: ServiceContractM
     : { id: "published_artifact_gate", status: "fail", detail: failures.join("; ") };
 }
 
+/**
+ * Nobody resolves a client credential by hand.
+ *
+ * A repo that reads `HASNA_<NAME>_API_KEY` out of `process.env` keeps the
+ * defect the credential provider chain removes: an environment snapshot taken
+ * at process start, which serves a revoked key for the whole life of the shell.
+ * See `src/credential-seam.ts` for why this rule is narrow and what it
+ * deliberately does not flag.
+ */
+function credentialSeamCheck(repoRoot: string, appName: string, skip?: boolean): ConformanceCheck {
+  if (skip) {
+    return { id: "credential_seam_compliance", status: "skip", detail: "skipped by caller" };
+  }
+  let scan;
+  try {
+    scan = scanCredentialSeam(repoRoot, { appName });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { id: "credential_seam_compliance", status: "fail", detail: `credential-seam scan error: ${message}` };
+  }
+
+  const failures: string[] = [];
+  for (const finding of scan.findings) {
+    failures.push(`${finding.path}:${finding.line} ${finding.message}`);
+  }
+  // A waiver with no usable justification is worse than no waiver: it silences
+  // the gate while recording nothing a reviewer can weigh.
+  for (const waiver of scan.invalidWaivers) {
+    failures.push(
+      `${waiver.path}:${waiver.line} carries a credential-seam waiver with no usable justification ` +
+        `('${waiver.reason}'); state why this read cannot go through the seam.`,
+    );
+  }
+  if (failures.length > 0) {
+    return { id: "credential_seam_compliance", status: "fail", detail: failures.join("; ") };
+  }
+
+  const waived =
+    scan.waivers.length > 0
+      ? `; explicitly waived: ${scan.waivers.map((waiver) => `${waiver.path}:${waiver.line} (${waiver.reason})`).join("; ")}`
+      : "";
+  return {
+    id: "credential_seam_compliance",
+    status: "pass",
+    detail: `no hand-rolled client credential reads across ${scan.filesScanned} source files${waived}`,
+  };
+}
+
 export function runRepoConformance(repoRoot: string, options: RepoConformanceOptions = {}): RepoConformanceReport {
   const checks: ConformanceCheck[] = [];
   const loaded: LoadServiceContractResult = loadServiceContractManifest(repoRoot);
@@ -912,6 +963,9 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
 
   // Check 9: published-artifact scanning is bound to prepack (clause C).
   checks.push(publishedArtifactGateCheck(repoRoot, manifest));
+
+  // Check 10: nobody hand-rolls a client credential outside the seam.
+  checks.push(credentialSeamCheck(repoRoot, manifest.name, options.skipCredentialSeamScan));
 
   // Check 8: no forbidden shared cloud runtimes (reuse the no-cloud guard).
   if (options.skipNoCloudScan) {

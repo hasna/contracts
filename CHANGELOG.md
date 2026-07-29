@@ -2,6 +2,51 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## Unreleased
+
+### Credential resolution: env holds a pointer, disk holds the secret, resolved at call time
+
+MEASURED FAILURE THIS KILLS. A tmux shell started before a key rotation held the
+stale `HASNA_ACCOUNTS_API_KEY` for its whole life; every command from it failed
+`401 "API key has been revoked"`, while a fresh login shell on the same machine
+in the same second returned `200`. The credential on disk was correct
+throughout — only the process env was stale. Environment variables are a
+snapshot taken at process start; credentials are mutable state.
+
+`resolveClientTransport()` stays the entry point and gains a credential provider
+chain resolved on every call: an explicit `--api-key`/`--profile` argument, then
+a deliberate `HASNA_<NAME>_API_KEY_OVERRIDE` / `HASNA_PROFILE` pointer, then
+**disk** (`$HOME/.hasna/cloud/<name>.env`, then
+`$HOME/.config/hasna/<name>-cloud.env`), and finally the legacy
+`HASNA_<NAME>_API_KEY` process env — demoted to a deprecated fallback used only
+when the disk yields nothing. That demotion is what fixes stale shells
+immediately, without waiting for shells to cycle. See CONTRACT.md §3a.
+
+WHAT WAS DELIBERATELY NOT BUILT: env-first with a retry-on-401 that re-reads
+disk. In mature CLIs retry-on-401 signals two-tier auth — a durable secret
+minting short-lived tokens. With a single static key it makes identity
+nondeterministic per call and, the correctness bug, SILENTLY RESCUES A REVOKED
+DELIBERATE OVERRIDE as the wrong principal. A deliberate tier therefore never
+falls through, and `401`/`403` are terminal regardless of retry policy.
+
+THE MODE DECISION IS UNCHANGED and stays env-only, so a credential file on disk
+can never flip a client that reads its local store into reading the network.
+`HOME` is read from the same env object the caller passes, so an env without
+`HOME` performs no disk read at all and the behaviour stays hermetic.
+
+Also fixed: `createClientTransport()` re-read the API key straight out of `env`,
+a second resolution path that diverged from `resolveClientTransport()` on the
+code path most consumers actually take. Both now share the chain, and
+`createHasnaHttpTransport()` accepts a provider so rotation heals inside
+long-lived processes without rebuilding the client — resolved once per request,
+never per retry attempt, so one request is always one identity.
+
+New conformance check `credential_seam_compliance` fails any repo that resolves
+a client credential by hand. It derives the names it polices from
+`clientTransportEnvKeys()` so it cannot drift from the seam, matches read
+expressions only, and structurally excludes server-side `*_SERVE_API_KEY` /
+`*_BOOTSTRAP_API_KEY` reads and third-party keys wearing the `HASNA_` prefix.
+
 ## [0.8.3] - 2026-07-27
 
 ### `no-cloud-scan` stops scoring its own inlined declaration, without switching a detector off

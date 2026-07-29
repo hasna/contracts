@@ -43,9 +43,31 @@
 // SAFETY: this module never returns, logs, or embeds the API key value. Callers
 // receive only presence flags and env-key names.
 
-import { normalizeStorageMode, envToken, type Env } from "../mode.js";
+import { normalizeStorageMode, type Env } from "../mode.js";
 import type { StorageMode } from "../schemas.js";
 import { isIP } from "node:net";
+import { clientTransportEnvKeys } from "./env-keys.js";
+import {
+  resolveCredential,
+  type CredentialChainOptions,
+  type CredentialTier,
+  type ResolvedCredential,
+} from "./credentials.js";
+
+// The credential chain is part of this module's public surface: callers wire
+// `--api-key` / `--profile` through it, and consumers migrating off a direct
+// `process.env` read need its types.
+import { credentialDiskSources } from "./credentials.js";
+
+export {
+  CredentialResolutionError,
+  credentialDiskSources,
+  resolveCredential,
+  __resetCredentialDeprecationNotices,
+} from "./credentials.js";
+export type { CredentialChainOptions, CredentialTier, ResolvedCredential } from "./credentials.js";
+export { clientTransportEnvKeys, credentialOverrideEnvKey, CREDENTIAL_PROFILE_ENV_KEY } from "./env-keys.js";
+export type { ClientTransportEnvKeys } from "./env-keys.js";
 
 const FLEET_API_DOMAIN_ENV_KEY = "HASNA_FLEET_API_DOMAIN";
 const NEUTRAL_FLEET_API_DOMAIN = "your-deployment.example";
@@ -174,30 +196,6 @@ export function fleetApiDomain(env: Env = process.env as Env): string {
 /** Default cloud host template. `<app>` is the app slug. */
 export function defaultCloudBaseUrl(name: string, env: Env = process.env as Env): string {
   return resolveDefaultCloudBaseUrl(name, env).baseUrl;
-}
-
-export interface ClientTransportEnvKeys {
-  /** Mode keys, in precedence order. */
-  modeKeys: string[];
-  /** API base-URL keys, in precedence order. */
-  apiUrlKeys: string[];
-  /** API-key keys, in precedence order. */
-  apiKeyKeys: string[];
-}
-
-/** Resolve the canonical client-flip env-key spec for an app. */
-export function clientTransportEnvKeys(name: string): ClientTransportEnvKeys {
-  const envSegment = envToken(name);
-  return {
-    modeKeys: [
-      `HASNA_${envSegment}_STORAGE_MODE`,
-      `HASNA_${envSegment}_MODE`,
-      `${envSegment}_STORAGE_MODE`,
-      `${envSegment}_MODE`,
-    ],
-    apiUrlKeys: [`HASNA_${envSegment}_API_URL`, `${envSegment}_API_URL`],
-    apiKeyKeys: [`HASNA_${envSegment}_API_KEY`, `${envSegment}_API_KEY`],
-  };
 }
 
 function firstEnv(
@@ -353,8 +351,20 @@ export interface ClientTransportResolution {
   apiUrlSource: string | null;
   /** Whether an API key is present (value never exposed). */
   apiKeyPresent: boolean;
-  /** Env key the API key came from, or null. */
+  /**
+   * WHERE the API key came from: an env key NAME or an absolute file path.
+   * Never the value.
+   *
+   * In `local` mode this reports only whether the legacy env key is set, since
+   * a local client resolves no credential at all. In `cloud` mode it names the
+   * tier of the provider chain that actually supplied the key.
+   */
   apiKeySource: string | null;
+  /**
+   * Which tier of the credential chain supplied the key, or null in local mode
+   * / when no credential resolved. See {@link CredentialTier}.
+   */
+  apiKeyTier: CredentialTier | null;
   /**
    * True when the operator asked for cloud but the config is incomplete. Missing
    * keys fall back to local; missing or malformed default-domain config resolves
@@ -365,13 +375,30 @@ export interface ClientTransportResolution {
   warning: string | null;
 }
 
+export interface ResolveClientTransportOptions {
+  /** Tier-1 credential inputs, e.g. from `--api-key` / `--profile` flags. */
+  credentials?: CredentialChainOptions;
+}
+
 /**
  * Resolve how a client should reach an app's data given the environment.
  *
  * Precedence for the mode: the first present of `HASNA_<NAME>_STORAGE_MODE`,
  * `HASNA_<NAME>_MODE`, `<NAME>_STORAGE_MODE`, `<NAME>_MODE`, else `local`.
+ *
+ * MODE AND CREDENTIAL ARE RESOLVED SEPARATELY, and deliberately so. The mode
+ * decision stays exactly as it was — env only — so that a credential file
+ * sitting on disk can never flip a client that reads its local store today
+ * into reading the network instead. Only once the mode is already `cloud` does
+ * the credential provider chain run, and then it resolves at CALL TIME through
+ * {@link resolveCredential}: argument, then a deliberate override/profile
+ * pointer, then disk, then the deprecated legacy env var.
  */
-export function resolveClientTransport(name: string, env: Env = process.env): ClientTransportResolution {
+export function resolveClientTransport(
+  name: string,
+  env: Env = process.env,
+  options: ResolveClientTransportOptions = {},
+): ClientTransportResolution {
   const keys = clientTransportEnvKeys(name);
   const modeHit = firstEnv(env, keys.modeKeys);
   const urlHit = firstEnv(env, keys.apiUrlKeys, { preserveRaw: true });
@@ -403,6 +430,9 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
   }
 
   // Local mode: never route to the network, regardless of URL/key presence.
+  // The credential chain is NOT run here: a local client authenticates to
+  // nothing, so resolving a secret would be pure side effect (including a
+  // spurious deprecation warning for an env var this process never uses).
   if (mode === "local") {
     return {
       transport: "local",
@@ -413,15 +443,24 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
       apiUrlSource: null,
       apiKeyPresent: Boolean(keyHit),
       apiKeySource: keyHit ? keyHit.key : null,
+      apiKeyTier: null,
       misconfigured: false,
       warning: warnings.length > 0 ? warnings.join(" ") : null,
     };
   }
 
-  // Cloud mode but no API key: fall back to local, but flag it loudly.
-  if (!keyHit) {
+  // Cloud mode: resolve the credential through the chain, at call time. A
+  // CredentialResolutionError from a deliberate tier propagates on purpose —
+  // an override or profile that cannot be honoured must fail loudly rather
+  // than authenticate as a different principal.
+  const credential = resolveCredential(name, env, options.credentials);
+
+  // Cloud mode but no credential from any tier: fall back to local, loudly.
+  if (!credential) {
+    const diskHint = credentialDiskSourcesForMessage(name, env);
     warnings.push(
-      `${modeSource}=cloud but no API key is set (${keys.apiKeyKeys[0]}). Refusing to route to cloud; using local store. Set ${keys.apiKeyKeys[0]} to enable the cloud client.`,
+      `${modeSource}=cloud but no API key could be resolved for '${name}'. Refusing to route to cloud; using local store. ` +
+        `Looked for a credential file at ${diskHint}, then for ${keys.apiKeyKeys[0]} in the environment.`,
     );
     return {
       transport: "local",
@@ -432,10 +471,12 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
       apiUrlSource: null,
       apiKeyPresent: false,
       apiKeySource: null,
+      apiKeyTier: null,
       misconfigured: true,
       warning: warnings.join(" "),
     };
   }
+  if (credential.warning) warnings.push(credential.warning);
 
   let defaultBaseUrl: DefaultCloudBaseUrlResolution | null = null;
   let apiUrlSource: string =
@@ -462,7 +503,8 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
       baseUrl: null,
       apiUrlSource: null,
       apiKeyPresent: true,
-      apiKeySource: keyHit.key,
+      apiKeySource: credential.source,
+      apiKeyTier: credential.tier,
       misconfigured: true,
       warning: warnings.join(" "),
     };
@@ -478,10 +520,17 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     baseUrl,
     apiUrlSource,
     apiKeyPresent: true,
-    apiKeySource: keyHit.key,
+    apiKeySource: credential.source,
+    apiKeyTier: credential.tier,
     misconfigured: defaultBaseUrl?.misconfigured ?? false,
     warning: warnings.length > 0 ? warnings.join(" ") : null,
   };
+}
+
+/** Render the disk candidates for a diagnostic, without touching their contents. */
+function credentialDiskSourcesForMessage(name: string, env: Env): string {
+  const paths = credentialDiskSources(name, env);
+  return paths.length > 0 ? paths.join(" or ") : "<no HOME set in this environment, so no credential file was consulted>";
 }
 
 /** Thrown when a cloud HTTP request returns a non-2xx status, including redirects. */
@@ -490,14 +539,84 @@ export class HasnaHttpError extends Error {
   readonly method: string;
   readonly path: string;
   readonly body: unknown;
-  constructor(method: string, path: string, status: number, body: unknown) {
-    super(`Hasna cloud request failed: ${method} ${path} -> ${status}`);
+  /** WHICH source supplied the rejected key (an env key name or a file path). Never a value. */
+  readonly credentialSource: string | null;
+  /** Which tier of the provider chain supplied it. */
+  readonly credentialTier: CredentialTier | null;
+  constructor(
+    method: string,
+    path: string,
+    status: number,
+    body: unknown,
+    credential?: { source: string; tier: CredentialTier; guidance: string } | null,
+  ) {
+    // The base message is byte-stable when there is no credential context, so
+    // callers matching on it keep working; guidance is strictly additive.
+    const guidance = credential ? `. ${credential.guidance}` : "";
+    super(`Hasna cloud request failed: ${method} ${path} -> ${status}${guidance}`);
     this.name = "HasnaHttpError";
     this.status = status;
     this.method = method;
     this.path = path;
     this.body = body;
+    this.credentialSource = credential?.source ?? null;
+    this.credentialTier = credential?.tier ?? null;
   }
+}
+
+/**
+ * A credential resolved fresh for one request.
+ *
+ * The transport takes a PROVIDER rather than a string so that a long-lived
+ * process — an MCP server, a daemon — picks up a key rotation without being
+ * rebuilt. Resolving once when the client is constructed would just move the
+ * stale snapshot from process start to client construction.
+ */
+export type CredentialProvider = () => ResolvedCredential;
+
+function currentCredential(apiKey: string | CredentialProvider): ResolvedCredential {
+  if (typeof apiKey === "function") return apiKey();
+  return {
+    apiKey,
+    tier: "argument",
+    source: "explicit apiKey option",
+    deliberate: true,
+    deprecated: false,
+    warning: null,
+  };
+}
+
+/**
+ * What a human should do about a 401/403, given where the key came from.
+ *
+ * The opaque "API key has been revoked" this replaces cost an engineer an hour:
+ * it named neither the source nor the fix, and the most likely cause — a shell
+ * older than the last rotation — is invisible from inside that shell.
+ */
+function authFailureGuidance(credential: ResolvedCredential): string {
+  const origin = `The API key for this request came from ${credential.source}`;
+  if (credential.deliberate) {
+    return (
+      `${origin} — a credential you selected deliberately. It was NOT substituted with any other key: ` +
+      `falling back here would authenticate as a different principal than the one you named, which is ` +
+      `exactly the failure an override exists to prevent. Rotate that key, or unset the override to use ` +
+      `the credential on disk.`
+    );
+  }
+  if (credential.deprecated) {
+    return (
+      `${origin}, a variable in this process's environment — which is a snapshot taken when the process ` +
+      `started. A STALE SHELL is the most common cause of this error: this shell exported the key before ` +
+      `it was rotated, and will keep sending the old one until it exits. The credential on disk is re-read ` +
+      `on every call, so unsetting ${credential.source} in this shell (or starting a new shell) picks up ` +
+      `the current key immediately.`
+    );
+  }
+  return (
+    `${origin}, which was re-read from disk on this very call — so a stale shell is NOT the cause here. ` +
+    `The stored credential is genuinely being rejected: rotate it, or re-run the fleet key distribution ` +
+    `so this machine gets the current key.`
+  );
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -570,8 +689,14 @@ export interface HasnaHttpTransportOptions {
   name: string;
   /** `<origin>/v1` base. Usually from `resolveClientTransport().baseUrl`. */
   baseUrl: string;
-  /** The API key (secret). Sent as both `x-api-key` and `Authorization: Bearer`. */
-  apiKey: string;
+  /**
+   * The API key (secret), or a provider that resolves one per request.
+   *
+   * Pass a provider (see {@link CredentialProvider}) so rotation heals inside a
+   * long-lived process. A plain string is still accepted and is treated as a
+   * deliberate, explicit credential.
+   */
+  apiKey: string | CredentialProvider;
   /** Override fetch (tests). Defaults to global fetch. */
   fetchImpl?: FetchLike;
   /** Extra headers merged into every request. */
@@ -653,12 +778,13 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
     url: string,
     body: unknown,
     opts: HasnaRequestOptions,
+    credential: ResolvedCredential,
   ): Promise<{ ok: true; value: T } | { ok: false; retryable: boolean; error: Error }> {
     assertNoAuthorityOverrideHeaders(options.headers, "transport");
     assertNoAuthorityOverrideHeaders(opts.headers, "request");
     const headers: Record<string, string> = {
-      "x-api-key": options.apiKey,
-      Authorization: `Bearer ${options.apiKey}`,
+      "x-api-key": credential.apiKey,
+      Authorization: `Bearer ${credential.apiKey}`,
       Accept: "application/json",
       ...(options.headers ?? {}),
       ...(opts.headers ?? {}),
@@ -718,6 +844,25 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
           error: new HasnaHttpError(method, rel, response.status, parsed),
         };
       }
+      // An authentication failure is TERMINAL, regardless of retry policy — the
+      // same rule redirects already follow, and for the same reason: a caller's
+      // retry list must not turn one failure into repeated authenticated
+      // requests. A rejected key does not become valid by being sent again, so
+      // retrying only multiplies failed-auth events in the server's audit log
+      // and delays the actionable error. This is also the boundary that keeps
+      // 401 handling from drifting back toward retry-on-401 — the pattern that
+      // silently rescues a revoked deliberate override as the wrong principal.
+      if (response.status === 401 || response.status === 403) {
+        return {
+          ok: false,
+          retryable: false,
+          error: new HasnaHttpError(method, rel, response.status, parsed, {
+            source: credential.source,
+            tier: credential.tier,
+            guidance: authFailureGuidance(credential),
+          }),
+        };
+      }
       const retry = resolveRetry(opts.retry);
       const retryable = retry ? retry.retryStatuses.includes(response.status) : false;
       return { ok: false, retryable, error: new HasnaHttpError(method, rel, response.status, parsed) };
@@ -733,9 +878,17 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
     const methodRetryable = IDEMPOTENT_METHODS.has(upper) || Boolean(opts.idempotencyKey);
     const maxAttempts = retry && methodRetryable ? retry.retries + 1 : 1;
 
+    // ONE request, ONE identity. The credential is resolved fresh here — so a
+    // rotation is picked up by the next request without rebuilding the client —
+    // but it is resolved exactly once for the whole retry loop. Re-resolving per
+    // attempt would let a rotation land mid-request and send two attempts of the
+    // same logical call under two different principals, which is precisely the
+    // audit-log confusion that makes retry-on-401 the wrong pattern here.
+    const credential = currentCredential(options.apiKey);
+
     let last: { retryable: boolean; error: Error } | null = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const result = await once<T>(upper, rel, url, body, opts);
+      const result = await once<T>(upper, rel, url, body, opts, credential);
       if (result.ok) return result.value;
       last = result;
       const canRetry = retry !== null && methodRetryable && result.retryable && attempt < maxAttempts;
@@ -768,29 +921,43 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
 export function createClientTransport(
   name: string,
   env: Env = process.env,
-  overrides?: Partial<Pick<HasnaHttpTransportOptions, "fetchImpl" | "headers" | "timeoutMs" | "retry" | "sleepImpl">>,
+  overrides?: Partial<Pick<HasnaHttpTransportOptions, "fetchImpl" | "headers" | "timeoutMs" | "retry" | "sleepImpl">> & {
+    /** Tier-1 credential inputs, e.g. from `--api-key` / `--profile` flags. */
+    credentials?: CredentialChainOptions;
+  },
 ):
   | { transport: "local"; client: null; resolution: ClientTransportResolution }
   | { transport: "cloud-http"; client: HasnaHttpTransport; resolution: ClientTransportResolution } {
-  const resolution = resolveClientTransport(name, env);
+  const credentialOptions = overrides?.credentials;
+  const resolution = resolveClientTransport(name, env, { ...(credentialOptions ? { credentials: credentialOptions } : {}) });
   if (resolution.misconfigured) {
     throw new Error(resolution.warning ?? `Client for '${name}' is misconfigured for cloud mode.`);
   }
   if (resolution.transport === "local" || !resolution.baseUrl) {
     return { transport: "local", client: null, resolution };
   }
-  const keys = clientTransportEnvKeys(name);
-  const apiKey = firstEnv(env, keys.apiKeyKeys)?.value;
-  if (!apiKey) {
-    // Should be unreachable given resolution logic, but never build without a key.
-    throw new Error(`Client for '${name}' resolved to cloud-http without an API key.`);
-  }
+  // The credential is NOT read here. It is resolved per request through the
+  // same chain `resolveClientTransport` used, so this path cannot drift from
+  // that one — an earlier version of this function re-read the key straight out
+  // of `env`, which was a second, divergent resolution on the code path most
+  // callers actually take.
+  const credentialProvider: CredentialProvider = () => {
+    const resolved = resolveCredential(name, env, credentialOptions);
+    if (!resolved) {
+      throw new Error(
+        `Client for '${name}' resolved to cloud-http but no API key is available any more. ` +
+          `Looked at ${credentialDiskSourcesForMessage(name, env)}, then the environment. ` +
+          `A credential file that was removed after this client was built is the usual cause.`,
+      );
+    }
+    return resolved;
+  };
   return {
     transport: "cloud-http",
     client: createHasnaHttpTransport({
       name,
       baseUrl: resolution.baseUrl,
-      apiKey,
+      apiKey: credentialProvider,
       ...(overrides?.fetchImpl ? { fetchImpl: overrides.fetchImpl } : {}),
       ...(overrides?.headers ? { headers: overrides.headers } : {}),
       ...(overrides?.timeoutMs ? { timeoutMs: overrides.timeoutMs } : {}),
