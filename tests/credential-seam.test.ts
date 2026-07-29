@@ -57,10 +57,13 @@ describe("the rule fails a package that resolves a credential by hand", () => {
     expect(result.findings).toHaveLength(1);
   });
 
-  test("the unprefixed alias is a finding", () => {
+  test("the unprefixed alias ALONE is deliberately not policed", () => {
+    // The bare `<APP>_API_KEY` alias has no namespace, so it collides with
+    // unrelated third-party credentials that share the app's name. Policing it
+    // made the gate red on compliant code. See the review regression suite for
+    // the measured case (`RECORDINGS_API_KEY` is an OpenAI key).
     const result = scan({ "src/store.ts": "const k = process.env.ACCOUNTS_API_KEY;\n" });
-    expect(result.findings).toHaveLength(1);
-    expect(result.findings[0]!.variable).toBe("ACCOUNTS_API_KEY");
+    expect(result.findings).toEqual([]);
   });
 
   test("destructuring the key out of process.env is a finding", () => {
@@ -242,7 +245,7 @@ describe("the rule does not fire on legitimate code", () => {
 describe("waivers are explicit, justified, and reported", () => {
   test("a waiver with a real reason clears the finding and is recorded", () => {
     const result = scan({
-      "src/api/index.ts": [
+      "src/lib/legacy-resolver.ts": [
         "// hasna-credential-seam-waiver: server-side validation of the inbound key, not a client resolve",
         "const expected = process.env.HASNA_ACCOUNTS_API_KEY;",
       ].join("\n"),
@@ -254,7 +257,7 @@ describe("waivers are explicit, justified, and reported", () => {
 
   test("a same-line waiver also applies", () => {
     const result = scan({
-      "src/api/index.ts":
+      "src/lib/legacy-resolver.ts":
         "const expected = process.env.HASNA_ACCOUNTS_API_KEY; // hasna-credential-seam-waiver: inbound key validation for the serve bin\n",
     });
     expect(result.findings).toEqual([]);
@@ -263,7 +266,7 @@ describe("waivers are explicit, justified, and reported", () => {
 
   test("a waiver that justifies nothing is rejected rather than honoured", () => {
     const result = scan({
-      "src/api/index.ts": [
+      "src/lib/legacy-resolver.ts": [
         "// hasna-credential-seam-waiver: TODO",
         "const expected = process.env.HASNA_ACCOUNTS_API_KEY;",
       ].join("\n"),
@@ -275,7 +278,7 @@ describe("waivers are explicit, justified, and reported", () => {
 
   test("a waiver two lines above does NOT apply to the read", () => {
     const result = scan({
-      "src/api/index.ts": [
+      "src/lib/legacy-resolver.ts": [
         "// hasna-credential-seam-waiver: this justification is nowhere near the read it claims to cover",
         "const unrelated = 1;",
         "const expected = process.env.HASNA_ACCOUNTS_API_KEY;",

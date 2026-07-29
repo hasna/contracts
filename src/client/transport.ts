@@ -408,6 +408,10 @@ export function resolveClientTransport(
   let deprecatedAlias: string | null = null;
   let modeSource = "default";
   const warnings: string[] = [];
+  // Resolved at most once per call and reused: the chain has side effects (the
+  // once-per-app deprecation) and reads the disk, so running it twice would both
+  // double the work and risk the two runs disagreeing.
+  let credential: ResolvedCredential | null | undefined;
 
   if (modeHit) {
     const normalized = normalizeStorageMode(modeHit.value);
@@ -419,14 +423,29 @@ export function resolveClientTransport(
         `Deprecated mode '${deprecatedAlias}' from ${modeHit.key} is treated as 'cloud'. Prefer ${keys.modeKeys[0]}=cloud.`,
       );
     }
-  } else if (urlHit && keyHit) {
+  } else if (urlHit) {
     // Flip signal: the fleet env-flip writes EXACTLY HASNA_<APP>_API_URL +
     // HASNA_<APP>_API_KEY per app and NO explicit STORAGE_MODE (see machines
     // FLEET-FLIP.md). Their joint presence IS the self_hosted intent, so infer
     // `cloud`. Revert removes both vars, so the client falls back to local. Without
     // this, a flipped client with only url+key silently kept reading its local store.
-    mode = "cloud";
-    modeSource = `${urlHit.key}+${keyHit.key}`;
+    //
+    // THE CREDENTIAL HALF OF THAT SIGNAL COMES FROM THE CHAIN, not from the env
+    // var alone. Reading it only from `HASNA_<APP>_API_KEY` meant the state this
+    // change TELLS operators to migrate to — endpoint in the environment,
+    // credential on disk — resolved to `local` with `misconfigured: false` and no
+    // warning, silently serving the local dataset while a perfectly good
+    // credential sat on disk. That is the false green this module forbids, and the
+    // deprecation notice was walking people straight into it.
+    //
+    // The URL is still required and still env-only, so this cannot flip a client
+    // that has no endpoint configured: a credential file alone never routes
+    // anything to the network.
+    credential = resolveCredential(name, env, options.credentials);
+    if (credential) {
+      mode = "cloud";
+      modeSource = `${urlHit.key}+${credential.source}`;
+    }
   }
 
   // Local mode: never route to the network, regardless of URL/key presence.
@@ -453,7 +472,7 @@ export function resolveClientTransport(
   // CredentialResolutionError from a deliberate tier propagates on purpose —
   // an override or profile that cannot be honoured must fail loudly rather
   // than authenticate as a different principal.
-  const credential = resolveCredential(name, env, options.credentials);
+  if (credential === undefined) credential = resolveCredential(name, env, options.credentials);
 
   // Cloud mode but no credential from any tier: fall back to local, loudly.
   if (!credential) {
@@ -582,6 +601,7 @@ function currentCredential(apiKey: string | CredentialProvider): ResolvedCredent
     source: "explicit apiKey option",
     deliberate: true,
     deprecated: false,
+    diskCandidates: [],
     warning: null,
   };
 }
@@ -604,12 +624,22 @@ function authFailureGuidance(credential: ResolvedCredential): string {
     );
   }
   if (credential.deprecated) {
+    // Reaching the legacy tier PROVES the disk had no credential — tier 3 runs
+    // first. So the advice must be "write the key to disk", never "unset this
+    // variable": unsetting it with nothing on disk leaves the client with no
+    // credential at all, which drops it back to its local store and prints
+    // healthy output from the wrong dataset.
+    const target = credential.diskCandidates[0];
+    const remedy = target
+      ? `Write the CURRENT key to ${target} — that file is re-read on every call, so rotations take ` +
+        `effect immediately and in every shell. Do not simply unset ${credential.source}: nothing was ` +
+        `found on disk, so that would leave this client with no credential at all.`
+      : `This environment has no HOME, so no credential file could be consulted; the disk tier is ` +
+        `unavailable here and there is nothing to fall back to. Set HOME, or supply the key explicitly.`;
     return (
       `${origin}, a variable in this process's environment — which is a snapshot taken when the process ` +
       `started. A STALE SHELL is the most common cause of this error: this shell exported the key before ` +
-      `it was rotated, and will keep sending the old one until it exits. The credential on disk is re-read ` +
-      `on every call, so unsetting ${credential.source} in this shell (or starting a new shell) picks up ` +
-      `the current key immediately.`
+      `it was rotated, and will keep sending the old one until it exits. ${remedy}`
     );
   }
   return (

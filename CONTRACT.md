@@ -116,9 +116,19 @@ Rules:
 - **Tier 3 is re-read per request**, not cached and not resolved once when the
   client is built — a cache is the same snapshot defect at a smaller timescale.
   This is what makes a rotation heal in any shell, however old.
-- **The credential never decides the mode.** Section 3's mode resolution is
-  unchanged and stays env-only, so a credential file on disk can never flip a
-  client that reads its local store into reading the network.
+- **A credential alone never routes anything to the network.** An explicit
+  `HASNA_<NAME>_STORAGE_MODE` always wins, and it is still read only from the
+  environment. Where no mode is set, the legacy flip signal (`API_URL` +
+  `API_KEY` both present) still applies, but its credential half is satisfied by
+  **any** tier of the chain, not only by the legacy env var. The **API URL is
+  still required and still env-only**, so a credential file on disk cannot flip
+  a client that has no endpoint configured.
+
+  This matters because the steady state this section tells operators to migrate
+  to — endpoint in the environment, credential on disk — would otherwise resolve
+  to `local` with `misconfigured: false` and no warning, silently serving the
+  local dataset while a valid credential sat on disk. That is the false green
+  this section forbids, so the inference has to see the whole chain.
 - **`HOME` comes from the same env object** the caller passes. An env with no
   `HOME` performs no disk read, which is what keeps the behaviour hermetic and
   test suites independent of the machine running them.
@@ -126,10 +136,19 @@ Rules:
   legitimate feature, but they MUST be a deliberate mode chosen *before* the
   request. A `401`-to-local fallback prints healthy output while authentication
   is broken — a false green, strictly worse than the loud failure.
+- **A credential source that cannot produce a usable key fails loudly.** A key
+  carrying bytes that are illegal in an HTTP header is rejected by name, never
+  forwarded — otherwise `fetch` throws a `TypeError` that embeds the whole
+  header value, i.e. the plaintext key, into logs and stack traces. Credential
+  files are read only when they are regular files under a size cap, so a FIFO
+  or a character device planted in the credential directory cannot wedge a
+  per-request read.
 - Errors name **which source** supplied the rejected key, and say what to do
-  about it. A key value is never logged, embedded, or serialized; where two
-  sources must be compared, they are compared by length and a truncated
-  SHA-256, never by any fragment of the secret.
+  about it. A key value is never logged, embedded, or serialized — the field is
+  non-enumerable, so serializing a resolution omits it rather than relying on
+  every caller to remember. Where two sources disagree, the report names the
+  **paths** only: a digest of a secret is still a derived encoding of it, and a
+  truncated one is a confirmation oracle.
 
 ---
 
@@ -510,17 +529,39 @@ Checks:
    names it polices rather than approximating them, so it cannot drift from the
    seam.
 
+   It also fails a repo that **defines** `resolveClientTransport`,
+   `createClientTransport`, `createHasnaHttpTransport`, or
+   `resolveStorageClient` itself — a vendored fork of the seam. A fork builds
+   its key names by template and reads them through a computed loop, so no
+   literal name ever appears and a name-based rule sees nothing: measured, one
+   repo scored zero findings while shipping a complete copy of the pre-fix
+   resolver on its live storage path. Without this clause the cheapest way to
+   turn the gate green is to fork the transport, and the gate would reward the
+   exact thing it exists to prevent. Importing and calling those functions is
+   the compliant path and never matches.
+
    It is deliberately narrow, because a mandatory gate that fires on compliant
    code gets switched off — and then it protects nothing, the same end state as
    a check that cannot fail. It matches **read expressions only**: writing the
    variable, naming it in an error message, listing it in a redaction
    allowlist, or forwarding it to a child process are all compliant. Comments
-   and JSDoc are masked. Tests, `dist/`, and shipped `bin/` bundles are
-   excluded. `HASNA_<APP>_SERVE_API_KEY` and `HASNA_<APP>_BOOTSTRAP_API_KEY`
-   are a server reading the key it expects *inbound*, and third-party keys
-   wearing the prefix (`HASNA_BRAIN_ANTHROPIC_API_KEY`) are not ours to
-   resolve; both fall outside the single-segment client-flip grammar and are
-   structurally excluded rather than allowlisted.
+   and JSDoc are masked. Tests, `scripts/`, `dist/`, and shipped `bin/` bundles
+   are excluded. Three exclusions are worth stating explicitly, because each was
+   measured against the fleet rather than guessed:
+
+   - **Only the `HASNA_`-prefixed name is policed.** The bare `<APP>_API_KEY`
+     alias has no namespace, so it collides with unrelated third-party
+     credentials that share the app's name — one repo's `RECORDINGS_API_KEY`
+     holds an OpenAI key. A real bypass through the alias almost always reads
+     the canonical name on the same line, so it is still caught.
+   - **Inbound surfaces (`src/server/`, `src/http/`, `src/api/`, `src/mcp/`)
+     are excluded.** A server reads its own key to *compare* against a caller's,
+     which is the opposite of resolving one to send. The name is identical, so
+     only location can separate them.
+   - `HASNA_<APP>_SERVE_API_KEY` and `HASNA_<APP>_BOOTSTRAP_API_KEY`, and
+     third-party keys wearing the prefix (`HASNA_BRAIN_ANTHROPIC_API_KEY`),
+     fall outside the single-segment client-flip grammar and are excluded
+     structurally rather than by an allowlist anyone has to maintain.
 
    The pressure valve is an explicit waiver comment on the read or the line
    above it:

@@ -81,7 +81,32 @@ const SKIP_DIRS = new Set([
   "__tests__",
   "examples",
   "docs",
+  // Dev and proof scripts are not shipped behaviour, for the same reason tests
+  // are not. Measured: `open-identities/scripts/proof-roundtrip.ts` was the
+  // only finding in that repo and it is a round-trip proof, not a client.
+  "scripts",
 ]);
+
+/**
+ * Directories that serve INBOUND requests.
+ *
+ * A server reading its own `HASNA_<APP>_API_KEY` is reading the key it EXPECTS
+ * a caller to present, then comparing the two — the opposite of resolving a
+ * credential to send. The name is identical, so no grammar can separate them;
+ * only location can.
+ *
+ * Measured across the fleet, every one of these is a constant-time comparison
+ * against an inbound header: `iapp-factory/src/api/index.ts` (`secureCompare`),
+ * `iapp-sandboxes/src/http/auth.ts` (`safeEqual`), `open-todos/src/server/serve.ts`
+ * (`safeEqualStrings`), `open-machines/src/mcp/http.ts`. Flagging them made the
+ * gate red on 7 of 24 repos on day one, and a gate that is red on compliant code
+ * gets switched off.
+ *
+ * The trade is deliberate: a genuine client bypass hidden under a server
+ * directory is missed. That is the safer direction — a missed finding leaves
+ * the status quo, while a false finding removes the gate entirely.
+ */
+const INBOUND_SURFACE_DIRS = new Set(["server", "http", "api", "mcp"]);
 
 const SOURCE_EXTENSIONS = /\.(?:[cm]?ts|[cm]?js|tsx|jsx)$/i;
 const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/i;
@@ -114,44 +139,80 @@ const FOREIGN_CLIENT_KEY = /^HASNA_[A-Z0-9]+_API_KEY$/;
  * comment — masking from there to end of line would hide real code behind it.
  */
 function maskComments(text: string): string {
-  const out = text.split("");
-  let index = 0;
-  let quote: string | null = null;
-  while (index < text.length) {
-    const char = text[index]!;
-    const next = text[index + 1];
-    if (quote) {
-      if (char === "\\") {
-        index += 2;
-        continue;
-      }
-      if (char === quote) quote = null;
-      index += 1;
-      continue;
-    }
-    if (char === '"' || char === "'" || char === "`") {
-      quote = char;
-      index += 1;
-      continue;
-    }
-    if (char === "/" && next === "/") {
-      while (index < text.length && text[index] !== "\n") {
+  const masked: string[] = [];
+  let inBlockComment = false;
+
+  for (const line of text.split("\n")) {
+    const out = line.split("");
+    // Quote state is reset at every line ON PURPOSE.
+    //
+    // An earlier version tracked quotes across the whole file and drifted: one
+    // apostrophe whose parity it got wrong (`service's` inside a template
+    // literal) left every following line unmasked, and the rule then reported a
+    // key name mentioned in a COMMENT ninety lines later — on its own source.
+    // A gate that fires on compliant code gets switched off, so the lexer must
+    // fail LOCALLY. Resetting per line bounds any mistake to that one line; the
+    // only thing given up is a string literal spanning lines, which cannot
+    // contain a single-line env-read expression anyway.
+    let quote: string | null = null;
+    let index = 0;
+
+    while (index < line.length) {
+      const char = line[index]!;
+      const next = line[index + 1];
+
+      if (inBlockComment) {
+        if (char === "*" && next === "/") {
+          out[index] = " ";
+          out[index + 1] = " ";
+          index += 2;
+          inBlockComment = false;
+          continue;
+        }
         out[index] = " ";
         index += 1;
+        continue;
       }
-      continue;
-    }
-    if (char === "/" && next === "*") {
-      while (index < text.length && !(text[index] === "*" && text[index + 1] === "/")) {
-        if (text[index] !== "\n") out[index] = " ";
+
+      if (quote) {
+        if (char === "\\") {
+          index += 2;
+          continue;
+        }
+        if (char === quote) quote = null;
         index += 1;
+        continue;
       }
-      for (let k = 0; k < 2 && index < text.length; k += 1, index += 1) out[index] = " ";
-      continue;
+
+      if (char === '"' || char === "'" || char === "`") {
+        quote = char;
+        index += 1;
+        continue;
+      }
+
+      if (char === "/" && next === "/") {
+        while (index < line.length) {
+          out[index] = " ";
+          index += 1;
+        }
+        continue;
+      }
+
+      if (char === "/" && next === "*") {
+        out[index] = " ";
+        out[index + 1] = " ";
+        index += 2;
+        inBlockComment = true;
+        continue;
+      }
+
+      index += 1;
     }
-    index += 1;
+
+    masked.push(out.join(""));
   }
-  return out.join("");
+
+  return masked.join("\n");
 }
 
 function escapeForRegExp(value: string): string {
@@ -182,6 +243,33 @@ function readPatterns(variable: string): RegExp[] {
 
 /** A computed client-flip read: ``env[`HASNA_${token}_API_KEY`]``. */
 const COMPUTED_CLIENT_KEY_READ = /[\w$)\]]\s*\[\s*`HASNA_\$\{[^`]*\}_API_KEY`\s*\]/g;
+
+/**
+ * A local DEFINITION of one of the seam's entry points — i.e. a vendored fork.
+ *
+ * Matches a declaration, not a call: `function resolveClientTransport(`,
+ * `export function createHasnaHttpTransport(`, `const createClientTransport = (`.
+ * Importing and calling these is the compliant path and must not match.
+ */
+const SEAM_DEFINITION =
+  /(?:^|\n)\s*(?:export\s+)?(?:async\s+)?(?:function\s+|const\s+|let\s+|var\s+)(resolveClientTransport|createClientTransport|createHasnaHttpTransport|resolveStorageClient)\s*(?:\(|=\s*(?:async\s*)?(?:\(|function))/g;
+
+function lineNumberAt(text: string, index: number): number {
+  let line = 1;
+  for (let i = 0; i < index && i < text.length; i += 1) {
+    if (text[i] === "\n") line += 1;
+  }
+  return line;
+}
+
+function packageName(repoRoot: string): string | null {
+  try {
+    const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as { name?: unknown };
+    return typeof pkg.name === "string" ? pkg.name : null;
+  } catch {
+    return null;
+  }
+}
 
 function collectSourceFiles(root: string): string[] {
   const files: string[] = [];
@@ -220,12 +308,28 @@ function collectSourceFiles(root: string): string[] {
  * your own does.
  */
 export function scanCredentialSeam(repoRoot: string, options: CredentialSeamScanOptions): CredentialSeamScan {
-  const ownKeys = clientTransportEnvKeys(options.appName).apiKeyKeys;
+  // ONLY the `HASNA_`-prefixed name is policed; the bare `<APP>_API_KEY` alias
+  // is not.
+  //
+  // The alias has no namespace, so it collides with unrelated third-party
+  // credentials that happen to share the app's name — `open-recordings` reads
+  // `RECORDINGS_API_KEY` and assigns it to `config.openai_api_key`, which is an
+  // OpenAI key and none of this rule's business. There is no structure in the
+  // bare form to tell the two apart. The canonical name is what the fleet
+  // actually uses, and a real bypass through the alias almost always reads the
+  // canonical name on the same line (`env.HASNA_X_API_KEY || env.X_API_KEY`),
+  // so it is still caught.
+  const ownKeys = clientTransportEnvKeys(options.appName).apiKeyKeys.filter((key) =>
+    key.startsWith("HASNA_"),
+  );
   const ownKeySet = new Set(ownKeys);
   const findings: CredentialSeamFinding[] = [];
   const waivers: CredentialSeamWaiver[] = [];
   const invalidWaivers: CredentialSeamWaiver[] = [];
   const files = collectSourceFiles(repoRoot);
+  // The package that DEFINES the seam is naturally the one package allowed to
+  // define it. Read from package.json rather than an allowlist of paths.
+  const isOwnPackage = packageName(repoRoot) === "@hasna/contracts";
 
   for (const file of files) {
     let text: string;
@@ -234,9 +338,36 @@ export function scanCredentialSeam(repoRoot: string, options: CredentialSeamScan
     } catch {
       continue;
     }
-    if (!text.includes("API_KEY")) continue;
 
     const path = relative(repoRoot, file).replaceAll("\\", "/");
+
+    // A vendored copy of the seam is the LOUDEST possible bypass, and it is
+    // invisible to a rule that looks for literal key names: a fork builds its
+    // names by template (`HASNA_${token}_API_KEY`) and reads them through a
+    // computed loop, so no literal ever appears. Measured: `iapp-telephony`
+    // scored ZERO findings while shipping a complete copy of the pre-fix
+    // resolver on its live storage path. Left unchecked, the cheapest way to
+    // turn this gate green is to fork the transport — the gate would reward
+    // exactly the thing it exists to prevent.
+    if (!isOwnPackage) {
+      for (const match of text.matchAll(SEAM_DEFINITION)) {
+        findings.push({
+          path,
+          line: lineNumberAt(text, match.index ?? 0),
+          variable: match[1]!,
+          message:
+            `${match[1]} is DEFINED here — this is a vendored copy of the @hasna/contracts client seam, ` +
+            `not a use of it. A fork does not receive credential-resolution fixes, so it keeps resolving ` +
+            `keys from the process environment however many times the shared package is corrected. ` +
+            `Import it from @hasna/contracts/client instead.`,
+        });
+      }
+    }
+
+    if (!text.includes("API_KEY")) continue;
+    // A directory that serves inbound requests reads its own key to COMPARE
+    // against a caller's, which is the opposite of resolving one to send.
+    if (path.split("/").some((segment) => INBOUND_SURFACE_DIRS.has(segment))) continue;
     const rawLines = text.split(/\r?\n/);
     const maskedLines = maskComments(text).split(/\r?\n/);
 
