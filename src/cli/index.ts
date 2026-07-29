@@ -489,7 +489,6 @@ export function createContractsProgram() {
     .option("--signing-secret-env <name>", "Env var holding the HMAC signing secret (default HASNA_<APP>_API_SIGNING_KEY, then HASNA_API_SIGNING_KEY)")
     .option("--database-url-env <name>", "Env var holding the Postgres URL for the record store (default HASNA_<APP>_DATABASE_URL)")
     .option("--table <name>", "api-keys table name (default api_keys)")
-    .option("--store-backend <backend>", "Where to persist the hashed record: database (default), api, or auto (api when the app's cloud transport is configured, else database)")
     .option("--no-store", "Do not persist the hashed record (print secret + hash only)")
     .option("-j, --json", "Output JSON")
     .action(async (options: Record<string, unknown>) => {

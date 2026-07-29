@@ -439,28 +439,21 @@ contracts issue-key --app todos --bootstrap
 
 # Print secret + hash without persisting (e.g. offline signing):
 contracts issue-key --app todos --scopes 'todos:read' --no-store --json
-
-# Persist through the app's cloud API instead of Postgres:
-contracts issue-key --app todos --scopes 'todos:read' --store-backend api
 ```
 
-Signing secret is read from `HASNA_<APP>_API_SIGNING_KEY` (then `HASNA_API_SIGNING_KEY`).
+Signing secret is read from `HASNA_<APP>_API_SIGNING_KEY` (then `HASNA_API_SIGNING_KEY`);
+the record store uses `HASNA_<APP>_DATABASE_URL` (or `--database-url-env`).
 
-`--store-backend` selects where the hashed record lands and defaults to
-`database` (`HASNA_<APP>_DATABASE_URL`, or `--database-url-env`): ambient
-`HASNA_<APP>_API_URL` + `HASNA_<APP>_API_KEY` never silently reroute a record that
-used to go to Postgres. `--store-backend api` posts it to `/v1/api-keys` with an
-idempotency key (the plaintext token is never sent) and fails if the cloud
-transport is not configured. `--store-backend auto` picks the API when that
-transport resolves and the database otherwise, except when `--database-url-env`
-or `--table` pins it to the database.
+The hashed record always lands in Postgres. Client-transport configuration
+(`HASNA_<APP>_STORAGE_MODE`, `HASNA_<APP>_API_URL`, `HASNA_<APP>_API_KEY`) selects
+the transport for that app's *data* and neither diverts nor blocks this write:
+there is no `api-keys` operation in the operation manifest or in any app's served
+OpenAPI document, so `issue-key` ships no HTTP writer that would have to guess
+whether a record was really stored.
 
-If the environment asks for cloud but cannot serve it (e.g.
-`HASNA_<APP>_STORAGE_MODE=cloud` with no API key), `issue-key` refuses to persist
-rather than writing the record to the other datastore. Any persistence failure
-still prints the minted secret — it exists only in that process and cannot be
-reissued. Generate a signing secret with `openssl rand -hex 32`. Revoke with
-`store.revoke(kid)`.
+Any persistence failure still prints the minted secret — it exists only in that
+process and cannot be reissued. Generate a signing secret with
+`openssl rand -hex 32`. Revoke with `store.revoke(kid)`.
 
 Services that expose API, MCP, CLI-token, dashboard, worker, sync/export, or
 provider webhook surfaces must also follow the shared

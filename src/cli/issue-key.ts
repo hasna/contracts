@@ -1,54 +1,34 @@
 // `contracts issue-key` implementation.
 //
-// Mints a Hasna API key, persists ONLY the hashed record — to the app's Postgres
-// by default, or to its cloud `/v1` API when `--store-backend api|auto` selects
-// that transport — and prints the plaintext secret exactly once (that is the
-// command's purpose — it is a freshly generated secret, not the disclosure of an
-// at-rest credential). The secret exists only in this process, so every exit path
-// after minting prints it, including persistence failures.
+// Mints a Hasna API key, persists ONLY the hashed record to the app's Postgres,
+// and prints the plaintext secret exactly once (that is the command's purpose —
+// it is a freshly generated secret, not the disclosure of an at-rest credential).
+// The secret exists only in this process, so every exit path after minting prints
+// it, including persistence failures.
+//
+// PERSISTENCE IS POSTGRES-ONLY, DELIBERATELY. Writing the hashed record through an
+// app's cloud `/v1` API would need an `api-keys` operation that is declared in the
+// operation manifest, published in the served OpenAPI document, and implemented by
+// the app. None of that exists yet, so this command ships no client for it: an
+// HTTP writer aimed at an undeclared route cannot report honestly whether the
+// record was stored. For the same reason the client-transport env
+// (`HASNA_<APP>_STORAGE_MODE`, `HASNA_<APP>_API_URL`, `HASNA_<APP>_API_KEY`) is not
+// consulted here — it selects the transport for app data, not for this record, and
+// must never block or divert the database write.
 
 import { mintApiKey, type MintedApiKey } from "../auth/keys";
 import { normalizeTenantId } from "../auth/tenant";
 import { ApiKeyStore, type AuthQueryClient } from "../auth/store";
-import {
-  createClientTransport,
-  resolveClientTransport,
-  type ClientTransportResolution,
-  type HasnaHttpTransportOptions,
-} from "../client/transport";
-
-export const API_KEY_RECORD_RESOURCE = "api-keys";
-
-/** Where the hashed record is persisted. */
-export type IssueKeyStoreBackend = "api" | "database" | "auto";
-
-const STORE_BACKENDS: readonly IssueKeyStoreBackend[] = ["api", "database", "auto"];
-
-export interface IssueKeyRecordPayload {
-  kid: string;
-  app: string;
-  agent: string | null;
-  tid: string | null;
-  scopes: string[];
-  tokenHash: string;
-  issuedAt: string;
-  expiresAt: string | null;
-  createdBy: string;
-}
 
 type IssueKeyStore = Pick<ApiKeyStore, "ensureSchema" | "insertMinted">;
 type IssueKeyStoreHandle = { store: IssueKeyStore; close: () => Promise<void> };
 type IssueKeyConnectStore = (connectionString: string, table: string) => Promise<IssueKeyStoreHandle>;
-type IssueKeyTransportOverrides = Partial<
-  Pick<HasnaHttpTransportOptions, "fetchImpl" | "headers" | "timeoutMs" | "retry" | "sleepImpl">
->;
 
 export interface IssueKeyDeps {
   report: (options: { json?: boolean }, error: string, details?: Record<string, unknown>) => void;
   env?: NodeJS.ProcessEnv;
   now?: () => number;
   connectStore?: IssueKeyConnectStore;
-  transportOverrides?: IssueKeyTransportOverrides;
 }
 
 function envToken(app: string): string {
@@ -65,50 +45,12 @@ export function databaseUrlEnvName(app: string, override?: string): string {
   return override ?? `HASNA_${envToken(app)}_DATABASE_URL`;
 }
 
-/**
- * Resolve which persistence backend the operator asked for.
- *
- * The default is `database`. Ambient `HASNA_<APP>_API_URL` + `HASNA_<APP>_API_KEY`
- * — exactly what the fleet env-flip writes — must NOT silently redirect a record
- * that used to land in Postgres to an HTTP route the app may not serve. `api` and
- * `auto` opt into the transport; `auto` still defers to the database when the
- * caller supplied `--database-url-env`/`--table`, since those options are a
- * database request and mean nothing to the API backend.
- */
-export function resolveStoreBackend(
-  options: Record<string, unknown>,
-): { ok: true; backend: IssueKeyStoreBackend } | { ok: false; error: string } {
-  const raw = options.storeBackend;
-  const requested = raw === undefined ? "database" : String(raw).trim().toLowerCase();
-  if (!STORE_BACKENDS.includes(requested as IssueKeyStoreBackend)) {
-    return { ok: false, error: `--store-backend must be one of: ${STORE_BACKENDS.join(", ")} (got '${String(raw)}').` };
-  }
-  const backend = requested as IssueKeyStoreBackend;
-  const databaseOptionsGiven = options.databaseUrlEnv !== undefined || options.table !== undefined;
-  return { ok: true, backend: backend === "auto" && databaseOptionsGiven ? "database" : backend };
-}
-
 function parseScopesCsv(csv: unknown): string[] {
   if (typeof csv !== "string") return [];
   return csv
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-}
-
-export function issueKeyRecordPayload(minted: MintedApiKey, createdBy: string): IssueKeyRecordPayload {
-  const claims = minted.claims;
-  return {
-    kid: minted.kid,
-    app: claims.app,
-    agent: claims.agent ?? null,
-    tid: claims.tid ?? null,
-    scopes: [...claims.scopes],
-    tokenHash: minted.tokenHash,
-    issuedAt: new Date(claims.iat * 1000).toISOString(),
-    expiresAt: claims.exp === null ? null : new Date(claims.exp * 1000).toISOString(),
-    createdBy,
-  };
 }
 
 async function connectStore(connectionString: string, table: string): Promise<IssueKeyStoreHandle> {
@@ -131,31 +73,6 @@ async function connectStore(connectionString: string, table: string): Promise<Is
   return { store, close: () => pool.end() };
 }
 
-async function persistKeyRecordOverHttp(
-  app: string,
-  minted: MintedApiKey,
-  createdBy: string,
-  env: NodeJS.ProcessEnv,
-  overrides: IssueKeyTransportOverrides | undefined,
-  resolution: ClientTransportResolution,
-): Promise<boolean> {
-  if (resolution.transport !== "cloud-http") {
-    return false;
-  }
-
-  const wired = createClientTransport(app, env, overrides);
-  if (wired.transport !== "cloud-http") {
-    return false;
-  }
-
-  await wired.client.post(
-    `/${API_KEY_RECORD_RESOURCE}`,
-    issueKeyRecordPayload(minted, createdBy),
-    { idempotencyKey: minted.kid },
-  );
-  return true;
-}
-
 export async function runIssueKey(options: Record<string, unknown>, deps: IssueKeyDeps): Promise<void> {
   const env = deps.env ?? process.env;
   const json = options.json === true;
@@ -164,13 +81,6 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
     deps.report({ json }, "Missing required option --app.", { code: "missing_app" });
     return;
   }
-
-  const backendChoice = resolveStoreBackend(options);
-  if (!backendChoice.ok) {
-    deps.report({ json }, backendChoice.error, { code: "bad_store_backend" });
-    return;
-  }
-  const backend = backendChoice.backend;
 
   const bootstrap = options.bootstrap === true;
   let scopes = parseScopesCsv(options.scopes);
@@ -242,7 +152,6 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
 
   const table = (options.table as string | undefined) ?? "api_keys";
   const dbEnvName = databaseUrlEnvName(app, options.databaseUrlEnv as string | undefined);
-  const appEnvToken = envToken(app);
   const expiresAt = minted.claims.exp === null ? null : new Date(minted.claims.exp * 1000).toISOString();
   const issuedAt = new Date(minted.claims.iat * 1000).toISOString();
 
@@ -280,87 +189,48 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
 
   /** Surface a persistence failure WITHOUT losing the already-minted secret. */
   const reportStoreFailure = (message: string, code: string, details: Record<string, unknown> = {}): void => {
-    deps.report({ json }, message, { code, ...details, stored: false, storeBackend: "none", ...keyMaterial });
+    deps.report({ json }, message, { code, ...details, stored: false, ...keyMaterial });
     if (!json) printKeyBlock("NOT STORED", message);
   };
 
   let stored = false;
-  let storeBackend: "none" | "api" | "database" = "none";
   if (options.store !== false) {
     const createdBy = agent ?? "issue-key";
-
-    // Resolve — never construct — the transport first, whatever the chosen
-    // backend. `misconfigured` means the operator asked for cloud with config
-    // that cannot serve it; createClientTransport() throws on exactly that state,
-    // so persisting anywhere while it holds would quietly write the record to a
-    // different datastore than the one that was requested.
-    const resolution = resolveClientTransport(app, env);
-    if (resolution.misconfigured) {
+    const connectionString = env[dbEnvName];
+    if (!connectionString) {
       reportStoreFailure(
-        resolution.warning ?? `Client for '${app}' is misconfigured for cloud mode.`,
-        "transport_misconfigured",
+        `No database URL found. Set ${dbEnvName}, or pass --no-store to skip persistence.`,
+        "missing_database_url",
+        { databaseUrlEnv: dbEnvName },
       );
       return;
     }
-
-    if (backend !== "database") {
-      try {
-        if (await persistKeyRecordOverHttp(app, minted, createdBy, env, deps.transportOverrides, resolution)) {
-          stored = true;
-          storeBackend = "api";
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        reportStoreFailure(`Could not persist key record through API: ${message}`, "store_failed");
-        return;
-      }
-      if (!stored && backend === "api") {
-        reportStoreFailure(
-          `--store-backend api needs the cloud transport. Set HASNA_${appEnvToken}_API_URL + HASNA_${appEnvToken}_API_KEY, or use --store-backend database.`,
-          "api_transport_unavailable",
-        );
-        return;
-      }
-    }
-
-    if (!stored) {
-      const connectionString = env[dbEnvName];
-      if (!connectionString) {
-        reportStoreFailure(
-          `No database URL found. Set ${dbEnvName}, or pass --store-backend api with HASNA_${appEnvToken}_API_URL + HASNA_${appEnvToken}_API_KEY, or pass --no-store to skip persistence.`,
-          "missing_database_url",
-          { databaseUrlEnv: dbEnvName },
-        );
-        return;
-      }
-      let handle: IssueKeyStoreHandle | undefined;
-      try {
-        const connect = deps.connectStore ?? connectStore;
-        handle = await connect(connectionString, table);
-        await handle.store.ensureSchema();
-        await handle.store.insertMinted(minted, createdBy);
-        stored = true;
-        storeBackend = "database";
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        reportStoreFailure(`Could not persist key record: ${message}`, "store_failed");
-        return;
-      } finally {
-        if (handle) {
-          try {
-            await handle.close();
-          } catch {
-            // ignore pool close failure
-          }
+    let handle: IssueKeyStoreHandle | undefined;
+    try {
+      const connect = deps.connectStore ?? connectStore;
+      handle = await connect(connectionString, table);
+      await handle.store.ensureSchema();
+      await handle.store.insertMinted(minted, createdBy);
+      stored = true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      reportStoreFailure(`Could not persist key record: ${message}`, "store_failed");
+      return;
+    } finally {
+      if (handle) {
+        try {
+          await handle.close();
+        } catch {
+          // ignore pool close failure
         }
       }
     }
   }
 
   if (json) {
-    console.log(JSON.stringify({ ok: true, ...keyMaterial, stored, storeBackend }, null, 2));
+    console.log(JSON.stringify({ ok: true, ...keyMaterial, stored }, null, 2));
     return;
   }
 
-  printKeyBlock(stored ? `stored (${storeBackend === "api" ? "api" : table})` : "not stored (--no-store)", null);
+  printKeyBlock(stored ? `stored (${table})` : "not stored (--no-store)", null);
 }
