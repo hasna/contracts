@@ -564,15 +564,24 @@ Checks:
    are excluded. Three exclusions are worth stating explicitly, because each was
    measured against the fleet rather than guessed:
 
-   - **Only the `HASNA_`-prefixed name is policed.** The bare `<APP>_API_KEY`
-     alias has no namespace, so it collides with unrelated third-party
-     credentials that share the app's name — one repo's `RECORDINGS_API_KEY`
-     holds an OpenAI key. A real bypass through the alias almost always reads
-     the canonical name on the same line, so it is still caught.
-   - **Inbound surfaces (`src/server/`, `src/http/`, `src/api/`, `src/mcp/`)
-     are excluded.** A server reads its own key to *compare* against a caller's,
-     which is the opposite of resolving one to send. The name is identical, so
-     only location can separate them.
+   - **Both of the app's OWN key names are policed** — `HASNA_<APP>_API_KEY`
+     and the bare `<APP>_API_KEY` alias — because the seam resolves both, so a
+     hand-read of either is the same defect. The name list is taken from
+     `clientTransportEnvKeys()` unfiltered; narrowing it here would reintroduce
+     exactly the drift that function is consulted to prevent. A third-party
+     credential that happens to wear an app's name — one repo's
+     `RECORDINGS_API_KEY` holds an OpenAI key — clears through a **waiver**,
+     which a reviewer reads in the report, rather than through the class going
+     unpoliced fleet-wide. Other services' bare aliases stay out of scope: a
+     foreign name is only recognised in the namespaced `HASNA_` form.
+   - **Top-level inbound surfaces (`src/server/`, `src/http/`, `src/api/`,
+     `src/mcp/`) are excluded**, including everything beneath them. A server
+     reads its own key to *compare* against a caller's, which is the opposite of
+     resolving one to send. The name is identical, so only location can separate
+     them — and the location must be TOP-LEVEL. Matching those directory names at
+     any depth silently exempted `src/client/api/…`, the most likely place for a
+     real client bypass to sit; every measured fleet case is directly under
+     `src/`. Widening this requires widening the rule and this clause together.
    - `HASNA_<APP>_SERVE_API_KEY` and `HASNA_<APP>_BOOTSTRAP_API_KEY`, and
      third-party keys wearing the prefix (`HASNA_BRAIN_ANTHROPIC_API_KEY`),
      fall outside the single-segment client-flip grammar and are excluded

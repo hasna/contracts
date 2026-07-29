@@ -72,6 +72,33 @@ built by exactly two constructors — `resolveCredential()` for the chain and th
 new exported `explicitCredential()` for a caller-supplied string — and both
 validate and seal. There is no third construction site.
 
+#### Fixed: `credential_seam_compliance` was quietly weakened below its own documentation
+
+Two exclusions had been widened past what CONTRACT.md describes, in the
+direction that lets a bypass through:
+
+- **`INBOUND_SURFACE_DIRS` matched at any depth.** CONTRACT.md documents
+  `src/server/`, `src/http/`, `src/api/`, `src/mcp/` — top-level directories —
+  but the implementation exempted any path containing one of those names as a
+  segment. `src/client/api/client.ts` was therefore silently exempt, which is
+  the single most likely place a real client bypass would sit. Matching is now
+  the documented top-level `src/<dir>/**` form. All four fleet files that
+  motivated the exclusion are directly under `src/`, so nothing measured is
+  given up.
+- **The bare `<APP>_API_KEY` alias had been dropped from policing.** The seam
+  resolves it, so a hand-read of it is the same defect; and the rule's claim to
+  soundness is that it asks `clientTransportEnvKeys()` for the names it polices
+  "rather than approximating them, so the rule and the seam cannot drift apart"
+  — filtering that answer reintroduced exactly that drift, on the app's own
+  canonical alias. The collision it dodged (a repo whose `RECORDINGS_API_KEY`
+  holds an OpenAI key) is now handled by the waiver this rule already ships and
+  echoes into the report, so one auditable line in one repo replaces a permanent
+  silent hole in every repo.
+
+`scripts/` staying in `SKIP_DIRS` is **kept**: it is not in the package's
+`files`, so it is not shipped behaviour, and it is excluded for the same reason
+tests already were. CONTRACT.md documents it.
+
 #### Fixed: CONTRACT.md §3a promised `console.log` safety the runtime did not honour
 
 Non-enumerability keeps the key out of `Object.keys`, spreads, and

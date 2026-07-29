@@ -57,13 +57,14 @@ describe("the rule fails a package that resolves a credential by hand", () => {
     expect(result.findings).toHaveLength(1);
   });
 
-  test("the unprefixed alias ALONE is deliberately not policed", () => {
-    // The bare `<APP>_API_KEY` alias has no namespace, so it collides with
-    // unrelated third-party credentials that share the app's name. Policing it
-    // made the gate red on compliant code. See the review regression suite for
-    // the measured case (`RECORDINGS_API_KEY` is an OpenAI key).
+  test("the unprefixed alias is a finding", () => {
+    // The seam resolves `<APP>_API_KEY` as well as `HASNA_<APP>_API_KEY`, so a
+    // hand-read of the alias is the same defect. A third-party key that happens
+    // to wear an app's name clears through a waiver, not through the whole class
+    // going unpoliced — see the review regression suite.
     const result = scan({ "src/store.ts": "const k = process.env.ACCOUNTS_API_KEY;\n" });
-    expect(result.findings).toEqual([]);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.variable).toBe("ACCOUNTS_API_KEY");
   });
 
   test("destructuring the key out of process.env is a finding", () => {

@@ -105,8 +105,28 @@ const SKIP_DIRS = new Set([
  * The trade is deliberate: a genuine client bypass hidden under a server
  * directory is missed. That is the safer direction — a missed finding leaves
  * the status quo, while a false finding removes the gate entirely.
+ *
+ * SCOPE: TOP-LEVEL ONLY, i.e. `src/<dir>/**`. CONTRACT.md documents exactly
+ * `src/server/`, `src/http/`, `src/api/`, and `src/mcp/`, and every one of the
+ * four measured fleet files above sits directly under `src/`. An earlier version
+ * matched the name at ANY depth, which silently exempted `src/client/api/...` —
+ * the single most likely place for a real client bypass to hide, and a
+ * disagreement between the documented rule and the implemented one in the
+ * direction that lets one through. Widening this again requires widening
+ * CONTRACT.md in the same change.
  */
 const INBOUND_SURFACE_DIRS = new Set(["server", "http", "api", "mcp"]);
+
+/**
+ * Is this repo-relative path inside a top-level inbound surface?
+ *
+ * The whole subtree beneath `src/<surface>/` counts — the constraint is on where
+ * the surface directory sits, not on how deeply files below it are organised.
+ */
+function isInboundSurfacePath(path: string): boolean {
+  const segments = path.split("/");
+  return segments.length > 2 && segments[0] === "src" && INBOUND_SURFACE_DIRS.has(segments[1]!);
+}
 
 const SOURCE_EXTENSIONS = /\.(?:[cm]?ts|[cm]?js|tsx|jsx)$/i;
 const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/i;
@@ -308,20 +328,27 @@ function collectSourceFiles(root: string): string[] {
  * your own does.
  */
 export function scanCredentialSeam(repoRoot: string, options: CredentialSeamScanOptions): CredentialSeamScan {
-  // ONLY the `HASNA_`-prefixed name is policed; the bare `<APP>_API_KEY` alias
-  // is not.
+  // BOTH of the app's own key names are policed — `HASNA_<APP>_API_KEY` and the
+  // bare `<APP>_API_KEY` alias — because the seam resolves both, so a hand-read
+  // of either is the defect this rule exists to catch.
   //
-  // The alias has no namespace, so it collides with unrelated third-party
-  // credentials that happen to share the app's name — `open-recordings` reads
-  // `RECORDINGS_API_KEY` and assigns it to `config.openai_api_key`, which is an
-  // OpenAI key and none of this rule's business. There is no structure in the
-  // bare form to tell the two apart. The canonical name is what the fleet
-  // actually uses, and a real bypass through the alias almost always reads the
-  // canonical name on the same line (`env.HASNA_X_API_KEY || env.X_API_KEY`),
-  // so it is still caught.
-  const ownKeys = clientTransportEnvKeys(options.appName).apiKeyKeys.filter((key) =>
-    key.startsWith("HASNA_"),
-  );
+  // This list is taken from `clientTransportEnvKeys()` UNFILTERED, and that is
+  // load-bearing rather than incidental: the rule's claim to soundness is that
+  // it asks the seam for the names it polices instead of approximating them, so
+  // it cannot drift from the seam. Filtering the answer down to the prefixed
+  // half reintroduces precisely that drift, and does so on the app's own
+  // canonical alias.
+  //
+  // The collision this narrowing was meant to dodge is real — `open-recordings`
+  // reads `RECORDINGS_API_KEY` into `config.openai_api_key`, which is an OpenAI
+  // key and none of this rule's business — but the remedy for a measured,
+  // nameable exception is the waiver comment this rule already ships and echoes
+  // into the conformance report, where a reviewer reads it. Dropping the class
+  // fleet-wide trades one auditable line in one repo for a permanent silent hole
+  // in every repo. Note that OTHER services' bare aliases stay out of scope:
+  // only the scanned app's own names come from here, and the candidate sweep
+  // below admits foreign names only in the namespaced `HASNA_` form.
+  const ownKeys = clientTransportEnvKeys(options.appName).apiKeyKeys;
   const ownKeySet = new Set(ownKeys);
   const findings: CredentialSeamFinding[] = [];
   const waivers: CredentialSeamWaiver[] = [];
@@ -367,7 +394,7 @@ export function scanCredentialSeam(repoRoot: string, options: CredentialSeamScan
     if (!text.includes("API_KEY")) continue;
     // A directory that serves inbound requests reads its own key to COMPARE
     // against a caller's, which is the opposite of resolving one to send.
-    if (path.split("/").some((segment) => INBOUND_SURFACE_DIRS.has(segment))) continue;
+    if (isInboundSurfacePath(path)) continue;
     const rawLines = text.split(/\r?\n/);
     const maskedLines = maskComments(text).split(/\r?\n/);
 

@@ -62,18 +62,13 @@ describe("a server reading the key it expects INBOUND is not a client bypass", (
   });
 });
 
-describe("the unprefixed alias is not policed, because it collides with third-party keys", () => {
-  test("a third-party key that happens to match the app name is not a finding", () => {
-    // Real case: open-recordings reads RECORDINGS_API_KEY and assigns it to
-    // config.openai_api_key. It is an OpenAI key, not a Hasna client credential.
-    const result = scan(
-      { "src/lib/config.ts": "const k = process.env.RECORDINGS_API_KEY;\n" },
-      "recordings",
-    );
-    expect(result.findings).toEqual([]);
-  });
+describe("a third-party key wearing an app's name is a waiver case, not an unpoliced class", () => {
+  // This block originally asserted that the bare alias was not policed at all.
+  // That exclusion was reverted: see "the app's own bare alias is policed"
+  // below for why, and for the waiver that covers the measured open-recordings
+  // case without opening a fleet-wide hole.
 
-  test("but the canonical name on the same line is still caught", () => {
+  test("the canonical name on the same line is caught", () => {
     const result = scan({
       "src/lib/cloud.ts": "const k = env.HASNA_ACCOUNTS_API_KEY || env.ACCOUNTS_API_KEY;\n",
     });
@@ -198,5 +193,111 @@ describe("a vendored fork of the seam is the loudest bypass, not a clean repo", 
       "src/generated/transport.ts": "export function resolveClientTransport(name, env) { return null; }\n",
     });
     expect(scanCredentialSeam(root, { appName: "telephony" }).findings).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P0 — the SECOND review round. Three gate-WEAKENING changes rode in under a
+// commit titled `test: pin the credential-seam review findings`, with no stated
+// finding behind them. The most serious made the documented exclusion and the
+// implemented one disagree in the UNSAFE direction.
+// ---------------------------------------------------------------------------
+
+describe("the inbound-surface exclusion is TOP-LEVEL, exactly as CONTRACT.md documents it", () => {
+  // CONTRACT.md says the excluded surfaces are `src/server/`, `src/http/`,
+  // `src/api/`, `src/mcp/` — top-level directories. The implementation matched
+  // ANY path segment at ANY depth, so `src/client/api/client.ts` was silently
+  // exempt. That is the single most likely place someone would actually put a
+  // client bypass, and doc and impl disagreed in the direction that lets one
+  // through.
+  //
+  // The four fleet files that motivated the exclusion are all top-level
+  // (`src/api/index.ts`, `src/http/auth.ts`, `src/server/serve.ts`,
+  // `src/mcp/http.ts`), so nothing measured is given up by narrowing it.
+
+  test("a nested api/ under a CLIENT directory is policed again", () => {
+    const result = scan({
+      "src/client/api/client.ts": "const key = process.env.HASNA_ACCOUNTS_API_KEY;\n",
+    });
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.path).toBe("src/client/api/client.ts");
+  });
+
+  test("a top-level src/api/ read stays excluded", () => {
+    const result = scan({
+      "src/api/client.ts": "const expected = process.env.HASNA_ACCOUNTS_API_KEY;\n",
+    });
+    expect(result.findings).toEqual([]);
+  });
+
+  for (const path of [
+    "src/lib/server/pool.ts",
+    "src/client/http/fetcher.ts",
+    "src/features/mcp/bridge.ts",
+  ]) {
+    test(`${path} is policed — the excluded segment is not at the top level`, () => {
+      const result = scan({ [path]: "const key = process.env.HASNA_ACCOUNTS_API_KEY;\n" });
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]!.path).toBe(path);
+    });
+  }
+
+  test("the exclusion covers the whole subtree under a top-level surface", () => {
+    // `src/server/**` is one inbound surface however deeply it is organised —
+    // the narrowing is about WHERE the surface directory sits, not how far the
+    // files beneath it nest.
+    const result = scan({
+      "src/server/routes/api/items.ts": "const expected = process.env.HASNA_ACCOUNTS_API_KEY;\n",
+    });
+    expect(result.findings).toEqual([]);
+  });
+
+  test("a directory merely NAMED like a surface outside src/ is policed", () => {
+    const result = scan({ "api/client.ts": "const key = process.env.HASNA_ACCOUNTS_API_KEY;\n" });
+    expect(result.findings).toHaveLength(1);
+  });
+});
+
+describe("the app's own bare alias is policed, because the seam honours it", () => {
+  // `clientTransportEnvKeys()` returns BOTH `HASNA_<APP>_API_KEY` and the bare
+  // `<APP>_API_KEY`, and the transport resolves both. This rule justifies its
+  // own soundness by asking that function for the names it polices "rather than
+  // approximating them, so the rule and the seam cannot drift apart" — so
+  // filtering its answer down to the prefixed half reintroduces exactly the
+  // drift that sentence forbids, on the app's own canonical alias.
+  //
+  // The collision with third-party keys that share an app's name is real, but
+  // the remedy for a measured exception is the waiver this rule already ships
+  // and echoes into the report, not a silent fleet-wide de-policing.
+
+  test("the unprefixed alias is a finding", () => {
+    const result = scan({ "src/store.ts": "const k = process.env.ACCOUNTS_API_KEY;\n" });
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.variable).toBe("ACCOUNTS_API_KEY");
+  });
+
+  test("a third-party key wearing the app's name clears with an auditable waiver", () => {
+    // The measured case: open-recordings reads RECORDINGS_API_KEY into
+    // config.openai_api_key. A waiver states that in the report where a
+    // reviewer sees it, instead of the class disappearing fleet-wide.
+    const result = scan(
+      {
+        "src/lib/config.ts": [
+          "// hasna-credential-seam-waiver: RECORDINGS_API_KEY holds an OpenAI key here, not a Hasna client credential",
+          "const k = process.env.RECORDINGS_API_KEY;",
+        ].join("\n"),
+      },
+      "recordings",
+    );
+    expect(result.findings).toEqual([]);
+    expect(result.waivers).toHaveLength(1);
+  });
+
+  test("another service's bare alias is still NOT policed", () => {
+    // Only the scanned app's own keys come from `clientTransportEnvKeys()`. A
+    // bare name belonging to some other service has no namespace to identify it
+    // by, so it stays out of scope — this narrowing is about the OWN app key.
+    const result = scan({ "src/lib/cloud.ts": "const k = process.env.TODOS_API_KEY;\n" });
+    expect(result.findings).toEqual([]);
   });
 });
