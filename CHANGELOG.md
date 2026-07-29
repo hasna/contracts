@@ -2,7 +2,7 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
-## Unreleased
+## [0.8.5] - 2026-07-29
 
 ### Credential resolution: env holds a pointer, disk holds the secret, resolved at call time
 
