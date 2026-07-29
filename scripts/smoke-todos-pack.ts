@@ -9,14 +9,64 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  installPackedConsumerFromArchive,
+  isEnvironmentRestrictedInstall,
+  PACK_INSTALL_DENY_ENV,
+  packInstallDenied,
+  packInstallFallbackAllowed,
+  packInstallUnavailableMessage,
+  packSmokeUnverifiedMessage,
+} from "../src/testing/packed-consumer.js";
+
+// This script is `smoke:todos-pack`, which `verify:release` runs, which is both
+// `prepack` and `prepublishOnly`. It is the last thing standing between a
+// tarball that no real consumer can install and npm, so it is fail-closed: the
+// only run that reports success is one where an isolated `bun install`
+// resolved the packed archive and its declared dependency ranges. When that
+// install cannot run, the run is UNVERIFIED and the script exits non-zero. The
+// archive-extraction diagnostic behind CONTRACTS_ALLOW_PACK_INSTALL_FALLBACK
+// resolves nothing, so it never reports success either.
+const ISOLATED_CONSUMER_LABEL = "isolated Todos consumer pack smoke";
+
+/** Exit code 2 marks a run that was refused rather than failed — see smoke-dist. */
+const UNVERIFIED_EXIT_CODE = 2;
+
+class PackSmokeRefusal extends Error {
+  constructor(readonly code: 1 | typeof UNVERIFIED_EXIT_CODE, message: string) {
+    super(message);
+    this.name = "PackSmokeRefusal";
+  }
+}
+
+function refuseUnavailableInstall(detail: string): PackSmokeRefusal {
+  return packInstallFallbackAllowed()
+    ? new PackSmokeRefusal(
+      UNVERIFIED_EXIT_CODE,
+      packSmokeUnverifiedMessage(ISOLATED_CONSUMER_LABEL, detail),
+    )
+    : new PackSmokeRefusal(1, packInstallUnavailableMessage(ISOLATED_CONSUMER_LABEL, detail));
+}
+
+// The deny seam is answered before anything is packed, so the refusal stays
+// observable on a runtime that has not built `dist` — which is exactly the
+// state `bun test` runs in during `verify:release`.
+if (packInstallDenied()) {
+  const denied = refuseUnavailableInstall(`isolated install denied by ${PACK_INSTALL_DENY_ENV}`);
+  console.error(denied.message);
+  process.exit(denied.code);
+}
 
 const root = join(import.meta.dir, "..");
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "contracts-todos-pack-"));
+const installCacheDirectory = join(temporaryDirectory, "bun-cache");
+const installXdgCacheDirectory = join(temporaryDirectory, ".cache");
 
 function text(value: Uint8Array): string {
   return new TextDecoder().decode(value);
 }
 
+let refusal: PackSmokeRefusal | undefined;
 try {
   const packed = Bun.spawnSync(
     ["bun", "pm", "pack", "--destination", temporaryDirectory, "--ignore-scripts"],
@@ -72,6 +122,8 @@ try {
 
   const consumerRoot = join(temporaryDirectory, "consumer");
   mkdirSync(consumerRoot);
+  mkdirSync(installCacheDirectory);
+  mkdirSync(installXdgCacheDirectory);
   writeFileSync(
     join(consumerRoot, "package.json"),
     JSON.stringify({
@@ -85,17 +137,56 @@ try {
     }, null, 2),
     "utf8",
   );
-  const install = Bun.spawnSync(["bun", "install", "--ignore-scripts"], {
+
+  const packageRoot = join(consumerRoot, "node_modules", "@hasna", "contracts");
+  const install = Bun.spawnSync(["bun", "install", "--production", "--ignore-scripts"], {
     cwd: consumerRoot,
+    env: {
+      ...process.env,
+      BUN_INSTALL_CACHE_DIR: installCacheDirectory,
+      BUN_TMPDIR: temporaryDirectory,
+      TEMP: temporaryDirectory,
+      TMPDIR: temporaryDirectory,
+      XDG_CACHE_HOME: installXdgCacheDirectory,
+    },
     stdout: "pipe",
     stderr: "pipe",
   });
+  let installedFromArchive = false;
   if (install.exitCode !== 0) {
-    throw new Error(`isolated consumer install failed\n${text(install.stdout)}\n${text(install.stderr)}`);
+    const installOutput = `${text(install.stdout)}\n${text(install.stderr)}`;
+    if (!isEnvironmentRestrictedInstall(installOutput)) {
+      throw new Error(`isolated consumer install failed\n${installOutput}`);
+    }
+    // The runtime, not the package, refused the install. That is still a
+    // refusal: without a real resolution this run cannot vouch for the
+    // package's dependency ranges, so it is UNVERIFIED either way — the opt-in
+    // only decides whether the remaining structural checks are worth running
+    // as a diagnostic first.
+    if (!packInstallFallbackAllowed()) {
+      throw refuseUnavailableInstall(installOutput.trim());
+    }
+    console.error(
+      `${ISOLATED_CONSUMER_LABEL}: isolated bun install unavailable; `
+      + "running the archive-extraction diagnostic (this run cannot pass).",
+    );
+    installPackedConsumerFromArchive({
+      archivePath,
+      consumerRoot,
+      repoRoot: root,
+      archiveEntries: entries,
+      runtimeDependencies: ["commander", "zod"],
+    });
+    installedFromArchive = true;
+    refusal = refuseUnavailableInstall(installOutput.trim());
   }
 
-  const packageRoot = join(consumerRoot, "node_modules", "@hasna", "contracts");
-  if (lstatSync(packageRoot).isSymbolicLink()) {
+  // On the `bun install` path the symlink check is the provenance proof — a
+  // resolver that linked back to this repo leaves node_modules/@hasna/contracts
+  // a link. On the diagnostic path that check is tautological, because the
+  // extraction creates that directory itself, so the tree is audited against
+  // the archive's own entry list inside installPackedConsumerFromArchive.
+  if (!installedFromArchive && lstatSync(packageRoot).isSymbolicLink()) {
     throw new Error("isolated consumer resolved @hasna/contracts through a symlink");
   }
   const packageJson = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
@@ -460,7 +551,25 @@ console.log("isolated Todos consumer passed");
   if (smoke.exitCode !== 0) {
     throw new Error(`isolated consumer import failed\n${text(smoke.stdout)}\n${text(smoke.stderr)}`);
   }
-  console.log(text(smoke.stdout).trim());
+  // stdout carries the success line and nothing else, so a caller that greps
+  // for it cannot be fooled by a diagnostic run: on the extraction path the
+  // consumer output goes to stderr and the refusal below decides the exit code.
+  if (refusal) {
+    console.error(text(smoke.stdout).trim());
+  } else {
+    console.log(text(smoke.stdout).trim());
+  }
+} catch (error) {
+  if (error instanceof PackSmokeRefusal) {
+    refusal = error;
+  } else {
+    throw error;
+  }
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });
+}
+
+if (refusal) {
+  console.error(refusal.message);
+  process.exit(refusal.code);
 }
