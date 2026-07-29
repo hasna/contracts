@@ -527,7 +527,14 @@ describe("published package hostname and provenance boundary", () => {
     const evidence = scanNoCloudTarget(packedArchivePath);
     expect(evidence.verdict).toBe("passed");
     expect(evidence.findings).toEqual([]);
-  }, 15_000);
+    // Measured 2026-07-29: 43s idle, 47-53s under load, on unmodified main as
+    // well as on this branch. A per-test budget passed here takes precedence
+    // over the suite-wide `bun test --timeout 120000` that package.json sets,
+    // so the old 15_000 made this the one test that escaped the default and
+    // failed `verify:release` on machine speed rather than on substance.
+    // 120_000 restores parity with that default; the gate still fails on any
+    // real no-cloud finding.
+  }, 120_000);
 
   test("raw-member scan catches an encoded duplicate that extraction overwrites", () => {
     const fixtureRoot = join(temporaryRoot, "duplicate-member-negative-control");
