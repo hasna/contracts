@@ -21,32 +21,67 @@
 //   API base URL (optional; `/v1` is appended automatically):
 //     HASNA_<NAME>_API_URL = https://<app>.your-deployment.example
 //     <NAME>_API_URL                                                  (alias)
-//   API key (bearer / x-api-key):
-//     HASNA_<NAME>_API_KEY -> value from the app-owned vault
-//     <NAME>_API_KEY                                                  (alias)
+//   API key (bearer / x-api-key) — resolved through the CREDENTIAL CHAIN, never
+//   from the environment alone. Env vars are POINTERS; the secret is re-read
+//   from disk on every call, so a rotation heals without cycling the shell. In
+//   precedence order (see `./credentials.ts`):
+//     an explicit `--api-key` / `--profile` argument
+//     HASNA_<NAME>_API_KEY_OVERRIDE, HASNA_PROFILE   (deliberate pointers)
+//     the credential file on disk    (see `credentialDiskSources()`)
+//     HASNA_<NAME>_API_KEY -> value from the app-owned vault (legacy, deprecated)
+//     <NAME>_API_KEY                                         (legacy alias)
 //
-// DECISION: transport is `http` IFF the resolved backend is `postgres` AND an
-// API key is present. The backend is `postgres` when either (a) an explicit
-// mode env resolves to postgres, OR (b) no mode env is set but BOTH the API URL
-// and API key are present — the fleet env-flip writes exactly those two vars
-// (no STORAGE_MODE), so their joint presence IS the server-data intent. When a
-// key is present but no explicit URL is set, the base URL falls back to
+// DECISION: transport is `http` IFF the resolved backend is `postgres` AND a
+// credential resolves. The backend is `postgres` when either (a) an explicit
+// mode env resolves to postgres, OR (b) no mode env is set but the API URL is
+// present AND the credential chain resolves a key from ANY tier — the fleet
+// env-flip writes an endpoint plus a credential and NO STORAGE_MODE, so that
+// pair IS the server-data intent. The credential half of the signal is satisfied
+// by a file ON DISK exactly as it is by an environment variable; the URL half is
+// env-only, so a credential file alone never routes anything to the network.
+// When a credential resolves but no explicit URL is set, the base URL falls back to
 // `https://<app>.<domain>` where `<domain>` comes from
 // `HASNA_FLEET_API_DOMAIN` (REQUIRED for a real deployment) or else a neutral,
 // non-resolving placeholder — this published package never bakes in a real
 // internal hostname. Missing, malformed, or app-prefix-incompatible
 // fleet-domain configuration resolves to that app-specific placeholder with
 // `misconfigured: true`; callers fail before constructing an authenticated
-// client. If the backend is `postgres` but the API key is MISSING, we do NOT
-// silently serve wrong local data — we return `sqlite` with a loud warning and
-// `misconfigured: true` so the caller can hard-fail instead of drifting.
+// client. If the backend is `postgres` but NO credential resolves from any tier,
+// we do NOT silently serve wrong local data — we return `sqlite` with a loud
+// warning and `misconfigured: true` so the caller can hard-fail instead of
+// drifting. A DELIBERATE tier that cannot be honoured (a revoked override, a
+// missing profile) THROWS instead: it never falls through to another identity.
 //
 // SAFETY: this module never returns, logs, or embeds the API key value. Callers
 // receive only presence flags and env-key names.
 
-import { normalizeStorageMode, envToken, type Env } from "../mode.js";
+import { normalizeStorageMode, type Env } from "../mode.js";
 import type { StorageMode } from "../schemas.js";
 import { isIP } from "node:net";
+import { clientTransportEnvKeys } from "./env-keys.js";
+import {
+  explicitCredential,
+  resolveCredential,
+  type CredentialChainOptions,
+  type CredentialTier,
+  type ResolvedCredential,
+} from "./credentials.js";
+
+// The credential chain is part of this module's public surface: callers wire
+// `--api-key` / `--profile` through it, and consumers migrating off a direct
+// `process.env` read need its types.
+import { credentialDiskSources } from "./credentials.js";
+
+export {
+  CredentialResolutionError,
+  credentialDiskSources,
+  explicitCredential,
+  resolveCredential,
+  __resetCredentialDeprecationNotices,
+} from "./credentials.js";
+export type { CredentialChainOptions, CredentialTier, ResolvedCredential } from "./credentials.js";
+export { clientTransportEnvKeys, credentialOverrideEnvKey, CREDENTIAL_PROFILE_ENV_KEY } from "./env-keys.js";
+export type { ClientTransportEnvKeys } from "./env-keys.js";
 
 const FLEET_API_DOMAIN_ENV_KEY = "HASNA_FLEET_API_DOMAIN";
 const NEUTRAL_FLEET_API_DOMAIN = "your-deployment.example";
@@ -175,30 +210,6 @@ export function fleetApiDomain(env: Env = process.env as Env): string {
 /** Default cloud host template. `<app>` is the app slug. */
 export function defaultCloudBaseUrl(name: string, env: Env = process.env as Env): string {
   return resolveDefaultCloudBaseUrl(name, env).baseUrl;
-}
-
-export interface ClientTransportEnvKeys {
-  /** Mode keys, in precedence order. */
-  modeKeys: string[];
-  /** API base-URL keys, in precedence order. */
-  apiUrlKeys: string[];
-  /** API-key keys, in precedence order. */
-  apiKeyKeys: string[];
-}
-
-/** Resolve the canonical client-flip env-key spec for an app. */
-export function clientTransportEnvKeys(name: string): ClientTransportEnvKeys {
-  const envSegment = envToken(name);
-  return {
-    modeKeys: [
-      `HASNA_${envSegment}_STORAGE_MODE`,
-      `HASNA_${envSegment}_MODE`,
-      `${envSegment}_STORAGE_MODE`,
-      `${envSegment}_MODE`,
-    ],
-    apiUrlKeys: [`HASNA_${envSegment}_API_URL`, `${envSegment}_API_URL`],
-    apiKeyKeys: [`HASNA_${envSegment}_API_KEY`, `${envSegment}_API_KEY`],
-  };
 }
 
 function firstEnv(
@@ -352,8 +363,21 @@ export interface ClientTransportResolution {
   apiUrlSource: string | null;
   /** Whether an API key is present (value never exposed). */
   apiKeyPresent: boolean;
-  /** Env key the API key came from, or null. */
+  /**
+   * WHERE the API key came from: an env key NAME or an absolute file path.
+   * Never the value.
+   *
+   * On the `sqlite` backend this reports only whether the legacy env key is
+   * set, since a client reading its own file resolves no credential at all. On
+   * the `postgres` backend it names the tier of the provider chain that
+   * actually supplied the key.
+   */
   apiKeySource: string | null;
+  /**
+   * Which tier of the credential chain supplied the key, or null on the
+   * `sqlite` backend / when no credential resolved. See {@link CredentialTier}.
+   */
+  apiKeyTier: CredentialTier | null;
   /**
    * True when the operator asked for server data but the config is incomplete.
    * Missing keys fall back to the sqlite file; missing or malformed
@@ -365,14 +389,36 @@ export interface ClientTransportResolution {
   warning: string | null;
 }
 
+export interface ResolveClientTransportOptions {
+  /** Tier-1 credential inputs, e.g. from `--api-key` / `--profile` flags. */
+  credentials?: CredentialChainOptions;
+}
+
 /**
  * Resolve how a client should reach an app's data given the environment.
  *
  * Precedence for the backend: the first present of `HASNA_<NAME>_STORAGE_MODE`,
- * `HASNA_<NAME>_MODE`, `<NAME>_STORAGE_MODE`, `<NAME>_MODE`, else `sqlite`
- * (or `postgres` when both the API URL and API key are present).
+ * `HASNA_<NAME>_MODE`, `<NAME>_STORAGE_MODE`, `<NAME>_MODE`, else `sqlite` —
+ * or `postgres` when the API URL is set AND the credential chain resolves a key
+ * from any tier.
+ *
+ * THE CREDENTIAL CHAIN PARTICIPATES IN THE BACKEND DECISION. It runs BEFORE the
+ * backend is settled whenever a URL env is present and no explicit mode env is,
+ * because the chain's answer is the second half of the flip signal: a client
+ * whose endpoint is in the environment and whose key is on disk must resolve to
+ * `postgres` rather than silently read its sqlite file. What the chain cannot do
+ * is manufacture that signal on its own — the URL is still required and still
+ * env-only, so a credential file with no endpoint configured routes nothing to
+ * the network. Once `postgres` is settled that SAME resolution is reused rather
+ * than re-run, and it resolves at CALL TIME through {@link resolveCredential}:
+ * argument, then a deliberate override/profile pointer, then disk, then the
+ * deprecated legacy env var.
  */
-export function resolveClientTransport(name: string, env: Env = process.env): ClientTransportResolution {
+export function resolveClientTransport(
+  name: string,
+  env: Env = process.env,
+  options: ResolveClientTransportOptions = {},
+): ClientTransportResolution {
   const keys = clientTransportEnvKeys(name);
   const modeHit = firstEnv(env, keys.modeKeys);
   const urlHit = firstEnv(env, keys.apiUrlKeys, { preserveRaw: true });
@@ -381,22 +427,51 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
   let mode: StorageMode = "sqlite";
   let modeSource = "default";
   const warnings: string[] = [];
+  // Resolved at most once per call and reused: the chain has side effects (the
+  // once-per-app deprecation) and reads the disk, so running it twice would both
+  // double the work and risk the two runs disagreeing.
+  let credential: ResolvedCredential | null | undefined;
 
   if (modeHit) {
     mode = normalizeStorageMode(modeHit.value).mode;
     modeSource = modeHit.key;
-  } else if (urlHit && keyHit) {
+  } else if (urlHit) {
     // Flip signal: the fleet env-flip writes EXACTLY HASNA_<APP>_API_URL +
     // HASNA_<APP>_API_KEY per app and NO explicit STORAGE_MODE (see machines
-    // FLEET-FLIP.md). Their joint presence IS the server-data intent, so infer
-    // `postgres`. Revert removes both vars, so the client falls back to its
-    // sqlite file. Without this, a flipped client with only url+key silently
-    // kept reading its local store.
-    mode = "postgres";
-    modeSource = `${urlHit.key}+${keyHit.key}`;
+    // FLEET-FLIP.md). An endpoint plus a resolvable credential IS the
+    // server-data intent, so infer `postgres`. Revert removes both vars, so the
+    // client falls back to its sqlite file. Without this, a flipped client with
+    // only url+key silently kept reading its local store.
+    //
+    // THE CREDENTIAL HALF OF THAT SIGNAL COMES FROM THE CHAIN, not from
+    // `HASNA_<APP>_API_KEY` alone — so a credential on DISK satisfies it just as
+    // an environment variable does. Reading it only from the env var meant the
+    // state this module TELLS operators to migrate to — endpoint in the
+    // environment, credential on disk — resolved to `sqlite` with
+    // `misconfigured: false` and no warning, silently serving the local dataset
+    // while a perfectly good credential sat on disk. That is the false green this
+    // module forbids, and the deprecation notice was walking people straight into
+    // it.
+    //
+    // The URL is still required and still env-only, so this cannot flip a client
+    // that has no endpoint configured: a credential file alone never routes
+    // anything to the network.
+    credential = resolveCredential(name, env, options.credentials);
+    if (credential) {
+      mode = "postgres";
+      modeSource = `${urlHit.key}+${credential.source}`;
+    }
   }
 
   // sqlite backend: never route to the network, regardless of URL/key presence.
+  //
+  // The credential chain may ALREADY have run above — it is half of the flip
+  // signal whenever a URL is set with no explicit mode env — but reaching here
+  // means either that it produced nothing, or that an explicit mode env settled
+  // the backend as `sqlite` before the question was ever asked. Nothing further
+  // is resolved from here on: a client reading its own file authenticates to
+  // nothing, so resolving a secret would be pure side effect (including a
+  // spurious deprecation warning for an env var this process never uses).
   if (mode === "sqlite") {
     return {
       transport: "sqlite",
@@ -406,17 +481,27 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
       apiUrlSource: null,
       apiKeyPresent: Boolean(keyHit),
       apiKeySource: keyHit ? keyHit.key : null,
+      apiKeyTier: null,
       misconfigured: false,
       warning: warnings.length > 0 ? warnings.join(" ") : null,
     };
   }
 
-  // Server data (postgres) but no API key: a client never opens PostgreSQL
-  // directly, and without a key it cannot reach the server either — fall back
-  // to the sqlite file, but flag it loudly.
-  if (!keyHit) {
+  // postgres backend: resolve the credential through the chain, at call time. A
+  // CredentialResolutionError from a deliberate tier propagates on purpose —
+  // an override or profile that cannot be honoured must fail loudly rather
+  // than authenticate as a different principal.
+  if (credential === undefined) credential = resolveCredential(name, env, options.credentials);
+
+  // Server data (postgres) but no credential from any tier: a client never opens
+  // PostgreSQL directly, and without a key it cannot reach the server either —
+  // fall back to the sqlite file, but flag it loudly.
+  if (!credential) {
+    const diskHint = credentialDiskSourcesForMessage(name, env);
     warnings.push(
-      `${modeSource}=postgres but no API key is set (${keys.apiKeyKeys[0]}). A client reaches server data over HTTP only; refusing to route. Using the local sqlite store. Set ${keys.apiKeyKeys[0]} to enable the API client.`,
+      `${modeSource}=postgres but no API key could be resolved for '${name}'. A client reaches server data ` +
+        `over HTTP only; refusing to route. Using the local sqlite store. ` +
+        `Looked for a credential file at ${diskHint}, then for ${keys.apiKeyKeys[0]} in the environment.`,
     );
     return {
       transport: "sqlite",
@@ -426,10 +511,12 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
       apiUrlSource: null,
       apiKeyPresent: false,
       apiKeySource: null,
+      apiKeyTier: null,
       misconfigured: true,
       warning: warnings.join(" "),
     };
   }
+  if (credential.warning) warnings.push(credential.warning);
 
   let defaultBaseUrl: DefaultCloudBaseUrlResolution | null = null;
   let apiUrlSource: string =
@@ -455,7 +542,8 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
       baseUrl: null,
       apiUrlSource: null,
       apiKeyPresent: true,
-      apiKeySource: keyHit.key,
+      apiKeySource: credential.source,
+      apiKeyTier: credential.tier,
       misconfigured: true,
       warning: warnings.join(" "),
     };
@@ -470,10 +558,17 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     baseUrl,
     apiUrlSource,
     apiKeyPresent: true,
-    apiKeySource: keyHit.key,
+    apiKeySource: credential.source,
+    apiKeyTier: credential.tier,
     misconfigured: defaultBaseUrl?.misconfigured ?? false,
     warning: warnings.length > 0 ? warnings.join(" ") : null,
   };
+}
+
+/** Render the disk candidates for a diagnostic, without touching their contents. */
+function credentialDiskSourcesForMessage(name: string, env: Env): string {
+  const paths = credentialDiskSources(name, env);
+  return paths.length > 0 ? paths.join(" or ") : "<no HOME set in this environment, so no credential file was consulted>";
 }
 
 /** Thrown when a cloud HTTP request returns a non-2xx status, including redirects. */
@@ -482,14 +577,90 @@ export class HasnaHttpError extends Error {
   readonly method: string;
   readonly path: string;
   readonly body: unknown;
-  constructor(method: string, path: string, status: number, body: unknown) {
-    super(`Hasna cloud request failed: ${method} ${path} -> ${status}`);
+  /** WHICH source supplied the rejected key (an env key name or a file path). Never a value. */
+  readonly credentialSource: string | null;
+  /** Which tier of the provider chain supplied it. */
+  readonly credentialTier: CredentialTier | null;
+  constructor(
+    method: string,
+    path: string,
+    status: number,
+    body: unknown,
+    credential?: { source: string; tier: CredentialTier; guidance: string } | null,
+  ) {
+    // The base message is byte-stable when there is no credential context, so
+    // callers matching on it keep working; guidance is strictly additive.
+    const guidance = credential ? `. ${credential.guidance}` : "";
+    super(`Hasna cloud request failed: ${method} ${path} -> ${status}${guidance}`);
     this.name = "HasnaHttpError";
     this.status = status;
     this.method = method;
     this.path = path;
     this.body = body;
+    this.credentialSource = credential?.source ?? null;
+    this.credentialTier = credential?.tier ?? null;
   }
+}
+
+/**
+ * A credential resolved fresh for one request.
+ *
+ * The transport takes a PROVIDER rather than a string so that a long-lived
+ * process — an MCP server, a daemon — picks up a key rotation without being
+ * rebuilt. Resolving once when the client is constructed would just move the
+ * stale snapshot from process start to client construction.
+ */
+export type CredentialProvider = () => ResolvedCredential;
+
+function currentCredential(name: string, apiKey: string | CredentialProvider): ResolvedCredential {
+  if (typeof apiKey === "function") return apiKey();
+  // A bare string goes through the SAME constructor as a resolved one. Building
+  // it as an object literal here is what let a key with a CR in it reach `fetch`,
+  // whose TypeError quotes the whole header value and so leaks the plaintext key.
+  return explicitCredential(name, apiKey);
+}
+
+/**
+ * What a human should do about a 401/403, given where the key came from.
+ *
+ * The opaque "API key has been revoked" this replaces cost an engineer an hour:
+ * it named neither the source nor the fix, and the most likely cause — a shell
+ * older than the last rotation — is invisible from inside that shell.
+ */
+function authFailureGuidance(credential: ResolvedCredential): string {
+  const origin = `The API key for this request came from ${credential.source}`;
+  if (credential.deliberate) {
+    return (
+      `${origin} — a credential you selected deliberately. It was NOT substituted with any other key: ` +
+      `falling back here would authenticate as a different principal than the one you named, which is ` +
+      `exactly the failure an override exists to prevent. Rotate that key, or unset the override to use ` +
+      `the credential on disk.`
+    );
+  }
+  if (credential.deprecated) {
+    // Reaching the legacy tier PROVES the disk had no credential — tier 3 runs
+    // first. So the advice must be "write the key to disk", never "unset this
+    // variable": unsetting it with nothing on disk leaves the client with no
+    // credential at all, which drops it back to its local store and prints
+    // healthy output from the wrong dataset.
+    const target = credential.diskCandidates[0];
+    const remedy = target
+      ? `Write the CURRENT key to ${target} — that file is re-read on every call, so rotations take ` +
+        `effect immediately and in every shell. Do not simply unset ${credential.source}: nothing was ` +
+        `found on disk, so that would leave this client with no credential at all.`
+      : `This environment has no HOME, so no credential file could be consulted; the disk tier is ` +
+        `unavailable here and there is nothing to fall back to. Set HOME, or supply the key explicitly.`;
+    return (
+      `${origin}, a variable in this process's environment — which is a snapshot taken when the process ` +
+      `started. A STALE SHELL is the most common cause of this error: this shell exported the key before ` +
+      `it was rotated, and will keep sending the old one until it exits. ${remedy}`
+    );
+  }
+  return (
+    `${origin}, which was re-read from disk on this very call — so a stale shell is NOT the cause here. ` +
+    `The stored credential is genuinely being rejected: rotate it, or re-run the fleet key distribution ` +
+    `so this machine gets the current key.`
+  );
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -562,8 +733,14 @@ export interface HasnaHttpTransportOptions {
   name: string;
   /** `<origin>/v1` base. Usually from `resolveClientTransport().baseUrl`. */
   baseUrl: string;
-  /** The API key (secret). Sent as both `x-api-key` and `Authorization: Bearer`. */
-  apiKey: string;
+  /**
+   * The API key (secret), or a provider that resolves one per request.
+   *
+   * Pass a provider (see {@link CredentialProvider}) so rotation heals inside a
+   * long-lived process. A plain string is still accepted and is treated as a
+   * deliberate, explicit credential.
+   */
+  apiKey: string | CredentialProvider;
   /** Override fetch (tests). Defaults to global fetch. */
   fetchImpl?: FetchLike;
   /** Extra headers merged into every request. */
@@ -645,12 +822,13 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
     url: string,
     body: unknown,
     opts: HasnaRequestOptions,
+    credential: ResolvedCredential,
   ): Promise<{ ok: true; value: T } | { ok: false; retryable: boolean; error: Error }> {
     assertNoAuthorityOverrideHeaders(options.headers, "transport");
     assertNoAuthorityOverrideHeaders(opts.headers, "request");
     const headers: Record<string, string> = {
-      "x-api-key": options.apiKey,
-      Authorization: `Bearer ${options.apiKey}`,
+      "x-api-key": credential.apiKey,
+      Authorization: `Bearer ${credential.apiKey}`,
       Accept: "application/json",
       ...(options.headers ?? {}),
       ...(opts.headers ?? {}),
@@ -710,6 +888,25 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
           error: new HasnaHttpError(method, rel, response.status, parsed),
         };
       }
+      // An authentication failure is TERMINAL, regardless of retry policy — the
+      // same rule redirects already follow, and for the same reason: a caller's
+      // retry list must not turn one failure into repeated authenticated
+      // requests. A rejected key does not become valid by being sent again, so
+      // retrying only multiplies failed-auth events in the server's audit log
+      // and delays the actionable error. This is also the boundary that keeps
+      // 401 handling from drifting back toward retry-on-401 — the pattern that
+      // silently rescues a revoked deliberate override as the wrong principal.
+      if (response.status === 401 || response.status === 403) {
+        return {
+          ok: false,
+          retryable: false,
+          error: new HasnaHttpError(method, rel, response.status, parsed, {
+            source: credential.source,
+            tier: credential.tier,
+            guidance: authFailureGuidance(credential),
+          }),
+        };
+      }
       const retry = resolveRetry(opts.retry);
       const retryable = retry ? retry.retryStatuses.includes(response.status) : false;
       return { ok: false, retryable, error: new HasnaHttpError(method, rel, response.status, parsed) };
@@ -725,9 +922,17 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
     const methodRetryable = IDEMPOTENT_METHODS.has(upper) || Boolean(opts.idempotencyKey);
     const maxAttempts = retry && methodRetryable ? retry.retries + 1 : 1;
 
+    // ONE request, ONE identity. The credential is resolved fresh here — so a
+    // rotation is picked up by the next request without rebuilding the client —
+    // but it is resolved exactly once for the whole retry loop. Re-resolving per
+    // attempt would let a rotation land mid-request and send two attempts of the
+    // same logical call under two different principals, which is precisely the
+    // audit-log confusion that makes retry-on-401 the wrong pattern here.
+    const credential = currentCredential(options.name, options.apiKey);
+
     let last: { retryable: boolean; error: Error } | null = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const result = await once<T>(upper, rel, url, body, opts);
+      const result = await once<T>(upper, rel, url, body, opts, credential);
       if (result.ok) return result.value;
       last = result;
       const canRetry = retry !== null && methodRetryable && result.retryable && attempt < maxAttempts;
@@ -760,29 +965,43 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
 export function createClientTransport(
   name: string,
   env: Env = process.env,
-  overrides?: Partial<Pick<HasnaHttpTransportOptions, "fetchImpl" | "headers" | "timeoutMs" | "retry" | "sleepImpl">>,
+  overrides?: Partial<Pick<HasnaHttpTransportOptions, "fetchImpl" | "headers" | "timeoutMs" | "retry" | "sleepImpl">> & {
+    /** Tier-1 credential inputs, e.g. from `--api-key` / `--profile` flags. */
+    credentials?: CredentialChainOptions;
+  },
 ):
   | { transport: "sqlite"; client: null; resolution: ClientTransportResolution }
   | { transport: "http"; client: HasnaHttpTransport; resolution: ClientTransportResolution } {
-  const resolution = resolveClientTransport(name, env);
+  const credentialOptions = overrides?.credentials;
+  const resolution = resolveClientTransport(name, env, { ...(credentialOptions ? { credentials: credentialOptions } : {}) });
   if (resolution.misconfigured) {
     throw new Error(resolution.warning ?? `Client for '${name}' is misconfigured for the API client.`);
   }
   if (resolution.transport === "sqlite" || !resolution.baseUrl) {
     return { transport: "sqlite", client: null, resolution };
   }
-  const keys = clientTransportEnvKeys(name);
-  const apiKey = firstEnv(env, keys.apiKeyKeys)?.value;
-  if (!apiKey) {
-    // Should be unreachable given resolution logic, but never build without a key.
-    throw new Error(`Client for '${name}' resolved to http without an API key.`);
-  }
+  // The credential is NOT read here. It is resolved per request through the
+  // same chain `resolveClientTransport` used, so this path cannot drift from
+  // that one — an earlier version of this function re-read the key straight out
+  // of `env`, which was a second, divergent resolution on the code path most
+  // callers actually take.
+  const credentialProvider: CredentialProvider = () => {
+    const resolved = resolveCredential(name, env, credentialOptions);
+    if (!resolved) {
+      throw new Error(
+        `Client for '${name}' resolved to the http transport but no API key is available any more. ` +
+          `Looked at ${credentialDiskSourcesForMessage(name, env)}, then the environment. ` +
+          `A credential file that was removed after this client was built is the usual cause.`,
+      );
+    }
+    return resolved;
+  };
   return {
     transport: "http",
     client: createHasnaHttpTransport({
       name,
       baseUrl: resolution.baseUrl,
-      apiKey,
+      apiKey: credentialProvider,
       ...(overrides?.fetchImpl ? { fetchImpl: overrides.fetchImpl } : {}),
       ...(overrides?.headers ? { headers: overrides.headers } : {}),
       ...(overrides?.timeoutMs ? { timeoutMs: overrides.timeoutMs } : {}),

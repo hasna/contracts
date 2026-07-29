@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -12,6 +12,7 @@ import {
   resolveClientTransport,
   toV1BaseUrl,
 } from "./transport.js";
+import { __resetCredentialDeprecationNotices, resolveCredential } from "./credentials.js";
 import { createLoopbackTestGate } from "../testing/loopback.js";
 
 // Each suite below is gated on the bind it actually performs, not on a single
@@ -939,5 +940,322 @@ wildcardGate.describe("end-to-end data-source flip (real HTTP loopback)", () => 
   test("wrong/absent key is rejected by the server (auth is enforced)", async () => {
     const bad = createHasnaHttpTransport({ name: "demo", baseUrl: `${baseUrl}/v1`, apiKey: "wrong" });
     await expect(bad.get("/items")).rejects.toThrow(/401/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Credential provider chain at the seam.
+//
+// The measured failure: a shell started before a key rotation holds the stale
+// `HASNA_<NAME>_API_KEY` for its whole life. Every one of these tests would
+// pass trivially if the seam kept reading the credential out of the process
+// env, so each asserts the DISK value specifically.
+// ---------------------------------------------------------------------------
+
+describe("credential resolution at the seam", () => {
+  const credHomes: string[] = [];
+
+  function credHome(): string {
+    const home = mkdtempSync(join(tmpdir(), "hasna-seam-"));
+    credHomes.push(home);
+    return home;
+  }
+
+  function writeKeyFile(home: string, app: string, key: string): string {
+    const dir = join(home, ".hasna", "cloud");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `${app}.env`);
+    writeFileSync(path, `HASNA_${app.toUpperCase()}_API_KEY=${key}\n`);
+    return path;
+  }
+
+  afterEach(() => {
+    __resetCredentialDeprecationNotices();
+    while (credHomes.length > 0) rmSync(credHomes.pop()!, { recursive: true, force: true });
+  });
+
+  test("a stale env key loses to the credential on disk", () => {
+    const home = credHome();
+    const diskPath = writeKeyFile(home, "todos", "fresh-disk-key");
+
+    const r = resolveClientTransport("todos", {
+      HOME: home,
+      HASNA_TODOS_STORAGE_MODE: "postgres",
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
+      HASNA_TODOS_API_KEY: "stale-revoked-env-key",
+    });
+
+    expect(r.transport).toBe("http");
+    expect(r.apiKeyTier).toBe("disk");
+    expect(r.apiKeySource).toBe(diskPath);
+  });
+
+  test("the built client actually SENDS the disk key, not the stale env key", async () => {
+    const home = credHome();
+    writeKeyFile(home, "todos", "fresh-disk-key");
+    const seen: string[] = [];
+
+    const wired = createClientTransport(
+      "todos",
+      {
+        HOME: home,
+        HASNA_TODOS_STORAGE_MODE: "postgres",
+        HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
+        HASNA_TODOS_API_KEY: "stale-revoked-env-key",
+      },
+      {
+        fetchImpl: async (_url, init) => {
+          seen.push(String((init?.headers as Record<string, string>)["x-api-key"]));
+          return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+        },
+      },
+    );
+
+    expect(wired.transport).toBe("http");
+    await wired.client!.get("/items");
+    expect(seen).toEqual(["fresh-disk-key"]);
+  });
+
+  test("a rotation mid-process is picked up WITHOUT rebuilding the client", async () => {
+    const home = credHome();
+    writeKeyFile(home, "todos", "key-before-rotation");
+    const seen: string[] = [];
+
+    const wired = createClientTransport(
+      "todos",
+      {
+        HOME: home,
+        HASNA_TODOS_STORAGE_MODE: "postgres",
+        HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
+      },
+      {
+        fetchImpl: async (_url, init) => {
+          seen.push(String((init?.headers as Record<string, string>)["x-api-key"]));
+          return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+        },
+      },
+    );
+
+    await wired.client!.get("/items");
+    writeKeyFile(home, "todos", "key-after-rotation");
+    await wired.client!.get("/items");
+
+    expect(seen).toEqual(["key-before-rotation", "key-after-rotation"]);
+  });
+
+  test("retries inside ONE request never change identity mid-request", async () => {
+    const home = credHome();
+    writeKeyFile(home, "todos", "key-at-request-start");
+    const seen: string[] = [];
+    let attempt = 0;
+
+    const client = createHasnaHttpTransport({
+      name: "todos",
+      baseUrl: "https://todos.your-deployment.example/v1",
+      apiKey: () =>
+        resolveCredential("todos", { HOME: home }) ?? (() => { throw new Error("no credential"); })(),
+      sleepImpl: async () => {},
+      fetchImpl: async (_url, init) => {
+        seen.push(String((init?.headers as Record<string, string>)["x-api-key"]));
+        attempt += 1;
+        // The credential rotates on disk BETWEEN the two attempts of one request.
+        writeKeyFile(home, "todos", "key-rotated-mid-request");
+        if (attempt === 1) return new Response("", { status: 503 });
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+
+    await client.get("/items");
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBe("key-at-request-start");
+    expect(seen[1]).toBe("key-at-request-start");
+  });
+
+  test("a 401 on a legacy-env key names the source and blames the stale shell", async () => {
+    const home = credHome();
+    const client = createHasnaHttpTransport({
+      name: "todos",
+      baseUrl: "https://todos.your-deployment.example/v1",
+      apiKey: () =>
+        resolveCredential(
+          "todos",
+          { HOME: home, HASNA_TODOS_API_KEY: "stale-revoked-env-key" },
+          { onDeprecation: () => {} },
+        )!,
+      fetchImpl: async () => new Response("", { status: 401 }),
+    });
+
+    let caught: unknown;
+    try {
+      await client.get("/items");
+    } catch (error) {
+      caught = error;
+    }
+
+    const message = (caught as Error).message;
+    expect(message).toContain("HASNA_TODOS_API_KEY");
+    expect(message).toMatch(/stale shell/i);
+    expect(message).not.toContain("stale-revoked-env-key");
+  });
+
+  test("a 401 on a deliberate override says the identity was NOT substituted", async () => {
+    const home = credHome();
+    writeKeyFile(home, "todos", "a-perfectly-valid-disk-key");
+    const client = createHasnaHttpTransport({
+      name: "todos",
+      baseUrl: "https://todos.your-deployment.example/v1",
+      apiKey: () =>
+        resolveCredential("todos", { HOME: home, HASNA_TODOS_API_KEY_OVERRIDE: "revoked-override" })!,
+      fetchImpl: async () => new Response("", { status: 401 }),
+    });
+
+    let caught: unknown;
+    try {
+      await client.get("/items");
+    } catch (error) {
+      caught = error;
+    }
+
+    const message = (caught as Error).message;
+    expect(message).toContain("HASNA_TODOS_API_KEY_OVERRIDE");
+    expect(message).toMatch(/not.*(substitut|replac|fall)/i);
+    expect(message).not.toContain("a-perfectly-valid-disk-key");
+    expect(message).not.toContain("revoked-override");
+  });
+
+  test("a 401 is never retried EVEN when a caller lists it as retryable", async () => {
+    // 401 is not in the default retry list, so a test that merely sends a 401
+    // would pass with or without the auth-terminal guard. The guard only earns
+    // its place against a caller that explicitly asks for 401 to be retried —
+    // which is the configuration that would otherwise re-send a revoked key.
+    const home = credHome();
+    writeKeyFile(home, "todos", "revoked-disk-key");
+    let calls = 0;
+    const client = createHasnaHttpTransport({
+      name: "todos",
+      baseUrl: "https://todos.your-deployment.example/v1",
+      apiKey: () => resolveCredential("todos", { HOME: home })!,
+      sleepImpl: async () => {},
+      retry: { retries: 3, retryStatuses: [401, 403] },
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response("", { status: 401 });
+      },
+    });
+
+    await expect(client.get("/items")).rejects.toThrow(/401/);
+    expect(calls).toBe(1);
+  });
+
+  test("a 403 is likewise terminal when a caller lists it as retryable", async () => {
+    const home = credHome();
+    writeKeyFile(home, "todos", "forbidden-disk-key");
+    let calls = 0;
+    const client = createHasnaHttpTransport({
+      name: "todos",
+      baseUrl: "https://todos.your-deployment.example/v1",
+      apiKey: () => resolveCredential("todos", { HOME: home })!,
+      sleepImpl: async () => {},
+      retry: { retries: 3, retryStatuses: [401, 403] },
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response("", { status: 403 });
+      },
+    });
+
+    await expect(client.get("/items")).rejects.toThrow(/403/);
+    expect(calls).toBe(1);
+  });
+
+  test("BOUNDARY: a credential on disk never flips a sqlite client to http", () => {
+    const home = credHome();
+    writeKeyFile(home, "todos", "disk-key");
+
+    const r = resolveClientTransport("todos", { HOME: home });
+
+    expect(r.transport).toBe("sqlite");
+    expect(r.mode).toBe("sqlite");
+    expect(r.misconfigured).toBe(false);
+  });
+
+  test("BOUNDARY: an explicit sqlite backend still ignores a disk credential", () => {
+    const home = credHome();
+    writeKeyFile(home, "todos", "disk-key");
+
+    const r = resolveClientTransport("todos", {
+      HOME: home,
+      HASNA_TODOS_STORAGE_MODE: "sqlite",
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
+    });
+
+    expect(r.transport).toBe("sqlite");
+  });
+
+  test("postgres backend with NO env key now resolves from disk instead of degrading to sqlite", () => {
+    const home = credHome();
+    const diskPath = writeKeyFile(home, "todos", "disk-key");
+
+    const r = resolveClientTransport("todos", {
+      HOME: home,
+      HASNA_TODOS_STORAGE_MODE: "postgres",
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
+    });
+
+    expect(r.transport).toBe("http");
+    expect(r.apiKeySource).toBe(diskPath);
+    expect(r.misconfigured).toBe(false);
+  });
+
+  test("postgres backend with neither disk nor env key still fails closed to sqlite + misconfigured", () => {
+    const home = credHome();
+
+    const r = resolveClientTransport("todos", {
+      HOME: home,
+      HASNA_TODOS_STORAGE_MODE: "postgres",
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
+    });
+
+    expect(r.transport).toBe("sqlite");
+    expect(r.misconfigured).toBe(true);
+  });
+
+  test("an explicit apiKey argument outranks both the disk and the env", async () => {
+    const home = credHome();
+    writeKeyFile(home, "todos", "disk-key");
+    const seen: string[] = [];
+
+    const wired = createClientTransport(
+      "todos",
+      {
+        HOME: home,
+        HASNA_TODOS_STORAGE_MODE: "postgres",
+        HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
+        HASNA_TODOS_API_KEY: "env-key",
+      },
+      {
+        credentials: { apiKey: "flag-key" },
+        fetchImpl: async (_url, init) => {
+          seen.push(String((init?.headers as Record<string, string>)["x-api-key"]));
+          return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+        },
+      },
+    );
+
+    await wired.client!.get("/items");
+    expect(seen).toEqual(["flag-key"]);
+  });
+
+  test("the resolution never carries the key value", () => {
+    const home = credHome();
+    writeKeyFile(home, "todos", "super-secret-disk-key");
+
+    const r = resolveClientTransport("todos", {
+      HOME: home,
+      HASNA_TODOS_STORAGE_MODE: "postgres",
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
+    });
+
+    expect(JSON.stringify(r)).not.toContain("super-secret-disk-key");
   });
 });
