@@ -4,6 +4,13 @@ All notable changes to `@hasna/contracts` are documented here.
 
 ## Unreleased
 
+### Tests: direct Todos domain and operation-schema coverage
+
+Added focused unit coverage for task lifecycle transitions, domain schema
+invariants, operation request boundaries, transfer bindings, and success/error
+response envelopes. The existing deterministic artifact suite already covers
+the artifact builders, renderer, and verifier.
+
 ### Credential resolution: env holds a pointer, disk holds the secret, resolved at call time
 
 MEASURED FAILURE THIS KILLS. A tmux shell started before a key rotation held the
