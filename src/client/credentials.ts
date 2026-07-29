@@ -366,6 +366,32 @@ export function explicitCredential(appName: string, apiKey: string): ResolvedCre
   });
 }
 
+/**
+ * Reapply the credential protections at a caller-supplied provider boundary.
+ *
+ * A {@link ResolvedCredential} is structurally typed, so a caller can satisfy
+ * the provider contract with a plain object instead of a value returned by one
+ * of the two credential constructors. Snapshot its key once, validate it, and
+ * copy the existing resolution metadata into the same seal those constructors
+ * use.
+ */
+export function validateAndSealResolvedCredential(
+  appName: string,
+  credential: ResolvedCredential,
+): ResolvedCredential {
+  const apiKey = credential.apiKey;
+  assertUsableCredential(appName, "caller-supplied CredentialProvider", apiKey);
+  return sealCredential({
+    apiKey,
+    tier: credential.tier,
+    source: credential.source,
+    deliberate: credential.deliberate,
+    deprecated: credential.deprecated,
+    diskCandidates: credential.diskCandidates,
+    warning: credential.warning,
+  });
+}
+
 function firstEnvValue(env: Env, keys: readonly string[]): { key: string; value: string } | null {
   for (const key of keys) {
     const value = env[key]?.trim();

@@ -62,6 +62,7 @@ import { clientTransportEnvKeys } from "./env-keys.js";
 import {
   explicitCredential,
   resolveCredential,
+  validateAndSealResolvedCredential,
   type CredentialChainOptions,
   type CredentialTier,
   type ResolvedCredential,
@@ -613,7 +614,9 @@ export class HasnaHttpError extends Error {
 export type CredentialProvider = () => ResolvedCredential;
 
 function currentCredential(name: string, apiKey: string | CredentialProvider): ResolvedCredential {
-  if (typeof apiKey === "function") return apiKey();
+  if (typeof apiKey === "function") {
+    return validateAndSealResolvedCredential(name, apiKey());
+  }
   // A bare string goes through the SAME constructor as a resolved one. Building
   // it as an object literal here is what let a key with a CR in it reach `fetch`,
   // whose TypeError quotes the whole header value and so leaks the plaintext key.
