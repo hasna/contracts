@@ -103,7 +103,7 @@
     "test": "bun test --timeout 120000",
     "lint": "tsc --noEmit",
     "conformance": "bun run src/cli/index.ts conformance examples",
-    "verify:release": "rm -rf dist && bun run todos:hygiene && bun run typecheck && bun test && bun run conformance && bun run build && bun run src/cli/index.ts repo-conformance . && bun run smoke:dist && bun run smoke:todos-pack && bun run pack:check && bun run scan:artifact",
+    "verify:release": "rm -rf dist && bun run todos:hygiene && bun run typecheck && bun run test && bun run conformance && bun run build && bun run src/cli/index.ts repo-conformance . && bun run smoke:dist && bun run smoke:todos-pack && bun run pack:check && bun run scan:artifact",
     "smoke:dist": "bun scripts/smoke-dist.ts",
     "smoke:todos-pack": "bun scripts/smoke-todos-pack.ts",
     "pack:check": "bun pm pack --dry-run --ignore-scripts",
