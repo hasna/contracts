@@ -76,8 +76,8 @@ operator approval and rollback or disable evidence.
 
 ## First Adoption Targets
 
-- `open-mailery`: canonical `open-mailery`/`open-emails` boundary, local versus
-  self-hosted versus cloud auth model, Postgres/S3/SES readiness, signed
+- `open-mailery`: canonical `open-mailery`/`open-emails` boundary,
+  single-operator versus server-backed auth model, Postgres/S3/SES readiness, signed
   webhooks, and no-send/domain-change smokes.
 - `open-telephony`: REST auth, Twilio signature and replay validation, toll
   fraud controls, durable queues, retention, and opt-in sandbox/live provider

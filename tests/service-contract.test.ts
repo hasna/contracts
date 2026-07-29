@@ -29,7 +29,7 @@ const baseCliWithStore = {
   kitVersion: "0.3.0",
   bins: ["todos", "todos-mcp"],
   storage: {
-    mode: "local",
+    mode: "sqlite",
     sqlitePath: "~/.hasna/todos/todos.db"
   }
 } as const;
@@ -77,16 +77,12 @@ describe("service contract manifest validation", () => {
     expect(validateServiceContractManifest(bad).success).toBe(false);
   });
 
-  test("normalizes legacy self-hosted placement spelling without conflating it with cloud", () => {
+  test("rejects the removed placement field outright", () => {
     const parsed = validateServiceContractManifest({
       ...baseCliWithStore,
       deploymentModes: ["local", "self-hosted"]
     });
-    expect(parsed.success).toBe(true);
-    if (parsed.success) {
-      expect(parsed.data.deploymentModes).toEqual(["local", "self_hosted"]);
-      expect(parsed.data.deploymentModes).not.toContain("cloud");
-    }
+    expect(parsed.success).toBe(false);
   });
 
   test("defaults the public product story to user-hosted", () => {
@@ -105,15 +101,15 @@ describe("service contract manifest validation", () => {
       bins: ["contracts", "contracts-cli"]
     };
     expect(validateServiceContractManifest(lib).success).toBe(true);
-    expect(validateServiceContractManifest({ ...lib, storage: { mode: "local", sqlitePath: "x" } }).success).toBe(false);
+    expect(validateServiceContractManifest({ ...lib, storage: { mode: "sqlite", sqlitePath: "x" } }).success).toBe(false);
     expect(validateServiceContractManifest({ ...lib, bins: ["contracts", "contracts-serve"] }).success).toBe(false);
   });
 
-  test("cloud storage can use the public env contract without a secret reference", () => {
+  test("postgres storage can use the public env contract without a secret reference", () => {
     const publicManifest = {
       ...baseCliWithStore,
       storage: {
-        mode: "cloud",
+        mode: "postgres",
         envPrefix: "HASNA_TODOS_"
       }
     };
@@ -122,7 +118,7 @@ describe("service contract manifest validation", () => {
     const privateCompatibility = {
       ...baseCliWithStore,
       storage: {
-        mode: "cloud",
+        mode: "postgres",
         envPrefix: "HASNA_TODOS_",
         databaseUrlSecretRef: "hasna/oss/todos/database-url"
       }
@@ -138,15 +134,13 @@ describe("service contract manifest validation", () => {
       contractVersion: SERVICE_CONTRACT_VERSION,
       kitVersion: "0.3.0",
       bins: ["loops", "loops-serve"],
-      storage: { mode: "cloud", databaseUrlSecretRef: "hasna/oss/loops/database-url" },
-      deploymentModes: ["local", "self-hosted"],
+      storage: { mode: "postgres", databaseUrlSecretRef: "hasna/oss/loops/database-url" },
       serviceSurfaces: [
         {
           name: "http",
           status: "supported",
           bin: "loops-serve",
           authMode: "api-key",
-          deploymentModes: ["local", "self-hosted"],
           health: { method: "GET", path: "/health", public: true },
           readiness: { method: "GET", path: "/ready", public: false },
           version: { method: "GET", path: "/version", public: true },
@@ -175,7 +169,7 @@ describe("service contract manifest validation", () => {
       kitVersion: "0.7.0",
       bins: ["loops", "loops-serve"],
       storage: {
-        mode: "local",
+        mode: "sqlite",
         engines: ["sqlite", "postgres"],
         envPrefix: "HASNA_LOOPS_",
         sqlitePath: "~/.hasna/loops/loops.db",
@@ -191,7 +185,6 @@ describe("service contract manifest validation", () => {
           status: "supported",
           bin: "loops-serve",
           authMode: "api-key",
-          deploymentModes: ["local"],
           health: { method: "POST", path: "/health", public: true },
           version: { method: "POST", path: "/version", public: true },
           apiBasePath: "/v1",
@@ -218,8 +211,7 @@ describe("service contract manifest validation", () => {
       kitVersion: "0.7.0",
       bins: ["mailery", "mailery-serve"],
       hosting: ["hasna-saas"],
-      deploymentModes: ["cloud"],
-      storage: { mode: "cloud" },
+      storage: { mode: "postgres" },
       serviceSurfaces: [
         {
           name: "http",
@@ -227,7 +219,6 @@ describe("service contract manifest validation", () => {
           status: "supported",
           bin: "mailery-serve",
           authMode: "api-key",
-          deploymentModes: ["cloud"],
           health: { method: "GET", path: "/health", public: true },
           readiness: { method: "GET", path: "/ready", public: false },
           version: { method: "GET", path: "/version", public: true },
@@ -252,7 +243,7 @@ describe("service contract manifest validation", () => {
       kitVersion: "0.6.0",
       bins: ["loops", "loops-serve"],
       storage: {
-        mode: "local",
+        mode: "sqlite",
         engines: ["sqlite"],
         sqlitePath: "~/.hasna/loops/loops.db"
       },
@@ -261,7 +252,6 @@ describe("service contract manifest validation", () => {
           name: "http",
           status: "deferred",
           authMode: "api-key",
-          deploymentModes: ["local"],
           deferReason: "Fixture only."
         }
       ]
@@ -277,7 +267,7 @@ describe("service contract manifest validation", () => {
     const bad = {
       ...baseCliWithStore,
       storage: {
-        mode: "local",
+        mode: "sqlite",
         sqlitePath: "~/.hasna/todos/accounts.json"
       }
     };
@@ -292,7 +282,7 @@ describe("service contract manifest validation", () => {
     const duplicateEngines = {
       ...baseCliWithStore,
       storage: {
-        mode: "local",
+        mode: "sqlite",
         engines: ["sqlite", "sqlite"],
         sqlitePath: "~/.hasna/todos/todos.db"
       }
@@ -330,7 +320,7 @@ describe("service contract manifest validation", () => {
     const waived = {
       ...baseCliWithStore,
       storage: {
-        mode: "local",
+        mode: "sqlite",
         engines: ["sqlite"],
         sqlitePath: "~/.hasna/todos/todos.db"
       },
@@ -376,7 +366,7 @@ describe("service contract manifest validation", () => {
     const unwaived = {
       ...baseCliWithStore,
       storage: {
-        mode: "local",
+        mode: "sqlite",
         engines: ["sqlite"],
         sqlitePath: "~/.hasna/todos/todos.db"
       }
@@ -395,7 +385,7 @@ describe("service contract manifest validation", () => {
       ...baseCliWithStore,
       bins: ["todos", "todos-serve"],
       storage: {
-        mode: "local",
+        mode: "sqlite",
         engines: ["sqlite"],
         sqlitePath: "~/.hasna/todos/todos.db"
       },
@@ -413,21 +403,16 @@ describe("service contract manifest validation", () => {
     }
   });
 
-  test("does not honour a storage waiver for cloud mode, cloud placement, or a saas story", () => {
+  test("does not honour a storage waiver for a postgres backend or a saas story", () => {
     const cases: Array<Record<string, unknown>> = [
       {
         ...baseCliWithStore,
-        storage: { mode: "cloud", engines: ["sqlite"], envPrefix: "HASNA_TODOS_" }
-      },
-      {
-        ...baseCliWithStore,
-        deploymentModes: ["local", "cloud"],
-        storage: { mode: "local", engines: ["sqlite"], sqlitePath: "~/.hasna/todos/todos.db" }
+        storage: { mode: "postgres", engines: ["sqlite"], envPrefix: "HASNA_TODOS_" }
       },
       {
         ...baseCliWithStore,
         hosting: ["user-hosted", "hasna-saas"],
-        storage: { mode: "local", engines: ["sqlite"], sqlitePath: "~/.hasna/todos/todos.db" }
+        storage: { mode: "sqlite", engines: ["sqlite"], sqlitePath: "~/.hasna/todos/todos.db" }
       }
     ];
     for (const base of cases) {
@@ -447,25 +432,24 @@ describe("service contract manifest validation", () => {
       }
     }
 
-    // self_hosted placement stays eligible: placement is not the storage engine.
-    const selfHosted = {
+    // A plain sqlite CLI stays eligible: the backend is what decides.
+    const sqliteOnly = {
       ...baseCliWithStore,
-      deploymentModes: ["local", "self_hosted"],
-      storage: { mode: "local", engines: ["sqlite"], sqlitePath: "~/.hasna/todos/todos.db" },
+      storage: { mode: "sqlite", engines: ["sqlite"], sqlitePath: "~/.hasna/todos/todos.db" },
       metadata: {
         conformance: {
           waivedStorageEngines: [{ engine: "postgres", reason: "SQLite-only local CLI." }]
         }
       }
     };
-    expect(validateServiceContractManifest(selfHosted).success).toBe(true);
+    expect(validateServiceContractManifest(sqliteOnly).success).toBe(true);
   });
 
   test("names the refusal reason when an ineligible manifest tried to waive", () => {
     const serveCapable = {
       ...baseCliWithStore,
       bins: ["todos", "todos-serve"],
-      storage: { mode: "local", engines: ["sqlite"], sqlitePath: "~/.hasna/todos/todos.db" },
+      storage: { mode: "sqlite", engines: ["sqlite"], sqlitePath: "~/.hasna/todos/todos.db" },
       metadata: {
         conformance: {
           waivedStorageEngines: [{ engine: "postgres", reason: "Repo ships a server but wants sqlite only." }]
@@ -485,7 +469,7 @@ describe("service contract manifest validation", () => {
     // Without a declared waiver the message stays exactly as it was.
     const noWaiver = {
       ...baseCliWithStore,
-      storage: { mode: "local", engines: ["sqlite"], sqlitePath: "~/.hasna/todos/todos.db" }
+      storage: { mode: "sqlite", engines: ["sqlite"], sqlitePath: "~/.hasna/todos/todos.db" }
     };
     const plain = validateServiceContractManifest(noWaiver);
     expect(plain.success).toBe(false);
@@ -509,7 +493,7 @@ describe("service contract manifest validation", () => {
     const withWaiver = (waiver: Record<string, unknown>) => ({
       ...baseCliWithStore,
       storage: {
-        mode: "local",
+        mode: "sqlite",
         engines: ["sqlite", "postgres"],
         envPrefix: "HASNA_TODOS_",
         sqlitePath: "~/.hasna/todos/todos.db"
@@ -544,7 +528,7 @@ describe("service contract manifest validation", () => {
     const waivedSqlite = {
       ...baseCliWithStore,
       storage: {
-        mode: "local",
+        mode: "sqlite",
         engines: ["postgres"],
         envPrefix: "HASNA_TODOS_",
         sqlitePath: "~/.hasna/todos/todos.db"
@@ -569,7 +553,7 @@ describe("service contract manifest validation", () => {
     const withWaivers = (waivedStorageEngines: unknown) => ({
       ...baseCliWithStore,
       storage: {
-        mode: "local",
+        mode: "sqlite",
         engines: ["sqlite", "postgres"],
         envPrefix: "HASNA_TODOS_",
         sqlitePath: "~/.hasna/todos/todos.db"
@@ -614,7 +598,7 @@ describe("service contract manifest validation", () => {
     const expired = {
       ...baseCliWithStore,
       storage: {
-        mode: "local",
+        mode: "sqlite",
         engines: ["sqlite"],
         sqlitePath: "~/.hasna/todos/todos.db"
       },
@@ -676,14 +660,13 @@ describe("service contract manifest validation", () => {
       ...baseCliWithStore,
       class: "service",
       bins: ["todos", "todos-serve"],
-      storage: { mode: "cloud", databaseUrlSecretRef: "hasna/oss/todos/database-url" },
+      storage: { mode: "postgres", databaseUrlSecretRef: "hasna/oss/todos/database-url" },
       serviceSurfaces: [
         {
           name: "http",
           status: "supported",
           bin: "todos-serve",
           authMode: "api-key",
-          deploymentModes: ["local"]
         }
       ]
     };
@@ -696,7 +679,6 @@ describe("service contract manifest validation", () => {
           name: "http",
           status: "deferred",
           authMode: "api-key",
-          deploymentModes: ["local"],
           deferReason: "Hosted service boundary still returns raw secret values."
         }
       ]
@@ -712,7 +694,7 @@ describe("service contract manifest validation", () => {
       contractVersion: SERVICE_CONTRACT_VERSION,
       kitVersion: "0.3.0",
       bins: ["mailery", "mailery-serve"],
-      storage: { mode: "local", sqlitePath: "x" }
+      storage: { mode: "sqlite", sqlitePath: "x" }
     };
     expect(validateServiceContractManifest(saas).success).toBe(false);
   });

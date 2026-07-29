@@ -4,18 +4,21 @@
   "name": "contracts",
   "class": "library",
   "contractVersion": "v1",
-  "kitVersion": "0.8.3",
+  "kitVersion": "0.8.4",
   "description": "Shared schemas, validators, and conformance kit for Hasna open-source agent infrastructure. Ships types and CLI checks only; no store.",
-  "bins": ["contracts", "contracts-cli"],
-  "hosting": ["user-hosted"],
-  "deploymentModes": ["local", "self_hosted"],
+  "bins": [
+    "contracts",
+    "contracts-cli"
+  ],
+  "hosting": [
+    "user-hosted"
+  ],
   "serviceSurfaces": [
     {
       "name": "package-sdk",
       "kind": "sdk",
       "status": "supported",
       "authMode": "none",
-      "deploymentModes": ["local", "self_hosted"],
       "exportSubpath": "."
     },
     {
@@ -23,13 +26,14 @@
       "kind": "cli",
       "status": "supported",
       "bin": "contracts",
-      "authMode": "local-only",
-      "deploymentModes": ["local", "self_hosted"]
+      "authMode": "local-only"
     }
   ],
   "metadata": {
     "release": {
-      "artifactScan": { "script": "scan:artifact" }
+      "artifactScan": {
+        "script": "scan:artifact"
+      }
     },
     "conformance": {
       "waivedSurfaces": [

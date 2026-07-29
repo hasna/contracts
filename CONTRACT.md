@@ -13,64 +13,70 @@ conformance kit (`runRepoConformance` / `contracts repo-conformance`).
 
 ---
 
-## 1. Docs tiers
+## 1. Product stories
 
-Documentation and deployment guidance is organized into three tiers. These are
-**documentation tiers**, not runtime modes.
+Every Hasna OSS product has exactly **two** customer-facing stories, declared
+in the manifest's `hosting` array. There is no third.
 
-| Tier | Meaning |
+| Story | Meaning |
 | --- | --- |
-| `local` | Single developer machine. SQLite is authoritative. No network store. |
-| `self_hosted` | Operator runs the app against their own Postgres (and their own object store if any). Delivered via the repo's root `docker-compose.yml`. |
-| `cloud` | Hasna-operated managed offering (SaaS). |
+| `user-hosted` | The user runs the whole thing, in any environment of theirs. SQLite by default, their own PostgreSQL by choice. |
+| `hasna-saas` | Hasna operates the product as a multi-tenant SaaS. |
 
-`self_hosted` is a distinct runtime placement. Its server process uses the
-**`cloud` storage mode** pointed at an operator-owned private database URL.
+The deployment-placement axis that used to sit next to this (three runtime
+placements plus aliases) was **removed entirely** (owner directive 2026-07-29).
+Where something ran never changed how it stored data; the only switch a repo
+carries is its server's **data backend**.
 
 ---
 
-## 2. Runtime storage mode (Amendment A1 — PURE REMOTE)
+## 2. Data backend (storage mode)
 
-The runtime storage enum is **`local | cloud` ONLY**.
+The storage enum is **`sqlite | postgres` ONLY**, and it describes the
+**SERVER's internal storage**:
 
-- **`local`** — SQLite at `~/.hasna/<name>/<name>.db` is authoritative.
-- **`cloud`** — reads **AND** writes go **directly** to the app-owned cloud
-  Postgres.
+- **`sqlite`** — SQLite at `~/.hasna/<name>/<name>.db` is authoritative.
+- **`postgres`** — reads **AND** writes go to a PostgreSQL server
+  (`DATABASE_URL`). Who operates that server — the user or Hasna — does not
+  change the backend, the code path, or this contract.
 
-**Amendment A1 (PURE REMOTE), spelled out — overrides everything:**
+Invariants, spelled out — these override everything:
 
-1. `cloud` mode means both reads and writes hit the cloud Postgres directly.
+1. `postgres` means both reads and writes hit PostgreSQL directly.
 2. There is **NO** sync engine.
-3. There is **NO** cache-as-mode (no "hybrid", no "local cache" runtime).
+3. There is **NO** cache-as-backend (no blended local-cache runtime).
 4. There is **NO** merge logic and **NO** conflict resolution.
 5. After a one-time migration, the local SQLite file becomes a dated backup
-   file (`<name>.db.pre-cloud.<YYYYMMDD>`), not a live read path.
+   file (`<name>.db.pre-postgres.<YYYYMMDD>`), not a live read path.
 6. The **only** sanctioned exception is the OpenTodos dual-write **SHADOW**:
    during a pre-cutover validation window, writes MAY be mirrored async
-   local→cloud for comparison; **reads stay local** and the app **never reads
-   from cloud** in shadow. Shadow is a migration step, not a runtime mode.
+   sqlite→postgres for comparison; **reads stay on sqlite** and the app
+   **never reads from postgres** in shadow. Shadow is a migration step, not a
+   backend.
 
-The words `remote`, `hybrid`, and `self_hosted` are accepted as deprecated
-**storage-mode** aliases that normalize to `cloud`. This does not erase the
-separate runtime-placement meaning of `self_hosted`: manifests write
-`deploymentModes: ["self_hosted"]` for an operator-run server. The old
-hyphenated deployment spelling `self-hosted` still parses for migration and is
-canonicalized to `self_hosted`.
+The **OSS client is `sqlite`-or-HTTP** and **never opens PostgreSQL
+directly**: a client whose data lives in the server's PostgreSQL reaches it
+over the HTTP `/v1` API (see `resolveClientTransport`). There is no
+client-side Postgres store.
 
-The reference normalizer lives in `src/mode.ts`, extracted from open-mailery's
-`normalizeMaileryMode`.
+The removed placement vocabulary (`local`, `cloud`, `remote`, the
+operator-hosted placement word in both its underscore and hyphen spellings,
+and the blended-cache word) is **rejected with a migration hint**, never
+silently mapped. The long spelling `postgresql` normalizes to `postgres`. The
+reference normalizer lives in `src/mode.ts`.
 
 ---
 
 ## 3. Environment specification
 
-Each app with a store resolves its mode and database URL from the environment.
+Each app with a store resolves its backend and database URL from the
+environment.
 
 | Key | Purpose |
 | --- | --- |
-| `HASNA_<NAME>_STORAGE_MODE` | Canonical mode selector. Value `local` or `cloud`. |
-| `HASNA_<NAME>_DATABASE_URL` | Cloud Postgres URL. **Required when mode is `cloud`.** |
-| `<NAME>_STORAGE_MODE` | Optional short alias for the mode selector. |
+| `HASNA_<NAME>_STORAGE_MODE` | Canonical backend selector. Value `sqlite` or `postgres` (`postgresql` accepted as the long spelling). |
+| `HASNA_<NAME>_DATABASE_URL` | PostgreSQL URL. **Required when the backend is `postgres`.** |
+| `<NAME>_STORAGE_MODE` | Optional short alias for the backend selector. |
 | `<NAME>_DATABASE_URL` | Optional short alias for the database URL. |
 
 `<NAME>` is the upper-snake form of the app name (e.g. `todos` → `TODOS`,
@@ -80,11 +86,11 @@ Resolution precedence (see `resolveStorageMode`):
 
 1. `HASNA_<NAME>_STORAGE_MODE`
 2. `<NAME>_STORAGE_MODE` (alias; emits a "use canonical key" warning)
-3. default → `local`
+3. default → `postgres` when a `DATABASE_URL` is present, else `sqlite`
 
-An app **MUST NOT** read secret *values* to decide the mode; it only detects
-`DATABASE_URL` presence. Selecting `cloud` without a database URL is a
-misconfiguration and MUST warn.
+An app **MUST NOT** read secret *values* to decide the backend; it only
+detects `DATABASE_URL` presence. Selecting `postgres` without a database URL
+is a misconfiguration and MUST warn.
 
 ---
 
@@ -94,7 +100,7 @@ Any repo that ships a `<name>-serve` bin **MUST** expose:
 
 | Endpoint | Response shape | Schema |
 | --- | --- | --- |
-| `GET /health` | `{ "status": "ok"\|"degraded"\|"unavailable", "version": string, "mode": "local"\|"cloud" }` | `HealthResponseSchema` |
+| `GET /health` | `{ "status": "ok"\|"degraded"\|"unavailable", "version": string, "mode": "sqlite"\|"postgres" }` | `HealthResponseSchema` |
 | `GET /ready` | `{ "ready": boolean, "reason"?: string }` | `ReadyResponseSchema` |
 | `GET /version` | `{ "version": string }` | `VersionResponseSchema` |
 
@@ -150,7 +156,7 @@ fabricating PostgreSQL support:
 ```json
 {
   "storage": {
-    "mode": "local",
+    "mode": "sqlite",
     "engines": ["sqlite"],
     "envPrefix": "HASNA_FACTORY_",
     "sqlitePath": "~/.hasna/factory/factory.db"
@@ -186,13 +192,10 @@ fabricating PostgreSQL support:
   refused for every manifest that already claims PostgreSQL is in play. Only a
   `cli-with-store` repo that
   1. does **not** ship `<name>-serve` (a serve bin makes it service-capable),
-  2. declares `storage.mode` `local` (`cloud` mode reads and writes PostgreSQL
-     directly),
-  3. does **not** declare the `cloud` runtime placement, and
-  4. does **not** declare the `hasna-saas` product story
-  may waive an engine. `service` and `saas` repos never may. The `self_hosted`
-  placement stays eligible: it is a placement, and `storage.mode` decides which
-  engine actually backs the repo.
+  2. declares `storage.mode` `sqlite` (`postgres` reads and writes PostgreSQL
+     directly), and
+  3. does **not** declare the `hasna-saas` product story
+  may waive an engine. `service` and `saas` repos never may.
 - A waiver for an engine the manifest already declares is redundant: the engine
   keeps its normal proof obligations, including `storage.pgTestGate`.
 - Waivers are additive. A manifest without `waivedStorageEngines` gets the same
@@ -299,9 +302,8 @@ separate axes:
   "kitVersion": "0.7.0",
   "bins": ["todos", "todos-mcp", "todos-serve"],
   "hosting": ["user-hosted", "hasna-saas"],
-  "deploymentModes": ["local", "self_hosted", "cloud"],
   "storage": {
-    "mode": "local",
+    "mode": "sqlite",
     "engines": ["sqlite", "postgres"],
     "envPrefix": "HASNA_TODOS_",
     "aliasEnvPrefix": "TODOS_",
@@ -318,8 +320,7 @@ separate axes:
       "status": "supported",
       "bin": "todos-serve",
       "authMode": "api-key",
-      "deploymentModes": ["local", "self_hosted", "cloud"],
-      "health": { "method": "GET", "path": "/health", "public": true },
+          "health": { "method": "GET", "path": "/health", "public": true },
       "readiness": { "method": "GET", "path": "/ready", "public": false },
       "version": { "method": "GET", "path": "/version", "public": true },
       "apiBasePath": "/v1",
@@ -330,8 +331,7 @@ separate axes:
       "kind": "sdk",
       "status": "supported",
       "authMode": "api-key",
-      "deploymentModes": ["local", "self_hosted", "cloud"],
-      "exportSubpath": "./sdk",
+          "exportSubpath": "./sdk",
       "generatedFrom": "/openapi.json",
       "clientClassName": "TodosClient"
     },
@@ -340,16 +340,14 @@ separate axes:
       "kind": "mcp",
       "status": "supported",
       "mcpBin": "todos-mcp",
-      "authMode": "api-key",
-      "deploymentModes": ["local", "self_hosted", "cloud"]
+      "authMode": "api-key"
     },
     {
       "name": "cli",
       "kind": "cli",
       "status": "supported",
       "bin": "todos",
-      "authMode": "local-only",
-      "deploymentModes": ["local", "self_hosted"]
+      "authMode": "local-only"
     }
   ]
 }
@@ -359,10 +357,8 @@ separate axes:
 - `kitVersion` — the `@hasna/contracts` version the repo tracks.
 - `hosting` — product stories: `user-hosted` and, only when available,
   `hasna-saas`.
-- `deploymentModes` — runtime placements: `local`, `self_hosted`, `cloud`.
-  The old `self-hosted` spelling parses as a deprecated alias.
-- `storage.mode` — active storage router (`local | cloud`), distinct from
-  placement.
+- `storage.mode` — active data backend (`sqlite | postgres`), the server's
+  internal storage.
 - `storage.engines` — supported persistence engines.
 - `serviceSurfaces` — supported product-surface declarations. Service-capable
   repos declare API, SDK, MCP, and CLI; a CLI-only `cli-with-store` declares
@@ -672,15 +668,18 @@ proof remain the responsibility of each owning package.
 
 ---
 
-## 12. Migration from 0.4.x/0.5.x manifests
+## 12. Migration from pre-0.8.3 manifests
 
-Existing `deploymentModes: ["self-hosted"]` values normalize to `self_hosted`;
-missing `hosting`, `deploymentModes`, and `serviceSurfaces` still receive
-compatible defaults, so legacy manifests such as OpenLoops remain
-schema-readable. The current schema intentionally rejects a declared
-non-`.db` `storage.sqlitePath`, a SaaS store without `storage.envPrefix`, and a
-declared supported API that omits the health/readiness/version endpoints or
-uses a method other than `GET`.
+The deployment-placement field is **rejected, not ignored**: a manifest that
+still carries it — top-level or on a service surface, in any spelling — fails
+validation with an error naming the field, and `storage.mode` accepts only
+`sqlite | postgres`. Migration is deletion plus rename: delete the placement
+arrays, rename `storage.mode` values (the old file-backed value becomes
+`sqlite`, the old server-backed value becomes `postgres`). Missing `hosting`
+and `serviceSurfaces` still receive compatible defaults. The current schema
+intentionally rejects a declared non-`.db` `storage.sqlitePath`, a SaaS store
+without `storage.envPrefix`, and a declared supported API that omits the
+health/readiness/version endpoints or uses a method other than `GET`.
 
 Conformance is stricter than schema parsing. A legacy service manifest can
 remain schema-valid while failing new checks until it:
@@ -696,9 +695,9 @@ remain schema-valid while failing new checks until it:
    repo adopting the waiver SHOULD keep an existing `storage.envPrefix`, since
    the waiver only removes the requirement and deleting the field discards the
    declared `HASNA_<NAME>_DATABASE_URL` contract;
-5. adds a root self-host artifact when it ships a service;
-6. removes private infrastructure references from the public manifest; and
-7. writes canonical `self_hosted` runtime placement spelling.
+5. adds a root operator-deploy artifact (`docker-compose.yml`) when it ships
+   a service; and
+6. removes private infrastructure references from the public manifest.
 
 Conformance treats `pgTestGate.command` and every other manifest command as
 data only; it never executes them.

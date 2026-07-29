@@ -55,8 +55,8 @@ Required fields:
 | `requestId` | Request id carried across API, MCP, CLI, SDK, dashboard, and worker logs. |
 
 Missing boundary claims fail closed outside explicitly documented local-only
-mode. Default tenant, workspace, or entity ids are not accepted in shared,
-self-hosted, or cloud modes.
+mode. Default tenant, workspace, or entity ids are not accepted on any shared
+or server-backed deployment.
 
 ## Token Types
 
@@ -68,7 +68,7 @@ self-hosted, or cloud modes.
 | MCP token | Agent tool calls. | Broad admin by default, credential value reads, live provider side effects without approval. |
 | Machine/job token | Worker, queue, and machine-local jobs. | Human session, arbitrary workspace access, provider mutation outside job scope. |
 | Provider webhook | Inbound provider callback. | Any caller-initiated API, dashboard, CLI, or MCP operation. |
-| Local-dev | Loopback-only local development. | Non-loopback bind, shared data, self-hosted/cloud claims. |
+| Local-dev | Loopback-only local development. | Non-loopback bind, shared data, server-backed claims. |
 
 Every verifier returns an audit event for both allow and deny decisions.
 
@@ -403,7 +403,7 @@ provider signatures, private payloads, or cross-tenant object details.
 
 Human dashboard sessions must use secure cookies, CSRF/origin protection,
 logout invalidation, refresh/rotation semantics, and same-site policy
-appropriate to the deployment mode. Dashboard APIs must not accept MCP or
+appropriate to the deployment. Dashboard APIs must not accept MCP or
 service tokens unless explicitly documented for a non-browser operator action.
 
 ## MCP And CLI Requirements

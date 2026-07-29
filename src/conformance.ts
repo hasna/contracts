@@ -8,7 +8,7 @@
 //      gate, or carry an explicit, unexpired storage-engine waiver.
 //   5. Public manifests do not expose private infrastructure references.
 //   6. Env parsing follows the HASNA_<NAME>_STORAGE_MODE spec and any mode env
-//      value normalizes to the local|cloud enum (mode enum compliance).
+//      value normalizes to the sqlite|postgres backend enum (mode enum compliance).
 //   7. If a `<name>-serve` bin exists, the health payload (when sampled) has the
 //      { status, version, mode } shape.
 //   8. No forbidden shared cloud runtimes (reuses the no-cloud guard).
@@ -377,7 +377,6 @@ function analyzeStorageWaivers(manifest: ServiceContractManifest, nowMs: number)
     name: manifest.name,
     bins: manifest.bins,
     hosting: manifest.hosting,
-    deploymentModes: manifest.deploymentModes,
     storageMode: manifest.storage?.mode
   });
   if (ineligible) {
@@ -880,12 +879,11 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
   const { modeKeys } = storageEnvKeys(manifest.name);
   const modeEnvHit = modeKeys.map((key) => ({ key, value: env[key]?.trim() })).find((hit) => hit.value);
   if (!modeEnvHit || !modeEnvHit.value) {
-    checks.push({ id: "mode_enum_compliance", status: "pass", detail: `no mode env set; defaults to local (keys: ${modeKeys.join(", ")})` });
+    checks.push({ id: "mode_enum_compliance", status: "pass", detail: `no mode env set; defaults to sqlite (keys: ${modeKeys.join(", ")})` });
   } else {
     try {
-      const { mode, deprecatedAlias } = normalizeStorageMode(modeEnvHit.value);
-      const alias = deprecatedAlias ? ` (deprecated alias '${deprecatedAlias}' -> cloud)` : "";
-      checks.push({ id: "mode_enum_compliance", status: "pass", detail: `${modeEnvHit.key} normalizes to '${mode}'${alias}` });
+      const { mode } = normalizeStorageMode(modeEnvHit.value);
+      checks.push({ id: "mode_enum_compliance", status: "pass", detail: `${modeEnvHit.key} normalizes to '${mode}'` });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       checks.push({ id: "mode_enum_compliance", status: "fail", detail: `${modeEnvHit.key}: ${message}` });

@@ -4,9 +4,12 @@
   "class": "cli-with-store",
   "contractVersion": "v1",
   "kitVersion": "0.3.0",
-  "bins": ["todos", "todos-sync"],
+  "bins": [
+    "todos",
+    "todos-sync"
+  ],
   "storage": {
-    "mode": "local",
+    "mode": "sqlite",
     "sqlitePath": "~/.hasna/todos/todos.db"
   }
 }

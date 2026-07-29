@@ -1,21 +1,21 @@
 // Client-side transport resolver for the Hasna Service Contract v1.
 //
-// THIS IS THE B2 CORE FIX. Historically, setting a client to cloud/self_hosted
-// mode was a NO-OP: the CLI/MCP still read the local SQLite/db.json store even
-// though `HASNA_<APP>_STORAGE_MODE=cloud` and a DATABASE_URL were set. A DSN on
-// the client does NOT switch the dataset a CLI reads.
+// THE CLIENT SEAM IS `sqlite | http` (owner ruling 2026-07-29): an OSS client
+// reads EITHER its on-box SQLite file OR the app server's HTTP API. It NEVER
+// opens PostgreSQL directly — `postgres` is the SERVER's backend, so a client
+// whose data lives in postgres reaches it over HTTP. A DSN on the client does
+// NOT switch the dataset a CLI reads.
 //
-// This module makes the client actually talk to the cloud. Given an app name and
-// the environment it decides whether reads AND writes should be routed to the
-// app's cloud HTTP API (`<API_URL>/v1`, default
-// `https://<app>.<HASNA_FLEET_API_DOMAIN>/v1`)
-// with the API key, or fall through to the local store.
+// Given an app name and the environment, this module decides whether reads AND
+// writes should be routed to the app's HTTP API (`<API_URL>/v1`, default
+// `https://<app>.<HASNA_FLEET_API_DOMAIN>/v1`) with the API key, or fall
+// through to the local store.
 //
 // THE CLIENT-FLIP CONTRACT (env vars). For app `<NAME>` = envToken(name):
 //
-//   Mode   (any one, first match wins; aliases self_hosted/remote/hybrid -> cloud):
-//     HASNA_<NAME>_STORAGE_MODE = cloud | self_hosted | local | ...
-//     HASNA_<NAME>_MODE         = cloud | self_hosted | local | ...   (alias)
+//   Backend (any one, first match wins; removed placement words throw):
+//     HASNA_<NAME>_STORAGE_MODE = sqlite | postgres
+//     HASNA_<NAME>_MODE         = sqlite | postgres                   (alias)
 //     <NAME>_STORAGE_MODE                                             (alias)
 //     <NAME>_MODE                                                     (alias)
 //   API base URL (optional; `/v1` is appended automatically):
@@ -25,20 +25,21 @@
 //     HASNA_<NAME>_API_KEY -> value from the app-owned vault
 //     <NAME>_API_KEY                                                  (alias)
 //
-// DECISION: transport is `cloud-http` IFF the resolved mode is `cloud` AND an API
-// key is present. The mode is `cloud` when either (a) an explicit mode env resolves
-// to cloud, OR (b) no mode env is set but BOTH the API URL and API key are present —
-// the fleet env-flip writes exactly those two vars (no STORAGE_MODE), so their joint
-// presence is inferred as self_hosted intent. When a key is present but no explicit
-// URL is set, the base URL falls back to `https://<app>.<domain>` where `<domain>`
-// comes from `HASNA_FLEET_API_DOMAIN` (REQUIRED for a real deployment) or else a
-// neutral, non-resolving placeholder — this published package never bakes in a real
-// internal hostname. Missing, malformed, or app-prefix-incompatible fleet-domain
-// configuration resolves to that app-specific placeholder with
+// DECISION: transport is `http` IFF the resolved backend is `postgres` AND an
+// API key is present. The backend is `postgres` when either (a) an explicit
+// mode env resolves to postgres, OR (b) no mode env is set but BOTH the API URL
+// and API key are present — the fleet env-flip writes exactly those two vars
+// (no STORAGE_MODE), so their joint presence IS the server-data intent. When a
+// key is present but no explicit URL is set, the base URL falls back to
+// `https://<app>.<domain>` where `<domain>` comes from
+// `HASNA_FLEET_API_DOMAIN` (REQUIRED for a real deployment) or else a neutral,
+// non-resolving placeholder — this published package never bakes in a real
+// internal hostname. Missing, malformed, or app-prefix-incompatible
+// fleet-domain configuration resolves to that app-specific placeholder with
 // `misconfigured: true`; callers fail before constructing an authenticated
-// client. If mode is `cloud` but the API key is MISSING, we do NOT silently serve
-// wrong local data — we return `local` with a loud warning and `misconfigured:
-// true` so the caller can hard-fail instead of drifting.
+// client. If the backend is `postgres` but the API key is MISSING, we do NOT
+// silently serve wrong local data — we return `sqlite` with a loud warning and
+// `misconfigured: true` so the caller can hard-fail instead of drifting.
 //
 // SAFETY: this module never returns, logs, or embeds the API key value. Callers
 // receive only presence flags and env-key names.
@@ -336,18 +337,16 @@ export function toV1BaseUrl(apiUrl: string): string {
   return url.toString().replace(/\/+$/, "");
 }
 
-export type ClientTransportKind = "local" | "cloud-http";
+export type ClientTransportKind = "sqlite" | "http";
 
 export interface ClientTransportResolution {
   /** Where the client should read/write from. */
   transport: ClientTransportKind;
-  /** Resolved storage mode (`local` | `cloud`). */
+  /** Resolved data backend (`sqlite` | `postgres`) the app's data lives in. */
   mode: StorageMode;
-  /** Deprecated mode alias that was normalized (e.g. `self_hosted`), if any. */
-  deprecatedAlias: string | null;
-  /** Env key the mode was read from, or `"default"`. */
+  /** Env key the backend was read from, or `"default"`. */
   modeSource: string;
-  /** `<origin>/v1` base for the cloud API when transport is cloud-http, else null. */
+  /** `<origin>/v1` base for the server API when transport is http, else null. */
   baseUrl: string | null;
   /** Env key the API URL/domain came from, `"default"` (neutral placeholder), or null. */
   apiUrlSource: string | null;
@@ -356,9 +355,10 @@ export interface ClientTransportResolution {
   /** Env key the API key came from, or null. */
   apiKeySource: string | null;
   /**
-   * True when the operator asked for cloud but the config is incomplete. Missing
-   * keys fall back to local; missing or malformed default-domain config resolves
-   * to a neutral placeholder. Callers SHOULD treat either result as an error.
+   * True when the operator asked for server data but the config is incomplete.
+   * Missing keys fall back to the sqlite file; missing or malformed
+   * default-domain config resolves to a neutral placeholder. Callers SHOULD
+   * treat either result as an error.
    */
   misconfigured: boolean;
   /** Human-readable warning, or null. Never contains secret values. */
@@ -368,8 +368,9 @@ export interface ClientTransportResolution {
 /**
  * Resolve how a client should reach an app's data given the environment.
  *
- * Precedence for the mode: the first present of `HASNA_<NAME>_STORAGE_MODE`,
- * `HASNA_<NAME>_MODE`, `<NAME>_STORAGE_MODE`, `<NAME>_MODE`, else `local`.
+ * Precedence for the backend: the first present of `HASNA_<NAME>_STORAGE_MODE`,
+ * `HASNA_<NAME>_MODE`, `<NAME>_STORAGE_MODE`, `<NAME>_MODE`, else `sqlite`
+ * (or `postgres` when both the API URL and API key are present).
  */
 export function resolveClientTransport(name: string, env: Env = process.env): ClientTransportResolution {
   const keys = clientTransportEnvKeys(name);
@@ -377,37 +378,29 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
   const urlHit = firstEnv(env, keys.apiUrlKeys, { preserveRaw: true });
   const keyHit = firstEnv(env, keys.apiKeyKeys);
 
-  let mode: StorageMode = "local";
-  let deprecatedAlias: string | null = null;
+  let mode: StorageMode = "sqlite";
   let modeSource = "default";
   const warnings: string[] = [];
 
   if (modeHit) {
-    const normalized = normalizeStorageMode(modeHit.value);
-    mode = normalized.mode;
-    deprecatedAlias = normalized.deprecatedAlias;
+    mode = normalizeStorageMode(modeHit.value).mode;
     modeSource = modeHit.key;
-    if (deprecatedAlias) {
-      warnings.push(
-        `Deprecated mode '${deprecatedAlias}' from ${modeHit.key} is treated as 'cloud'. Prefer ${keys.modeKeys[0]}=cloud.`,
-      );
-    }
   } else if (urlHit && keyHit) {
     // Flip signal: the fleet env-flip writes EXACTLY HASNA_<APP>_API_URL +
     // HASNA_<APP>_API_KEY per app and NO explicit STORAGE_MODE (see machines
-    // FLEET-FLIP.md). Their joint presence IS the self_hosted intent, so infer
-    // `cloud`. Revert removes both vars, so the client falls back to local. Without
-    // this, a flipped client with only url+key silently kept reading its local store.
-    mode = "cloud";
+    // FLEET-FLIP.md). Their joint presence IS the server-data intent, so infer
+    // `postgres`. Revert removes both vars, so the client falls back to its
+    // sqlite file. Without this, a flipped client with only url+key silently
+    // kept reading its local store.
+    mode = "postgres";
     modeSource = `${urlHit.key}+${keyHit.key}`;
   }
 
-  // Local mode: never route to the network, regardless of URL/key presence.
-  if (mode === "local") {
+  // sqlite backend: never route to the network, regardless of URL/key presence.
+  if (mode === "sqlite") {
     return {
-      transport: "local",
+      transport: "sqlite",
       mode,
-      deprecatedAlias,
       modeSource,
       baseUrl: null,
       apiUrlSource: null,
@@ -418,15 +411,16 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     };
   }
 
-  // Cloud mode but no API key: fall back to local, but flag it loudly.
+  // Server data (postgres) but no API key: a client never opens PostgreSQL
+  // directly, and without a key it cannot reach the server either — fall back
+  // to the sqlite file, but flag it loudly.
   if (!keyHit) {
     warnings.push(
-      `${modeSource}=cloud but no API key is set (${keys.apiKeyKeys[0]}). Refusing to route to cloud; using local store. Set ${keys.apiKeyKeys[0]} to enable the cloud client.`,
+      `${modeSource}=postgres but no API key is set (${keys.apiKeyKeys[0]}). A client reaches server data over HTTP only; refusing to route. Using the local sqlite store. Set ${keys.apiKeyKeys[0]} to enable the API client.`,
     );
     return {
-      transport: "local",
+      transport: "sqlite",
       mode,
-      deprecatedAlias,
       modeSource,
       baseUrl: null,
       apiUrlSource: null,
@@ -455,9 +449,8 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     const message = error instanceof Error ? error.message : String(error);
     warnings.push(`Invalid API URL from ${apiUrlSource}: ${message}. Using local store.`);
     return {
-      transport: "local",
+      transport: "sqlite",
       mode,
-      deprecatedAlias,
       modeSource,
       baseUrl: null,
       apiUrlSource: null,
@@ -471,9 +464,8 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
   if (defaultBaseUrl?.warning) warnings.push(defaultBaseUrl.warning);
 
   return {
-    transport: "cloud-http",
+    transport: "http",
     mode,
-    deprecatedAlias,
     modeSource,
     baseUrl,
     apiUrlSource,
@@ -759,34 +751,34 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
 }
 
 /**
- * Convenience: resolve transport from env and, when cloud-http, build the HTTP
- * client in one call. Returns `{ transport: 'local', resolution }` for local, or
- * `{ transport: 'cloud-http', client, resolution }` for cloud. Throws if the
- * config is `misconfigured` (cloud requested but unusable) so callers can't drift
- * onto local data by accident.
+ * Convenience: resolve transport from env and, when http, build the HTTP
+ * client in one call. Returns `{ transport: 'sqlite', resolution }` for the
+ * local file, or `{ transport: 'http', client, resolution }` for server data.
+ * Throws if the config is `misconfigured` (server data requested but unusable)
+ * so callers can't drift onto local data by accident.
  */
 export function createClientTransport(
   name: string,
   env: Env = process.env,
   overrides?: Partial<Pick<HasnaHttpTransportOptions, "fetchImpl" | "headers" | "timeoutMs" | "retry" | "sleepImpl">>,
 ):
-  | { transport: "local"; client: null; resolution: ClientTransportResolution }
-  | { transport: "cloud-http"; client: HasnaHttpTransport; resolution: ClientTransportResolution } {
+  | { transport: "sqlite"; client: null; resolution: ClientTransportResolution }
+  | { transport: "http"; client: HasnaHttpTransport; resolution: ClientTransportResolution } {
   const resolution = resolveClientTransport(name, env);
   if (resolution.misconfigured) {
-    throw new Error(resolution.warning ?? `Client for '${name}' is misconfigured for cloud mode.`);
+    throw new Error(resolution.warning ?? `Client for '${name}' is misconfigured for the API client.`);
   }
-  if (resolution.transport === "local" || !resolution.baseUrl) {
-    return { transport: "local", client: null, resolution };
+  if (resolution.transport === "sqlite" || !resolution.baseUrl) {
+    return { transport: "sqlite", client: null, resolution };
   }
   const keys = clientTransportEnvKeys(name);
   const apiKey = firstEnv(env, keys.apiKeyKeys)?.value;
   if (!apiKey) {
     // Should be unreachable given resolution logic, but never build without a key.
-    throw new Error(`Client for '${name}' resolved to cloud-http without an API key.`);
+    throw new Error(`Client for '${name}' resolved to http without an API key.`);
   }
   return {
-    transport: "cloud-http",
+    transport: "http",
     client: createHasnaHttpTransport({
       name,
       baseUrl: resolution.baseUrl,

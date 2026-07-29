@@ -1145,10 +1145,9 @@ function conformanceRepo(name: string, pkg: Record<string, unknown>, manifestExt
       description: "Test fixture",
       bins: ["widget"],
       hosting: ["user-hosted"],
-      deploymentModes: ["local"],
       serviceSurfaces: [
-        { name: "sdk", kind: "sdk", status: "supported", authMode: "none", deploymentModes: ["local"], exportSubpath: "." },
-        { name: "cli", kind: "cli", status: "supported", bin: "widget", authMode: "local-only", deploymentModes: ["local"] },
+        { name: "sdk", kind: "sdk", status: "supported", authMode: "none", exportSubpath: "." },
+        { name: "cli", kind: "cli", status: "supported", bin: "widget", authMode: "local-only" },
       ],
       metadata: {
         conformance: {
