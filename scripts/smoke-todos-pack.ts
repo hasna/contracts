@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { archivePackageEntries, auditExtractedPackage } from "../src/testing/packed-consumer.js";
 
 const root = join(import.meta.dir, "..");
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "contracts-todos-pack-"));
@@ -127,15 +128,30 @@ try {
     stdout: "pipe",
     stderr: "pipe",
   });
+  let installedFromArchive = false;
   if (install.exitCode !== 0) {
     const installOutput = `${text(install.stdout)}\n${text(install.stderr)}`;
     if (!/(?:ReadOnlyFileSystem|ConnectionRefused|FailedToOpenSocket)/.test(installOutput)) {
       throw new Error(`isolated consumer install failed\n${installOutput}`);
     }
     installFromArchiveFallback();
+    installedFromArchive = true;
   }
 
-  if (lstatSync(packageRoot).isSymbolicLink()) {
+  // Both branches have to prove the same thing: the consumer resolves the
+  // packed tarball and nothing else. On the `bun install` path the symlink
+  // check is that proof — a resolver that linked back to this repo leaves
+  // node_modules/@hasna/contracts a link. On the fallback path the same check
+  // is tautological, because the fallback creates that directory itself, so
+  // the tree is audited against the archive's own entry list instead.
+  if (installedFromArchive) {
+    const audit = auditExtractedPackage(packageRoot, archivePackageEntries(entries));
+    if (!audit.ok) {
+      throw new Error(
+        `isolated consumer tree does not match the packed archive\n${audit.failures.join("\n")}`,
+      );
+    }
+  } else if (lstatSync(packageRoot).isSymbolicLink()) {
     throw new Error("isolated consumer resolved @hasna/contracts through a symlink");
   }
   const packageJson = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {

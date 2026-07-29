@@ -12,4 +12,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install
+        # The loopback security suites and the publish gate are fail-closed.
+        # Pinning both seams to empty here means CI can never inherit an
+        # environment that downgrades them to a skip: a runner that loses bind
+        # capability breaks the build instead of going green with the
+        # credential-boundary coverage silently missing.
       - run: bun run verify:release
+        env:
+          CONTRACTS_ALLOW_LOOPBACK_SKIP: ""
+          CONTRACTS_LOOPBACK_PROBE_DENY: ""

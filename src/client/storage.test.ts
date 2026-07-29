@@ -6,28 +6,18 @@ import {
   type HasnaRequestOptions,
 } from "./transport.js";
 import { createHasnaStorageClient, resolveStorageClient } from "./storage.js";
+import { createLoopbackTestGate } from "../testing/loopback.js";
 
-function canStartLoopbackServer(): boolean {
-  const servers: Array<ReturnType<typeof Bun.serve>> = [];
-  try {
-    for (const hostname of ["127.0.0.1", "0.0.0.0"]) {
-      servers.push(Bun.serve({
-        hostname,
-        port: 0,
-        fetch() {
-          return new Response("ok");
-        },
-      }));
-    }
-    return true;
-  } catch {
-    return false;
-  } finally {
-    for (const server of servers) server.stop(true);
-  }
-}
+// The resolver suite below binds with `Bun.serve({ port })` and no hostname,
+// which Bun binds on the wildcard address, so that is the only capability it
+// needs. The gate is fail-closed: an unavailable bind produces a failing case,
+// never a silent skip, unless CONTRACTS_ALLOW_LOOPBACK_SKIP=1 is set — and the
+// positive control below fails in that case.
+const wildcardGate = createLoopbackTestGate(["wildcard"], { describe, test });
 
-const describeLoopback = canStartLoopbackServer() ? describe : describe.skip;
+test("positive control: the loopback-gated resolver suite actually ran", () => {
+  expect(wildcardGate.requirement.decision).toBe("run");
+});
 
 // A scriptable fetch stub that records requests and returns queued responses.
 function makeFetch(handler: (req: { method: string; url: string; headers: Record<string, string>; body: unknown }) => { status: number; body?: unknown; text?: string }) {
@@ -185,7 +175,7 @@ describe("retries + idempotency", () => {
 });
 
 // End-to-end: a demo app storage resolver picks the HTTP client on flip, local otherwise.
-describeLoopback("resolveStorageClient — the resolver an app wires", () => {
+wildcardGate.describe("resolveStorageClient — the resolver an app wires", () => {
   const KEY = "hasna_demo_resolver_secret";
   const cloud = new Map<string, { id: string; title: string }>();
   let server: ReturnType<typeof Bun.serve>;
