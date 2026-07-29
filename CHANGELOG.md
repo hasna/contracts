@@ -2,6 +2,13 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [Unreleased]
+
+- Client transport now requires an explicit `STORAGE_MODE=postgres` selection
+  before using HTTP. API endpoints and credentials are connection material;
+  their presence, including a credential appearing on disk, never changes a
+  client from SQLite to network data.
+
 ## [0.8.4] - 2026-07-29
 
 ### BREAKING: the deployment-mode axis is removed; storage is a `sqlite | postgres` backend switch

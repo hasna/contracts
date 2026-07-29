@@ -63,19 +63,21 @@ describe("resolveClientTransport — the client-flip contract", () => {
     expect(JSON.stringify(r)).not.toContain("hasna_todos_abc");
   });
 
-  test("FLIP: url+key with NO mode env => inferred http (fleet-flip contract)", () => {
+  test("url+key with no backend env stays sqlite until postgres is explicitly selected", () => {
     const r = resolveClientTransport("todos", {
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
       HASNA_TODOS_API_KEY: "hasna_todos_flip",
     });
-    expect(r.transport).toBe("http");
-    expect(r.mode).toBe("postgres");
-    expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
-    expect(r.modeSource).toBe("HASNA_TODOS_API_URL+HASNA_TODOS_API_KEY");
+    expect(r.transport).toBe("sqlite");
+    expect(r.mode).toBe("sqlite");
+    expect(r.baseUrl).toBeNull();
+    expect(r.modeSource).toBe("default");
+    expect(r.apiKeyPresent).toBe(true);
+    expect(r.apiKeySource).toBe("HASNA_TODOS_API_KEY");
     expect(JSON.stringify(r)).not.toContain("hasna_todos_flip");
   });
 
-  test("FLIP revert: url present but key removed => back to sqlite (not misconfigured)", () => {
+  test("url without a backend env stays sqlite (not misconfigured)", () => {
     const r = resolveClientTransport("todos", {
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
     });

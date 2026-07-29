@@ -247,13 +247,15 @@ describe("client seam is sqlite|http, never placement words", () => {
     }
   });
 
-  test("URL + key without a mode env infers the http transport", () => {
+  test("URL + key without an explicit backend env cannot select the http transport", () => {
     const resolved = resolveClientTransport("demo", {
       HASNA_DEMO_API_URL: "https://demo.example.com",
       HASNA_DEMO_API_KEY: "test-key-not-a-secret",
     });
-    expect(resolved.transport).toBe("http");
-    expect(resolved.baseUrl).toBe("https://demo.example.com/v1");
+    expect(resolved.transport).toBe("sqlite");
+    expect(resolved.mode).toBe("sqlite");
+    expect(resolved.modeSource).toBe("default");
+    expect(resolved.baseUrl).toBeNull();
   });
 
   test("postgres backend on a client routes over http (never a direct DB open)", () => {

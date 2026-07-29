@@ -25,12 +25,11 @@
 //     HASNA_<NAME>_API_KEY -> value from the app-owned vault
 //     <NAME>_API_KEY                                                  (alias)
 //
-// DECISION: transport is `http` IFF the resolved backend is `postgres` AND an
-// API key is present. The backend is `postgres` when either (a) an explicit
-// mode env resolves to postgres, OR (b) no mode env is set but BOTH the API URL
-// and API key are present — the fleet env-flip writes exactly those two vars
-// (no STORAGE_MODE), so their joint presence IS the server-data intent. When a
-// key is present but no explicit URL is set, the base URL falls back to
+// DECISION: transport is `http` IFF an explicit backend env resolves to
+// `postgres` AND an API key is present. An endpoint or credential is connection
+// material, never a transition signal: adding either one, in the environment or
+// on disk, cannot move a client off its local SQLite data. When a key is present
+// but no explicit URL is set, the base URL falls back to
 // `https://<app>.<domain>` where `<domain>` comes from
 // `HASNA_FLEET_API_DOMAIN` (REQUIRED for a real deployment) or else a neutral,
 // non-resolving placeholder — this published package never bakes in a real
@@ -369,8 +368,8 @@ export interface ClientTransportResolution {
  * Resolve how a client should reach an app's data given the environment.
  *
  * Precedence for the backend: the first present of `HASNA_<NAME>_STORAGE_MODE`,
- * `HASNA_<NAME>_MODE`, `<NAME>_STORAGE_MODE`, `<NAME>_MODE`, else `sqlite`
- * (or `postgres` when both the API URL and API key are present).
+ * `HASNA_<NAME>_MODE`, `<NAME>_STORAGE_MODE`, `<NAME>_MODE`, else `sqlite`.
+ * API URLs and credentials never participate in this decision.
  */
 export function resolveClientTransport(name: string, env: Env = process.env): ClientTransportResolution {
   const keys = clientTransportEnvKeys(name);
@@ -385,15 +384,6 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
   if (modeHit) {
     mode = normalizeStorageMode(modeHit.value).mode;
     modeSource = modeHit.key;
-  } else if (urlHit && keyHit) {
-    // Flip signal: the fleet env-flip writes EXACTLY HASNA_<APP>_API_URL +
-    // HASNA_<APP>_API_KEY per app and NO explicit STORAGE_MODE (see machines
-    // FLEET-FLIP.md). Their joint presence IS the server-data intent, so infer
-    // `postgres`. Revert removes both vars, so the client falls back to its
-    // sqlite file. Without this, a flipped client with only url+key silently
-    // kept reading its local store.
-    mode = "postgres";
-    modeSource = `${urlHit.key}+${keyHit.key}`;
   }
 
   // sqlite backend: never route to the network, regardless of URL/key presence.

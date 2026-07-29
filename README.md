@@ -411,6 +411,9 @@ Seam](docs/AUTH_RBAC_VERIFIER_CONTRACT.md#identity-seam-offline-eddsa-fleet-toke
 
 **Client env vars (HTTP transport to an operator-run server):**
 
+- `HASNA_<APP>_STORAGE_MODE=postgres` — the required explicit signal that the
+  client's data lives behind the HTTP API. Neither an endpoint nor a credential
+  selects network transport on its own or in combination.
 - `HASNA_<APP>_API_URL` + `HASNA_<APP>_API_KEY` — the explicit per-app URL
   always wins and is normalized to `/v1`. Explicit URLs require canonical ASCII
   authorities without credentials, controls, IDN/punycode, query strings, or
@@ -434,8 +437,8 @@ Seam](docs/AUTH_RBAC_VERIFIER_CONTRACT.md#identity-seam-offline-eddsa-fleet-toke
 The short aliases `<APP>_API_URL` and `<APP>_API_KEY` remain supported after the
 canonical `HASNA_` names. Client configuration uses an HTTP API URL, never a
 database DSN. When relying on the fleet-domain or placeholder default (no
-explicit per-app URL), set `HASNA_<APP>_STORAGE_MODE=cloud`; only an explicit
-URL + API-key pair infers cloud mode when the mode variable is absent.
+explicit per-app URL), the same explicit `HASNA_<APP>_STORAGE_MODE=postgres`
+signal is still required.
 
 Scope grammar is `<app>:<action>` with wildcards (`*`, `<app>:*`, `*:<action>`).
 
