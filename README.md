@@ -209,6 +209,49 @@ contracts no-cloud-scan --manifest app-cloud.manifest.json .
 contracts no-cloud-scan --json hasna-todos-0.11.62.tgz
 ```
 
+## Adopter Checklist
+
+A downstream package has finished adopting `@hasna/contracts` only when it
+ships the enforcement half as well as the runtime import:
+
+1. Add `@hasna/contracts` to `dependencies` when production code imports it.
+2. Call `parseContract(...)` at the boundary before returning, publishing, or
+   persisting a shared contract payload.
+3. Copy the starter fixtures into `fixtures/` (or use `examples/`) and replace
+   them with package-owned cases. Keep at least one `.valid.json` and one
+   `.invalid.json` fixture for every adopted schema.
+4. Add the conformance script below and run it in CI. The fixture directory in
+   the script must match the directory chosen in step 3.
+5. Run `contracts no-cloud-scan .` from `prepublishOnly`. Merge it into the
+   existing release gate; do not remove typecheck, test, build, or pack checks.
+
+Copy the published starter fixtures after installing the dependency:
+
+```bash
+mkdir -p fixtures
+cp node_modules/@hasna/contracts/templates/adopter/fixtures/*.json fixtures/
+```
+
+Merge this reference fragment into `package.json` (and preserve any existing
+`prepublishOnly` commands before the two new gates):
+
+```json
+{
+  "dependencies": {
+    "@hasna/contracts": "^0.8.4"
+  },
+  "scripts": {
+    "contracts:conformance": "contracts conformance fixtures",
+    "prepublishOnly": "bun run contracts:conformance && contracts no-cloud-scan ."
+  }
+}
+```
+
+Run `bun run contracts:conformance` locally before relying on the prepublish
+gate. Conformance fails closed on empty fixture sets, malformed JSON, unknown
+schemas, valid fixtures rejected by their schema, and invalid fixtures that the
+schema accepts.
+
 Print the shared declarative secure local-store policy for `.hasna` and
 `.codewith`, optionally filtered to one package-owned store:
 
