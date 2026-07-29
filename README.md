@@ -453,7 +453,17 @@ contracts issue-key --app todos --scopes 'todos:read' --no-store --json
 ```
 
 Signing secret is read from `HASNA_<APP>_API_SIGNING_KEY` (then `HASNA_API_SIGNING_KEY`);
-the record store uses `HASNA_<APP>_DATABASE_URL`. Generate a signing secret with
+the record store uses `HASNA_<APP>_DATABASE_URL` (or `--database-url-env`).
+
+The hashed record always lands in Postgres. Client-transport configuration
+(`HASNA_<APP>_STORAGE_MODE`, `HASNA_<APP>_API_URL`, `HASNA_<APP>_API_KEY`) selects
+the transport for that app's *data* and neither diverts nor blocks this write:
+there is no `api-keys` operation in the operation manifest or in any app's served
+OpenAPI document, so `issue-key` ships no HTTP writer that would have to guess
+whether a record was really stored.
+
+Any persistence failure still prints the minted secret — it exists only in that
+process and cannot be reissued. Generate a signing secret with
 `openssl rand -hex 32`. Revoke with `store.revoke(kid)`.
 
 Services that expose API, MCP, CLI-token, dashboard, worker, sync/export, or
