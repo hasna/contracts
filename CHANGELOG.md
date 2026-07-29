@@ -4,6 +4,14 @@ All notable changes to `@hasna/contracts` are documented here.
 
 ## Unreleased
 
+### Tests: direct Todos operation and invariant coverage
+
+Added focused unit coverage for the operation manifest's schema and semantic
+guards, operation lookup misses, invariant-registry integrity, and invariant
+lookup hits and empty results. `src/no-cloud.ts` was not duplicated here because
+its exported scanner and declaration masker already have extensive direct edge
+coverage in `tests/no-cloud-edge.test.ts`.
+
 ### Credential resolution: env holds a pointer, disk holds the secret, resolved at call time
 
 MEASURED FAILURE THIS KILLS. A tmux shell started before a key rotation held the
