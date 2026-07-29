@@ -21,9 +21,9 @@ Excluded packages:
 - CLI-only or library packages that explicitly declare unsupported service
   surfaces in `hasna.contract.json`.
 
-Runtime placement vocabulary is `local`, `self_hosted`, and `cloud`.
-`self-hosted` is accepted only as a deprecated manifest-input alias.
-`remote` is a location word, not a deployment mode.
+Data-backend vocabulary is `sqlite` and `postgres` (the server's internal
+storage). The removed placement vocabulary — in any spelling — fails manifest
+validation. `remote` is a location word, not a backend.
 
 ## Contract Fields
 
@@ -32,8 +32,8 @@ Every onboarded repo must have `hasna.contract.json` validated by
 
 - Package identity: package name, version source, repo path, and canonical app
   short name.
-- Runtime placement support: `local`, `self_hosted`, `cloud`, or explicit
-  unsupported reason per mode.
+- Data backend: `storage.mode` of `sqlite` or `postgres`, with declared
+  `storage.engines`.
 - Published bins: primary CLI, MCP, serve, worker, runner, daemon, migrate, and
   doctor bins when supported.
 - Serve declaration: serve binary name, startup flags, lifecycle endpoints, and
@@ -238,7 +238,7 @@ Duplicate roots and package identity collisions are flagged, not counted twice.
 
 - Add or update `hasna.contract.json`.
 - Confirm package identity and canonical repo path.
-- Declare supported deployment modes and unsupported reasons.
+- Declare the data backend and storage engines.
 - Publish or explicitly reject `<name>-serve`.
 - Implement `/health`, `/ready`, and `/version`.
 - Place stable public APIs under `/v1`.

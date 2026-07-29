@@ -275,7 +275,7 @@ tests, worker/provider readiness, and readiness evidence bundles.
 
 ## Durable Storage Readiness
 
-Repos that claim shared, self-hosted, cloud, provider-live, finance, or
+Repos that claim shared, operator-run, provider-live, finance, or
 production readiness must also follow the
 [Durable Storage Readiness Standard](docs/STORAGE_READINESS_STANDARD.md). The
 standard covers source-of-truth declarations, Postgres migrations and drift
@@ -409,7 +409,7 @@ Seam](docs/AUTH_RBAC_VERIFIER_CONTRACT.md#identity-seam-offline-eddsa-fleet-toke
 | `HASNA_<APP>_API_SIGNING_KEY`  | HMAC signing secret (falls back to `HASNA_API_SIGNING_KEY`) |
 | `HASNA_<APP>_DATABASE_URL`     | RDS URL for the `api_keys` store (revocation lookups)      |
 
-**Client env vars (self_hosted mode):**
+**Client env vars (HTTP transport to an operator-run server):**
 
 - `HASNA_<APP>_API_URL` + `HASNA_<APP>_API_KEY` — the explicit per-app URL
   always wins and is normalized to `/v1`. Explicit URLs require canonical ASCII
@@ -467,8 +467,8 @@ negative-test matrix.
 
 `generateSdkFromOpenApi(spec)` turns an `<app>-serve` OpenAPI 3 document into a
 typed, dependency-free `fetch` client plus interfaces from `components.schemas`.
-The generated client sends the API key as `x-api-key`, so a self_hosted consumer
-only needs `HASNA_<APP>_API_URL` + `HASNA_<APP>_API_KEY`.
+The generated client sends the API key as `x-api-key`, so a consumer of an
+operator-run server only needs `HASNA_<APP>_API_URL` + `HASNA_<APP>_API_KEY`.
 
 ```ts
 import { generateSdkFromOpenApi } from "@hasna/contracts/sdk";

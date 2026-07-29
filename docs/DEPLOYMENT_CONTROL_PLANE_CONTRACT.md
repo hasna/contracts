@@ -309,7 +309,7 @@ environment. It MUST include:
 
 - product projection ID and revision;
 - environment identity and classification;
-- deployment mode (`local`, `self-hosted`, or `cloud`);
+- the environment's data backend (`sqlite` or `postgres`);
 - provider connection reference and provider capability snapshot digest;
 - typed account, region, cluster, network, storage, and routing locators;
 - policy, authorization, data-classification, backup, and rollback profiles;
@@ -669,8 +669,8 @@ of magical exactly-once execution. It MUST use:
 
 The existing `hasna.service_contract.v1` remains readable. Its additive
 capability fields may evolve compatibly under the rules in Section 10.1; the
-four-surface, hosting, storage-engine, and canonical `self_hosted` declarations
-land in v1 because old readers can ignore them safely. The only intentional v1
+four-surface, hosting, and storage-engine declarations land in v1 because old
+readers can ignore them safely. The only intentional v1
 validation tightening is that an explicitly declared SQLite path must end in
 `.db`.
 
@@ -687,8 +687,8 @@ contractVersion: v2
 
 `service_contract.v2` MUST:
 
-- preserve the existing package identity, class, bins, deployment modes,
-  storage, lifecycle, and conformance concepts;
+- preserve the existing package identity, class, bins, storage, lifecycle,
+  and conformance concepts;
 - model an explicit API base path that supports `/vN` and same-origin
   `/api/vN` without ambiguous route rewriting;
 - keep `/health`, `/ready`, `/version`, and `/openapi.json` outside the product
@@ -703,8 +703,8 @@ contractVersion: v2
   modes, reconciliation, and readiness gates;
 - declare package, installed-artifact, schema-drift, parity, auth-negative,
   no-secret, and evidence-bundle smokes;
-- distinguish `local`, `self_hosted`, and `cloud` deployment modes from the
-  package's `local | cloud` runtime storage vocabulary.
+- keep the package's `sqlite | postgres` data-backend switch as the only
+  storage axis; the removed placement vocabulary MUST NOT reappear in v2.
 
 The implementation MUST keep v1 exports and validation available. It MUST ship
 an explicit v1-to-v2 adapter where semantics are known, compatibility fixtures,

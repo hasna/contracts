@@ -88,6 +88,27 @@ describe("deployment-mode axis is rejected, not ignored", () => {
     }
   });
 
+  // Direction 1 of the inversion. The old schema REQUIRED deploymentModes on
+  // every service surface (`.min(1)`), so a manifest omitting it FAILED. Both
+  // directions must flip: omission validates (this test), carriage fails (the
+  // next one). This test is red against pre-removal main.
+  test("a service surface omitting deploymentModes validates", () => {
+    const result = validateServiceContractManifest({
+      ...validManifest,
+      bins: ["todos", "todos-serve"],
+      serviceSurfaces: [
+        {
+          name: "api",
+          kind: "api",
+          status: "deferred",
+          authMode: "api-key",
+          deferReason: "pending",
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
   test("a service surface carrying deploymentModes fails validation", () => {
     const result = validateServiceContractManifest({
       ...validManifest,
@@ -160,8 +181,12 @@ describe("JSON Schema copies reject the field structurally", () => {
       expect((schema as { additionalProperties?: boolean }).additionalProperties).toBe(false);
       const surfaceItems = (schema as any).properties?.serviceSurfaces?.items;
       expect(surfaceItems?.additionalProperties).toBe(false);
-      // The placement words must not survive as enum values anywhere.
+      // The placement words must not survive as enum values anywhere — and
+      // the field name must not survive as a VALUE either (the old schema
+      // listed "deploymentModes" in `required` arrays, where it is a string
+      // value, invisible to a key walk).
       const text = JSON.stringify(schema);
+      expect(text).not.toContain("deploymentMode");
       expect(text).not.toContain("self_hosted");
       expect(text).not.toContain("self-hosted");
     });
@@ -266,8 +291,18 @@ const FORBIDDEN_PATTERNS: readonly [string, RegExp][] = [
   ["hybrid", /\bhybrid\b/i],
 ];
 
+// A line carrying a 64-hex digest cell is a hash-anchored evidence row — a
+// quoted artifact of record whose text must stay verbatim (rewording it would
+// falsify the recorded digest). Exactly those lines are exempt from the
+// vocabulary scan; everything else in the same file is still scanned.
+const DIGEST_ANCHORED_LINE = /`[0-9a-f]{64}`/;
+
 function scanForForbidden(content: string): string[] {
-  return FORBIDDEN_PATTERNS.filter(([, pattern]) => pattern.test(content)).map(
+  const scannable = content
+    .split("\n")
+    .filter((line) => !DIGEST_ANCHORED_LINE.test(line))
+    .join("\n");
+  return FORBIDDEN_PATTERNS.filter(([, pattern]) => pattern.test(scannable)).map(
     ([label]) => label,
   );
 }
@@ -289,6 +324,16 @@ describe("no mode vocabulary survives in shipped source or live docs", () => {
     ]);
     expect(scanForForbidden("a hybrid runtime")).toEqual(["hybrid"]);
     expect(scanForForbidden("nothing to see")).toEqual([]);
+  });
+
+  test("digest-anchored evidence rows are exempt, and ONLY those", () => {
+    const digest = "a".repeat(64);
+    // Positive control pair: the same token is ignored on a digest row and
+    // caught on a plain line — proving the exemption is line-scoped.
+    expect(scanForForbidden(`| 1 | "self-hosted plane" | \`${digest}\` |`)).toEqual([]);
+    expect(
+      scanForForbidden(`| 1 | "self-hosted plane" | \`${digest}\` |\na self_hosted claim`),
+    ).toEqual(["self_hosted"]);
   });
 
   test("src, manifests, examples, templates, and docs are clean", () => {
