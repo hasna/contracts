@@ -4,27 +4,27 @@ import {
   resolveStorageMode,
   storageEnvKeys,
   envToken,
-  STORAGE_MODES,
-  DEPRECATED_STORAGE_MODE_ALIASES
+  STORAGE_MODES
 } from "../src";
 
-describe("storage mode normalizer", () => {
-  test("enum is local|cloud only", () => {
-    expect(STORAGE_MODES).toEqual(["local", "cloud"]);
+describe("storage backend normalizer", () => {
+  test("enum is sqlite|postgres only", () => {
+    expect(STORAGE_MODES).toEqual(["sqlite", "postgres"]);
   });
 
   test("normalizes canonical values", () => {
-    expect(normalizeStorageMode("local")).toEqual({ mode: "local", deprecatedAlias: null });
-    expect(normalizeStorageMode("cloud")).toEqual({ mode: "cloud", deprecatedAlias: null });
-    expect(normalizeStorageMode("  CLOUD  ")).toEqual({ mode: "cloud", deprecatedAlias: null });
+    expect(normalizeStorageMode("sqlite")).toEqual({ mode: "sqlite" });
+    expect(normalizeStorageMode("postgres")).toEqual({ mode: "postgres" });
+    expect(normalizeStorageMode("  POSTGRES  ")).toEqual({ mode: "postgres" });
+    expect(normalizeStorageMode("postgresql")).toEqual({ mode: "postgres" });
   });
 
-  test("maps deprecated aliases to cloud", () => {
-    for (const alias of DEPRECATED_STORAGE_MODE_ALIASES) {
-      expect(normalizeStorageMode(alias)).toEqual({ mode: "cloud", deprecatedAlias: alias });
+  test("removed placement words throw with a migration hint", () => {
+    for (const word of ["local", "cloud", "remote", "hybrid", "self_hosted", "self-hosted"]) {
+      expect(() => normalizeStorageMode(word), `${word} must throw`).toThrow(
+        /runtime-placement axis was removed/
+      );
     }
-    // dash form normalizes to snake alias
-    expect(normalizeStorageMode("self-hosted")).toEqual({ mode: "cloud", deprecatedAlias: "self_hosted" });
   });
 
   test("rejects unknown modes", () => {
@@ -43,41 +43,47 @@ describe("env spec", () => {
     });
   });
 
-  test("defaults to local with no env", () => {
+  test("defaults to sqlite with no env", () => {
     const r = resolveStorageMode("todos", {});
-    expect(r.mode).toBe("local");
+    expect(r.mode).toBe("sqlite");
     expect(r.source).toBe("default");
     expect(r.databaseUrlPresent).toBe(false);
     expect(r.warning).toBeNull();
   });
 
+  test("a bare DATABASE_URL selects postgres", () => {
+    const r = resolveStorageMode("todos", { HASNA_TODOS_DATABASE_URL: "postgres://u:p@host/db" });
+    expect(r.mode).toBe("postgres");
+    expect(r.source).toBe("HASNA_TODOS_DATABASE_URL");
+    expect(r.databaseUrlPresent).toBe(true);
+  });
+
   test("reads canonical mode key and db url presence without leaking value", () => {
     const r = resolveStorageMode("todos", {
-      HASNA_TODOS_STORAGE_MODE: "cloud",
+      HASNA_TODOS_STORAGE_MODE: "postgres",
       HASNA_TODOS_DATABASE_URL: "postgres://u:p@host/db"
     });
-    expect(r.mode).toBe("cloud");
+    expect(r.mode).toBe("postgres");
     expect(r.source).toBe("HASNA_TODOS_STORAGE_MODE");
     expect(r.databaseUrlPresent).toBe(true);
     expect(r.databaseUrlSource).toBe("HASNA_TODOS_DATABASE_URL");
     expect(r.warning).toBeNull();
   });
 
-  test("warns when cloud has no database url", () => {
-    const r = resolveStorageMode("todos", { HASNA_TODOS_STORAGE_MODE: "cloud" });
-    expect(r.mode).toBe("cloud");
+  test("warns when postgres has no database url", () => {
+    const r = resolveStorageMode("todos", { HASNA_TODOS_STORAGE_MODE: "postgres" });
+    expect(r.mode).toBe("postgres");
     expect(r.databaseUrlPresent).toBe(false);
-    expect(r.warning).toContain("cloud mode needs HASNA_TODOS_DATABASE_URL");
+    expect(r.warning).toContain("postgres storage needs HASNA_TODOS_DATABASE_URL");
   });
 
-  test("warns on deprecated alias and on alias env key", () => {
-    const alias = resolveStorageMode("todos", { HASNA_TODOS_STORAGE_MODE: "self_hosted", HASNA_TODOS_DATABASE_URL: "x" });
-    expect(alias.mode).toBe("cloud");
-    expect(alias.deprecatedAlias).toBe("self_hosted");
-    expect(alias.warning).toContain("Deprecated storage mode 'self_hosted'");
+  test("removed placement words in the env throw, and alias env keys warn", () => {
+    expect(() =>
+      resolveStorageMode("todos", { HASNA_TODOS_STORAGE_MODE: "self_hosted", HASNA_TODOS_DATABASE_URL: "x" })
+    ).toThrow(/runtime-placement axis was removed/);
 
-    const aliasKey = resolveStorageMode("todos", { TODOS_STORAGE_MODE: "local" });
-    expect(aliasKey.mode).toBe("local");
+    const aliasKey = resolveStorageMode("todos", { TODOS_STORAGE_MODE: "sqlite" });
+    expect(aliasKey.mode).toBe("sqlite");
     expect(aliasKey.source).toBe("TODOS_STORAGE_MODE");
     expect(aliasKey.warning).toContain("canonical key is HASNA_TODOS_STORAGE_MODE");
   });

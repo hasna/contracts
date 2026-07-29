@@ -12,36 +12,24 @@
   "hosting": [
     "user-hosted"
   ],
-  "deploymentModes": [
-    "local",
-    "self_hosted"
-  ],
   "serviceSurfaces": [
     {
       "name": "cli",
       "kind": "cli",
       "status": "supported",
       "bin": "factory",
-      "authMode": "local-only",
-      "deploymentModes": [
-        "local",
-        "self_hosted"
-      ]
+      "authMode": "local-only"
     },
     {
       "name": "mcp",
       "kind": "mcp",
       "status": "supported",
       "mcpBin": "factory-mcp",
-      "authMode": "local-only",
-      "deploymentModes": [
-        "local",
-        "self_hosted"
-      ]
+      "authMode": "local-only"
     }
   ],
   "storage": {
-    "mode": "local",
+    "mode": "sqlite",
     "engines": [
       "sqlite"
     ],

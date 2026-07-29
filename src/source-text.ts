@@ -1234,7 +1234,7 @@ export function importsModule(maskedText: string, moduleName: string): boolean {
  * Local names bound by importing `moduleName`.
  *
  * This is what separates `iapp-files`' own `registerCloudTools` — defined in
- * `src/mcp/cloud-tools.ts` and routed at the self-hosted service — from the
+ * `src/mcp/cloud-tools.ts` and routed at its own service — from the
  * retired shared runtime's export of the same name. A bare identifier says
  * nothing about where it came from; the import statement says everything.
  */

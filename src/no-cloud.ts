@@ -128,7 +128,7 @@ const MAX_TEXT_BYTES = 5 * 1024 * 1024;
  *   code is a lead worth failing on; a mention in a comment is prose.
  * - `symbol`  — an export of the retired runtime. The NAME alone proves
  *   nothing: `iapp-files` defines its own `registerCloudTools` in
- *   `src/mcp/cloud-tools.ts` and routes it at the self-hosted files service.
+ *   `src/mcp/cloud-tools.ts` and routes it at its own files service.
  *   Only an import binding from a forbidden module makes it a breach.
  * - `config`  — an env or dotdir key. There is no import to look for, so any
  *   occurrence outside a comment counts.

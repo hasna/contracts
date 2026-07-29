@@ -4947,24 +4947,17 @@ export type AgentTrajectory = z.infer<typeof AgentTrajectorySchema>;
 //
 // A repo's `hasna.contract.json` declares its name, repo class, the contract
 // version it targets, the contract-kit version it tracks, its customer-facing
-// hosting stories, runtime placements, four product surfaces, declared bins,
-// and its storage boundary. Runtime placement (`local | self_hosted | cloud`)
-// is intentionally separate from storage routing (`local | cloud`): a
-// self-hosted server uses the cloud storage router against operator-owned
-// Postgres, while `cloud` placement is reserved for Hasna SaaS.
+// hosting stories, four product surfaces, declared bins, and its storage
+// boundary. The runtime-placement axis was removed entirely (owner directive
+// 2026-07-29): a repo declares WHICH DATA BACKEND its server uses
+// (`sqlite | postgres`), never where it is deployed. Manifests carrying the
+// removed placement field fail validation (`.strict()` below).
 // ---------------------------------------------------------------------------
 
 export const SERVICE_CONTRACT_VERSION = "v1";
 
 export const RepoClassSchema = z.enum(["library", "cli-with-store", "service", "saas"]);
 export type RepoClass = z.infer<typeof RepoClassSchema>;
-
-export const DEPLOYMENT_MODES = ["local", "self_hosted", "cloud"] as const;
-export const DEPRECATED_DEPLOYMENT_MODE_ALIASES = ["self-hosted"] as const;
-export const DeploymentModeSchema = z
-  .enum([...DEPLOYMENT_MODES, ...DEPRECATED_DEPLOYMENT_MODE_ALIASES])
-  .transform((value) => (value === "self-hosted" ? "self_hosted" : value));
-export type DeploymentMode = z.infer<typeof DeploymentModeSchema>;
 
 export const HOSTING_MODES = ["user-hosted", "hasna-saas"] as const;
 export const HostingModeSchema = z.enum(HOSTING_MODES);
@@ -5020,7 +5013,6 @@ export const ServiceSurfaceSchema = z
     bin: z.string().min(1).optional(),
     mcpBin: z.string().min(1).optional(),
     authMode: ServiceAuthModeSchema,
-    deploymentModes: z.array(DeploymentModeSchema).min(1),
     health: ServiceEndpointSchema.optional(),
     readiness: ServiceEndpointSchema.optional(),
     version: ServiceEndpointSchema.optional(),
@@ -5087,8 +5079,11 @@ export const ServiceSurfaceSchema = z
   });
 export type ServiceSurface = z.infer<typeof ServiceSurfaceSchema>;
 
-/** Runtime storage enum. `local | cloud` ONLY (Amendment A1: PURE REMOTE). */
-export const STORAGE_MODES = ["local", "cloud"] as const;
+/**
+ * Active data backend. `sqlite | postgres` ONLY — the single switch that
+ * replaced the removed runtime-placement axis (owner directive 2026-07-29).
+ */
+export const STORAGE_MODES = ["sqlite", "postgres"] as const;
 export const StorageModeSchema = z.enum(STORAGE_MODES);
 export type StorageMode = z.infer<typeof StorageModeSchema>;
 
@@ -5105,10 +5100,6 @@ export type StorageEngine = z.infer<typeof StorageEngineSchema>;
  */
 export const WAIVABLE_STORAGE_ENGINES = ["postgres"] as const;
 export type WaivableStorageEngine = (typeof WAIVABLE_STORAGE_ENGINES)[number];
-
-/** Deprecated storage-mode aliases accepted at parse time and mapped to cloud. */
-export const DEPRECATED_STORAGE_MODE_ALIASES = ["remote", "hybrid", "self_hosted"] as const;
-export type DeprecatedStorageModeAlias = (typeof DEPRECATED_STORAGE_MODE_ALIASES)[number];
 
 export const SurfaceConformanceWaiverSchema = z
   .object({
@@ -5187,7 +5178,6 @@ export interface StorageWaiverEligibilityInput {
   name: string;
   bins: readonly string[];
   hosting: readonly HostingMode[];
-  deploymentModes: readonly DeploymentMode[];
   storageMode?: StorageMode | undefined;
 }
 
@@ -5197,11 +5187,8 @@ export interface StorageWaiverEligibilityInput {
  * A waiver is an admission that a repo has no PostgreSQL support, so it is
  * refused for every manifest that already claims PostgreSQL is in play: a
  * long-running service or SaaS, a `cli-with-store` that ships `<name>-serve`,
- * a repo whose runtime store IS the cloud database (`storage.mode: "cloud"`
- * reads and writes go straight to PostgreSQL), a repo that advertises the
- * `cloud` runtime placement, and a repo offering the `hasna-saas` product
- * story. `self_hosted` placement stays eligible: it is a placement, and
- * `storage.mode` is what decides which engine actually backs the repo.
+ * a repo whose active backend IS PostgreSQL (`storage.mode: "postgres"`), and
+ * a repo offering the `hasna-saas` product story.
  *
  * Shared by the manifest schema and the conformance gate so the two layers
  * cannot drift apart.
@@ -5213,11 +5200,8 @@ export function storageWaiverIneligibilityReason(input: StorageWaiverEligibility
   if (input.bins.includes(`${input.name}-serve`)) {
     return `storage waivers are not permitted for a service-capable cli-with-store repo shipping ${input.name}-serve`;
   }
-  if (input.storageMode === "cloud") {
-    return "storage waivers are not permitted while storage.mode is cloud, which reads and writes PostgreSQL directly";
-  }
-  if (input.deploymentModes.includes("cloud")) {
-    return "storage waivers are not permitted for a repo declaring the cloud runtime placement";
+  if (input.storageMode === "postgres") {
+    return "storage waivers are not permitted while storage.mode is postgres, which reads and writes PostgreSQL directly";
   }
   if (input.hosting.includes("hasna-saas")) {
     return "storage waivers are not permitted for a repo declaring the hasna-saas product story";
@@ -5522,7 +5506,6 @@ export const ServiceContractManifestSchema = z
     bins: z.array(z.string().min(1)).default([]),
     storage: StorageContractSchema.optional(),
     hosting: z.array(HostingModeSchema).min(1).default(["user-hosted"]),
-    deploymentModes: z.array(DeploymentModeSchema).default(["local"]),
     serviceSurfaces: z.array(ServiceSurfaceSchema).default([]),
     metadata: ServiceContractMetadataSchema.optional()
   })
@@ -5533,13 +5516,6 @@ export const ServiceContractManifestSchema = z
         code: z.ZodIssueCode.custom,
         message: "hosting must not contain duplicates",
         path: ["hosting"]
-      });
-    }
-    if (new Set(value.deploymentModes).size !== value.deploymentModes.length) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "deploymentModes must not contain duplicates after alias normalization",
-        path: ["deploymentModes"]
       });
     }
     const allowed = new Set(allowedBinsForName(value.name));
@@ -5595,10 +5571,10 @@ export const ServiceContractManifestSchema = z
       if (!value.storage) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "cli-with-store repos must declare storage", path: ["storage"] });
       } else {
-        if (value.storage.mode === "local" && !value.storage.sqlitePath) {
+        if (value.storage.mode === "sqlite" && !value.storage.sqlitePath) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
-            message: "local cli-with-store storage requires sqlitePath (~/.hasna/<name>/<name>.db)",
+            message: "sqlite cli-with-store storage requires sqlitePath (~/.hasna/<name>/<name>.db)",
             path: ["storage", "sqlitePath"]
           });
         }
@@ -5615,7 +5591,6 @@ export const ServiceContractManifestSchema = z
             name: value.name,
             bins: value.bins,
             hosting: value.hosting,
-            deploymentModes: value.deploymentModes,
             storageMode: value.storage.mode
           });
           const waivedEngines = new Set<StorageEngine>(
@@ -5668,8 +5643,8 @@ export const ServiceContractManifestSchema = z
       if (!value.storage) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "saas repos must declare storage", path: ["storage"] });
       } else {
-        if (value.storage.mode !== "cloud") {
-          ctx.addIssue({ code: z.ZodIssueCode.custom, message: "saas repos must use cloud storage mode", path: ["storage", "mode"] });
+        if (value.storage.mode !== "postgres") {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: "saas repos must use the postgres storage backend", path: ["storage", "mode"] });
         }
         if (!value.storage.envPrefix) {
           ctx.addIssue({
@@ -5701,15 +5676,6 @@ export const ServiceContractManifestSchema = z
           message: `Service surface MCP bin "${surface.mcpBin}" must be declared in bins`,
           path: ["serviceSurfaces", index, "mcpBin"]
         });
-      }
-      for (const [modeIndex, deploymentMode] of surface.deploymentModes.entries()) {
-        if (!value.deploymentModes.includes(deploymentMode)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `Service surface deployment mode "${deploymentMode}" must be declared in deploymentModes`,
-            path: ["serviceSurfaces", index, "deploymentModes", modeIndex]
-          });
-        }
       }
     }
 
