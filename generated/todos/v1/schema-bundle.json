@@ -589,7 +589,7 @@
   "manifestVersion": "1",
   "runtimeValidationRequired": true,
   "schema": "hasna.todos.schema_bundle.v1",
-  "schemaDigest": "b65d185367e004fd24ad42ff1da041a440c6ee9675b17ed44712948b438c21c4",
+  "schemaDigest": "288038293c5c6d052d27cdc7890bf2777a006242186f52d5b25480ceb30a9970",
   "schemas": {
     "hasna.todos.activity.v1": {
       "$defs": {
@@ -3814,6 +3814,98 @@
         "ref",
         "expectedVersion",
         "releasedAt"
+      ],
+      "type": "object"
+    },
+    "hasna.todos.request.api_key_create.v1": {
+      "$defs": {
+        "__schema0": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$",
+          "type": "string"
+        }
+      },
+      "$id": "hasna.todos.request.api_key_create.v1",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "app": {
+          "const": "todos",
+          "type": "string"
+        },
+        "createdBy": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "expiresAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema0"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "issuedAt": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "kid": {
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        "scopes": {
+          "items": {
+            "pattern": "^(?:\\*|(?:\\*|[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)*):(?:\\*|[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)*))$",
+            "type": "string"
+          },
+          "maxItems": 256,
+          "minItems": 1,
+          "type": "array"
+        },
+        "tid": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tokenHash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kid",
+        "app",
+        "agent",
+        "tid",
+        "scopes",
+        "tokenHash",
+        "issuedAt",
+        "expiresAt",
+        "createdBy"
       ],
       "type": "object"
     },

@@ -65,6 +65,7 @@
         "cloud"
       ],
       "operationIds": [
+        "todos.api_keys.create",
         "todos.authority.get",
         "todos.capabilities.get",
         "todos.capabilities.list",
@@ -206,6 +207,7 @@
         "todos.agents.heartbeat",
         "todos.agents.register",
         "todos.agents.release",
+        "todos.api_keys.create",
         "todos.approvals.approve",
         "todos.approvals.expire",
         "todos.approvals.reject",
@@ -561,6 +563,7 @@
         "todos.agents.list",
         "todos.agents.register",
         "todos.agents.release",
+        "todos.api_keys.create",
         "todos.approvals.approve",
         "todos.approvals.expire",
         "todos.approvals.get",
@@ -700,7 +703,7 @@
       ]
     }
   ],
-  "manifestDigest": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+  "manifestDigest": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
   "schema": "hasna.todos.capability_manifest.v1",
   "version": "1"
 }

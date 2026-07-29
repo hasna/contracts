@@ -40,6 +40,7 @@
     "todos.openapi.get",
     "todos.capabilities.list",
     "todos.capabilities.get",
+    "todos.api_keys.create",
     "todos.tasks.list",
     "todos.tasks.count",
     "todos.tasks.exists_many",

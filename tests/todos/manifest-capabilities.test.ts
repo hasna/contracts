@@ -28,6 +28,7 @@ const EXPECTED_SHARED_OPERATION_IDS = [
   ...group("manifest", ["get"]),
   ...group("openapi", ["get"]),
   ...group("capabilities", ["list", "get"]),
+  ...group("api_keys", ["create"]),
   ...group("tasks", [
     "list",
     "count",
@@ -99,8 +100,8 @@ describe("Todos operation manifest", () => {
 
     expect(shared).toEqual(EXPECTED_SHARED_OPERATION_IDS);
     expect(local).toEqual(EXPECTED_LOCAL_OPERATION_IDS);
-    expect(TODOS_OPERATION_MANIFEST.operations).toHaveLength(125);
-    expect(shared).toHaveLength(116);
+    expect(TODOS_OPERATION_MANIFEST.operations).toHaveLength(126);
+    expect(shared).toHaveLength(117);
     expect(local).toHaveLength(9);
   });
 
@@ -140,6 +141,43 @@ describe("Todos operation manifest", () => {
         });
       }
     }
+  });
+
+  test("declares the hash-only API-key record prerequisite", () => {
+    const operation = TODOS_OPERATION_MANIFEST.operations.find(
+      (candidate) => candidate.id === "todos.api_keys.create",
+    );
+    expect(operation).toMatchObject({
+      audience: "tenant_admin",
+      capabilityId: "authority",
+      mutability: "write",
+      idempotency: "required",
+      requestSchemaId: TODOS_REQUEST_SCHEMA_IDS.apiKeyCreate,
+      responseSchemaId: TODOS_RESPONSE_SCHEMA_IDS.mutation,
+      requiredScopes: ["todos:authority:admin"],
+      surfaces: {
+        http: {
+          method: "POST",
+          path: "/v1/api-keys",
+        },
+      },
+    });
+
+    const requestSchema = TODOS_REQUEST_SCHEMAS[TODOS_REQUEST_SCHEMA_IDS.apiKeyCreate];
+    const record = {
+      kid: "key_01",
+      app: "todos",
+      agent: "issuer",
+      tid: "acme-corp",
+      scopes: ["todos:read", "todos:write"],
+      tokenHash: "a".repeat(64),
+      issuedAt: "2026-07-29T00:00:00.000Z",
+      expiresAt: "2026-10-27T00:00:00.000Z",
+      createdBy: "issuer",
+    };
+    expect(requestSchema.safeParse(record).success).toBe(true);
+    expect(requestSchema.safeParse({ ...record, app: "accounts" }).success).toBe(false);
+    expect(requestSchema.safeParse({ ...record, token: "plaintext-must-never-cross-this-boundary" }).success).toBe(false);
   });
 
   test("records target-only surface provenance against the exact frozen evidence commits", () => {
@@ -187,7 +225,7 @@ describe("Todos operation manifest", () => {
         expect(operation.supportedModes).toEqual(["local", "cloud"]);
         expect(operation.surfaces.http).not.toBeNull();
         expect(operation.surfaces.http?.path.startsWith("/v1/")).toBe(true);
-        expect(operation.surfaces.http?.path).not.toContain("/api");
+        expect(operation.surfaces.http?.path).not.toContain("/api/");
       } else {
         expect(operation.supportedModes).toEqual(["local"]);
         expect(operation.surfaces.http).toBeNull();
@@ -364,7 +402,7 @@ describe("Todos capability inventory", () => {
         .map((operation) => operation.id)
         .sort((left, right) => left.localeCompare(right)),
     );
-    expect(byId.get("typed-errors")?.operationIds).toHaveLength(125);
+    expect(byId.get("typed-errors")?.operationIds).toHaveLength(126);
     expect(byId.get("approvals")?.availability).toBe("gated");
     expect(byId.get("task-templates")?.availability).toBe("gated");
     expect(byId.get("reports")?.availability).toBe("gated");

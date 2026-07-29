@@ -23,6 +23,7 @@ import {
   TODOS_OPERATION_MANIFEST_DIGEST,
   TODOS_OPERATION_MANIFEST,
   TODOS_PROVENANCE_DIGEST,
+  TODOS_REQUEST_SCHEMA_IDS,
   TODOS_SOURCE_FREEZE,
   TaskToPrProjectionSchema,
   TodosCanonicalAuthorityHandshakeSchema,
@@ -455,6 +456,27 @@ describe("Todos deterministic artifacts", () => {
           .toBe(false);
       }
     }
+  });
+
+  test("OpenAPI publishes the API-key record prerequisite", () => {
+    const openapi = buildTodosOpenApi() as {
+      paths: Record<string, Record<string, {
+        operationId: string;
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: { $ref: string };
+            };
+          };
+        };
+        "x-todos-required-scopes": string[];
+      }>>;
+    };
+    const operation = openapi.paths["/v1/api-keys"]?.post;
+    expect(operation?.operationId).toBe("todos.api_keys.create");
+    expect(operation?.requestBody.content["application/json"].schema.$ref)
+      .toBe(`#/components/schemas/${TODOS_REQUEST_SCHEMA_IDS.apiKeyCreate}`);
+    expect(operation?.["x-todos-required-scopes"]).toEqual(["todos:authority:admin"]);
   });
 
   test("ties all generated provenance surfaces to the canonical descriptor", () => {

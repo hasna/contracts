@@ -499,6 +499,7 @@ const operations: TodosOperation[] = [
   shared({ resource: "openapi", action: "get", capabilityId: "authority", requestSchemaId: RQ.empty, responseSchemaId: RS.artifactDocument, httpMethod: "GET", httpPath: "/v1/openapi" }),
   shared({ resource: "capabilities", action: "list", capabilityId: "authority", requestSchemaId: RQ.list, responseSchemaId: RS.capabilityPage, httpMethod: "GET", httpPath: "/v1/capabilities", pagination: "cursor" }),
   shared({ resource: "capabilities", action: "get", capabilityId: "authority", requestSchemaId: RQ.ref, responseSchemaId: RS.capability, httpMethod: "GET", httpPath: "/v1/capabilities/{ref}" }),
+  shared({ resource: "api_keys", action: "create", capabilityId: "authority", requestSchemaId: RQ.apiKeyCreate, responseSchemaId: RS.mutation, httpMethod: "POST", httpPath: "/v1/api-keys", audience: "tenant_admin", mutability: "write" }),
 
   shared({ resource: "tasks", action: "list", capabilityId: "tasks", requestSchemaId: RQ.list, responseSchemaId: RS.taskPage, httpMethod: "GET", httpPath: "/v1/tasks", pagination: "cursor" }),
   shared({ resource: "tasks", action: "count", capabilityId: "tasks", requestSchemaId: RQ.list, responseSchemaId: RS.count, httpMethod: "GET", httpPath: "/v1/tasks/count" }),

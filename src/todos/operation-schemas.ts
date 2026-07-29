@@ -84,6 +84,7 @@ export const TODOS_REQUEST_SCHEMA_IDS = {
   versionedRef: "hasna.todos.request.versioned_ref.v1",
   list: "hasna.todos.request.list.v1",
   refList: "hasna.todos.request.ref_list.v1",
+  apiKeyCreate: "hasna.todos.request.api_key_create.v1",
   existsMany: "hasna.todos.request.exists_many.v1",
   taskCreate: "hasna.todos.request.task_create.v1",
   taskUpsert: "hasna.todos.request.task_upsert.v1",
@@ -238,6 +239,17 @@ const RefListRequestSchema = z.strictObject({
   ref: TodosEntityIdSchema,
   cursor: TodosCursorSchema.nullable(),
   limit: z.number().int().positive().max(500),
+});
+const ApiKeyCreateRequestSchema = z.strictObject({
+  kid: z.string().min(1).max(160).regex(/^[A-Za-z0-9_-]+$/),
+  app: z.literal("todos"),
+  agent: z.string().min(1).max(256).nullable(),
+  tid: z.string().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/).nullable(),
+  scopes: z.array(z.string().regex(/^(?:\*|(?:\*|[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)*):(?:\*|[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)*))$/)).min(1).max(256),
+  tokenHash: TodosSha256DigestSchema,
+  issuedAt: TodosTimestampSchema,
+  expiresAt: TodosTimestampSchema.nullable(),
+  createdBy: z.string().min(1).max(256),
 });
 const ExistsManyRequestSchema = z.strictObject({
   refs: z.array(TodosEntityIdSchema).min(1).max(10_000),
@@ -755,6 +767,7 @@ export const TODOS_REQUEST_SCHEMAS = Object.freeze({
   [TODOS_REQUEST_SCHEMA_IDS.versionedRef]: VersionedRefRequestSchema,
   [TODOS_REQUEST_SCHEMA_IDS.list]: ListRequestSchema,
   [TODOS_REQUEST_SCHEMA_IDS.refList]: RefListRequestSchema,
+  [TODOS_REQUEST_SCHEMA_IDS.apiKeyCreate]: ApiKeyCreateRequestSchema,
   [TODOS_REQUEST_SCHEMA_IDS.existsMany]: ExistsManyRequestSchema,
   [TODOS_REQUEST_SCHEMA_IDS.taskCreate]: TaskCreateInputSchema,
   [TODOS_REQUEST_SCHEMA_IDS.taskUpsert]: TaskUpsertRequestSchema,

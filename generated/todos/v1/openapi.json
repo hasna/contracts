@@ -3227,6 +3227,98 @@
         ],
         "type": "object"
       },
+      "hasna.todos.request.api_key_create.v1": {
+        "$defs": {
+          "__schema0": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$",
+            "type": "string"
+          }
+        },
+        "$id": "hasna.todos.request.api_key_create.v1",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "app": {
+            "const": "todos",
+            "type": "string"
+          },
+          "createdBy": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "expiresAt": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/__schema0"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "issuedAt": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "kid": {
+            "maxLength": 160,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "pattern": "^(?:\\*|(?:\\*|[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)*):(?:\\*|[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)*))$",
+              "type": "string"
+            },
+            "maxItems": 256,
+            "minItems": 1,
+            "type": "array"
+          },
+          "tid": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tokenHash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kid",
+          "app",
+          "agent",
+          "tid",
+          "scopes",
+          "tokenHash",
+          "issuedAt",
+          "expiresAt",
+          "createdBy"
+        ],
+        "type": "object"
+      },
       "hasna.todos.request.approval_decision.v1": {
         "$defs": {
           "__schema0": {
@@ -48554,7 +48646,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -48563,7 +48655,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -48798,7 +48890,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -48807,7 +48899,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -48976,7 +49068,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -48985,7 +49077,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -49190,7 +49282,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -49199,7 +49291,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -49378,7 +49470,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -49387,7 +49479,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -49592,7 +49684,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -49601,7 +49693,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -49768,6 +49860,212 @@
         ]
       }
     },
+    "/v1/api-keys": {
+      "post": {
+        "operationId": "todos.api_keys.create",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Todos-Mode",
+            "required": true,
+            "schema": {
+              "enum": [
+                "local",
+                "cloud"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Todos-Authority-Id",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9.-]*$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Todos-Contract-Digest",
+            "required": true,
+            "schema": {
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Todos-Manifest-Digest",
+            "required": true,
+            "schema": {
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Todos-Operation-Id",
+            "required": true,
+            "schema": {
+              "const": "todos.api_keys.create",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Todos-Request-Id",
+            "required": true,
+            "schema": {
+              "maxLength": 160,
+              "minLength": 8,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 160,
+              "minLength": 8,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/hasna.todos.request.api_key_create.v1"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/hasna.todos.response.mutation.v1"
+                }
+              }
+            },
+            "description": "Typed Todos response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/hasna.todos.error.v1"
+                }
+              }
+            },
+            "description": "Typed Todos error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "api_keys.create",
+        "tags": [
+          "authority"
+        ],
+        "x-todos-audience": "tenant_admin",
+        "x-todos-concurrency": "none",
+        "x-todos-idempotency": "required",
+        "x-todos-identity-context-schema": {
+          "$ref": "#/components/schemas/hasna.todos.identity_context.v1"
+        },
+        "x-todos-invocation-bindings": {
+          "fields": {
+            "authorityId": {
+              "source": {
+                "in": "header",
+                "name": "X-Todos-Authority-Id"
+              },
+              "target": "authorityId"
+            },
+            "contractDigest": {
+              "source": {
+                "in": "header",
+                "name": "X-Todos-Contract-Digest"
+              },
+              "target": "contractDigest"
+            },
+            "idempotencyKey": {
+              "required": true,
+              "source": {
+                "in": "header",
+                "name": "Idempotency-Key"
+              },
+              "target": "identity.idempotencyKey"
+            },
+            "identity": {
+              "source": {
+                "in": "security",
+                "name": "bearerAuth"
+              },
+              "target": "identity",
+              "validated": true
+            },
+            "manifestDigest": {
+              "source": {
+                "in": "header",
+                "name": "X-Todos-Manifest-Digest"
+              },
+              "target": "manifestDigest"
+            },
+            "mode": {
+              "source": {
+                "in": "header",
+                "name": "X-Todos-Mode"
+              },
+              "target": "mode"
+            },
+            "operationId": {
+              "source": {
+                "in": "header",
+                "name": "X-Todos-Operation-Id"
+              },
+              "target": "operationId"
+            },
+            "request": {
+              "source": {
+                "in": "body",
+                "mediaType": "application/json"
+              },
+              "target": "request"
+            },
+            "requestId": {
+              "source": {
+                "in": "header",
+                "name": "X-Todos-Request-Id"
+              },
+              "target": "identity.requestId"
+            }
+          },
+          "schema": {
+            "$ref": "#/components/schemas/hasna.todos.operation_invocation.v1"
+          }
+        },
+        "x-todos-invocation-context-schema": {
+          "$ref": "#/components/schemas/hasna.todos.operation_invocation.v1"
+        },
+        "x-todos-modes": [
+          "local",
+          "cloud"
+        ],
+        "x-todos-required-scopes": [
+          "todos:authority:admin"
+        ]
+      }
+    },
     "/v1/approvals": {
       "get": {
         "operationId": "todos.approvals.list",
@@ -49862,7 +50160,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -49871,7 +50169,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -50040,7 +50338,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -50049,7 +50347,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -50254,7 +50552,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -50263,7 +50561,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -50442,7 +50740,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -50451,7 +50749,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -50656,7 +50954,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -50665,7 +50963,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -50870,7 +51168,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -50879,7 +51177,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -51076,7 +51374,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -51085,7 +51383,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -51320,7 +51618,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -51329,7 +51627,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -51508,7 +51806,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -51517,7 +51815,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -51752,7 +52050,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -51761,7 +52059,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -51940,7 +52238,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -51949,7 +52247,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -52184,7 +52482,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -52193,7 +52491,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -52362,7 +52660,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -52371,7 +52669,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -52576,7 +52874,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -52585,7 +52883,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -52846,7 +53144,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -52855,7 +53153,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -53024,7 +53322,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -53033,7 +53331,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -53230,7 +53528,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -53239,7 +53537,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -53426,7 +53724,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -53435,7 +53733,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -53696,7 +53994,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -53705,7 +54003,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -53874,7 +54172,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -53883,7 +54181,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -54080,7 +54378,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -54089,7 +54387,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -54268,7 +54566,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -54277,7 +54575,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -54512,7 +54810,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -54521,7 +54819,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -54700,7 +54998,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -54709,7 +55007,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -54880,7 +55178,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -54889,7 +55187,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -55124,7 +55422,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -55133,7 +55431,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -55302,7 +55600,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -55311,7 +55609,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -55516,7 +55814,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -55525,7 +55823,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -55728,7 +56026,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -55737,7 +56035,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -55914,7 +56212,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -55923,7 +56221,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -56184,7 +56482,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -56193,7 +56491,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -56362,7 +56660,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -56371,7 +56669,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -56576,7 +56874,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -56585,7 +56883,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -56788,7 +57086,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -56797,7 +57095,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -56974,7 +57272,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -56983,7 +57281,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -57188,7 +57486,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -57197,7 +57495,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -57394,7 +57692,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -57403,7 +57701,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -57664,7 +57962,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -57673,7 +57971,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -57842,7 +58140,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -57851,7 +58149,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -58056,7 +58354,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -58065,7 +58363,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -58260,7 +58558,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -58269,7 +58567,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -58464,7 +58762,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -58473,7 +58771,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -58668,7 +58966,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -58677,7 +58975,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -58872,7 +59170,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -58881,7 +59179,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -59060,7 +59358,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -59069,7 +59367,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -59274,7 +59572,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -59283,7 +59581,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -59462,7 +59760,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -59471,7 +59769,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -59684,7 +59982,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -59693,7 +59991,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -59898,7 +60196,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -59907,7 +60205,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -60112,7 +60410,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -60121,7 +60419,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -60326,7 +60624,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -60335,7 +60633,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -60596,7 +60894,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -60605,7 +60903,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -60774,7 +61072,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -60783,7 +61081,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -60988,7 +61286,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -60997,7 +61295,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -61200,7 +61498,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -61209,7 +61507,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -61386,7 +61684,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -61395,7 +61693,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -61600,7 +61898,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -61609,7 +61907,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -61788,7 +62086,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -61797,7 +62095,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -61976,7 +62274,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -61985,7 +62283,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -62156,7 +62454,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -62165,7 +62463,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -62336,7 +62634,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -62345,7 +62643,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -62516,7 +62814,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -62525,7 +62823,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -62760,7 +63058,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -62769,7 +63067,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -62938,7 +63236,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -62947,7 +63245,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -63208,7 +63506,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -63217,7 +63515,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -63386,7 +63684,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -63395,7 +63693,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -63600,7 +63898,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -63609,7 +63907,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -63812,7 +64110,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -63821,7 +64119,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -63998,7 +64296,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -64007,7 +64305,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -64268,7 +64566,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -64277,7 +64575,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -64446,7 +64744,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -64455,7 +64753,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -64660,7 +64958,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -64669,7 +64967,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -64872,7 +65170,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -64881,7 +65179,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -65058,7 +65356,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -65067,7 +65365,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -65272,7 +65570,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -65281,7 +65579,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -65542,7 +65840,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -65551,7 +65849,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -65730,7 +66028,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -65739,7 +66037,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -65974,7 +66272,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -65983,7 +66281,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -66152,7 +66450,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -66161,7 +66459,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -66422,7 +66720,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -66431,7 +66729,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -66602,7 +66900,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -66611,7 +66909,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -66832,7 +67130,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -66841,7 +67139,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -67012,7 +67310,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -67021,7 +67319,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -67282,7 +67580,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -67291,7 +67589,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -67462,7 +67760,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -67471,7 +67769,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -67714,7 +68012,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -67723,7 +68021,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -67958,7 +68256,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -67967,7 +68265,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -68138,7 +68436,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -68147,7 +68445,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -68352,7 +68650,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -68361,7 +68659,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -68564,7 +68862,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -68573,7 +68871,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -68750,7 +69048,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -68759,7 +69057,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -68980,7 +69278,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -68989,7 +69287,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -69168,7 +69466,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -69177,7 +69475,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -69382,7 +69680,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -69391,7 +69689,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -69586,7 +69884,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -69595,7 +69893,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -69774,7 +70072,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -69783,7 +70081,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -70004,7 +70302,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -70013,7 +70311,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -70192,7 +70490,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -70201,7 +70499,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -70404,7 +70702,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -70413,7 +70711,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -70618,7 +70916,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -70627,7 +70925,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -70832,7 +71130,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -70841,7 +71139,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -71046,7 +71344,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -71055,7 +71353,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -71226,7 +71524,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -71235,7 +71533,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -71414,7 +71712,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -71423,7 +71721,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -71620,7 +71918,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -71629,7 +71927,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -71808,7 +72106,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -71817,7 +72115,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -72060,7 +72358,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -72069,7 +72367,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -72238,7 +72536,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -72247,7 +72545,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -72444,7 +72742,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -72453,7 +72751,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -72640,7 +72938,7 @@
             "name": "X-Todos-Contract-Digest",
             "required": true,
             "schema": {
-              "const": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+              "const": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
               "type": "string"
             }
           },
@@ -72649,7 +72947,7 @@
             "name": "X-Todos-Manifest-Digest",
             "required": true,
             "schema": {
-              "const": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+              "const": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
               "type": "string"
             }
           },
@@ -73388,5 +73686,5 @@
   },
   "x-todos-invariant-registry-digest": "12da98adc6f79a8f0118760df2b8641e4905eba6b12205ad8a580c7aa108f646",
   "x-todos-runtime-validation-required": true,
-  "x-todos-schema-digest": "b65d185367e004fd24ad42ff1da041a440c6ee9675b17ed44712948b438c21c4"
+  "x-todos-schema-digest": "288038293c5c6d052d27cdc7890bf2777a006242186f52d5b25480ceb30a9970"
 }

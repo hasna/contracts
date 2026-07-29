@@ -6,11 +6,11 @@
 // The secret exists only in this process, so every exit path after minting prints
 // it, including persistence failures.
 //
-// PERSISTENCE IS POSTGRES-ONLY, DELIBERATELY. Writing the hashed record through an
-// app's cloud `/v1` API would need an `api-keys` operation that is declared in the
-// operation manifest, published in the served OpenAPI document, and implemented by
-// the app. None of that exists yet, so this command ships no client for it: an
-// HTTP writer aimed at an undeclared route cannot report honestly whether the
+// PERSISTENCE IS POSTGRES-ONLY, DELIBERATELY. The Todos contract now declares the
+// hash-only `api-keys` operation and publishes it in generated OpenAPI, but that
+// target mapping is not an attestation that a producer implements and serves it.
+// Until a producer handler exists, this command ships no HTTP client for it: an
+// HTTP writer aimed at an unverified route cannot report honestly whether the
 // record was stored. For the same reason the client-transport env
 // (`HASNA_<APP>_STORAGE_MODE`, `HASNA_<APP>_API_URL`, `HASNA_<APP>_API_KEY`) is not
 // consulted here — it selects the transport for app data, not for this record, and

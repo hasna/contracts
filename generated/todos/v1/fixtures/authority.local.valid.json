@@ -31,10 +31,10 @@
     "typed-errors",
     "verification-evidence"
   ],
-  "contractDigest": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+  "contractDigest": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
   "contractVersion": "1.0.0",
   "issuedAt": "2026-07-24T00:00:00.000Z",
-  "manifestDigest": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+  "manifestDigest": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
   "manifestVersion": "1",
   "mode": "local"
 }

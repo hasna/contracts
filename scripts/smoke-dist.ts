@@ -82,7 +82,7 @@ if (CONTRACTS_PACKAGE_VERSION !== packageJson.version) {
 if (todos.TodosModeSchema.parse("local") !== "local" || todos.TodosModeSchema.parse("cloud") !== "cloud") {
   throw new Error("dist/todos did not expose the strict Todos mode schema");
 }
-if (todos.TODOS_OPERATION_MANIFEST.operations.length !== 125) {
+if (todos.TODOS_OPERATION_MANIFEST.operations.length !== 126) {
   throw new Error("dist/todos operation manifest is incomplete");
 }
 if (todos.TODOS_CONTRACT_DESCRIPTOR.rootExported !== false) {

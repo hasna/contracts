@@ -385,6 +385,54 @@
       "transition": null
     },
     {
+      "action": "create",
+      "audience": "tenant_admin",
+      "availability": "core",
+      "capabilityId": "authority",
+      "classification": "shared_customer",
+      "concurrency": "none",
+      "concurrencyFields": [],
+      "errorSchemaId": "hasna.todos.error.v1",
+      "id": "todos.api_keys.create",
+      "idempotency": "required",
+      "mutability": "write",
+      "pagination": "none",
+      "requestSchemaId": "hasna.todos.request.api_key_create.v1",
+      "requiredScopes": [
+        "todos:authority:admin"
+      ],
+      "resource": "api_keys",
+      "responseSchemaId": "hasna.todos.response.mutation.v1",
+      "supportedModes": [
+        "local",
+        "cloud"
+      ],
+      "surfaces": {
+        "cli": {
+          "command": "todos api-keys create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "http": {
+          "method": "POST",
+          "path": "/v1/api-keys",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        },
+        "mcp": {
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target",
+          "tool": "todos_api_keys_create"
+        },
+        "sdk": {
+          "method": "apiKeys.create",
+          "producerImplementationStatus": "not_attested",
+          "status": "required_target"
+        }
+      },
+      "transition": null
+    },
+    {
       "action": "list",
       "audience": "customer",
       "availability": "core",

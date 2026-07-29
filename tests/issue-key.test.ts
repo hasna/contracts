@@ -191,8 +191,8 @@ async function withoutNetwork<T>(fn: () => Promise<T>): Promise<{ value: T; call
 
 describe("issue-key persistence destination", () => {
   test("the hashed record goes to Postgres over no network at all", async () => {
-    // There is no declared `api-keys` operation in the manifest or in any app's
-    // served OpenAPI document, so issue-key must never post the record anywhere.
+    // The contract target alone is not evidence that an app implements and serves
+    // it, so issue-key must never post the record anywhere yet.
     const { reports, report } = collectReports();
     const db = recordingConnectStore();
     const { value: out, calls } = await withoutNetwork(async () =>

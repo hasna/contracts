@@ -194,6 +194,30 @@
     },
     {
       "cli": {
+        "command": "todos api-keys create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "http": {
+        "method": "POST",
+        "path": "/v1/api-keys",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      },
+      "id": "todos.api_keys.create",
+      "mcp": {
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target",
+        "tool": "todos_api_keys_create"
+      },
+      "sdk": {
+        "method": "apiKeys.create",
+        "producerImplementationStatus": "not_attested",
+        "status": "required_target"
+      }
+    },
+    {
+      "cli": {
         "command": "todos tasks list",
         "producerImplementationStatus": "not_attested",
         "status": "required_target"

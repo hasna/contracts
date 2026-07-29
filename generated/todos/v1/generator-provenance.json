@@ -1,8 +1,8 @@
 {
   "generatorVersion": "1.0.0",
-  "identityDigest": "d62a5857dc57afce5caf0d978a5607ab5f8c7215677c5df6325d4e329307225e",
+  "identityDigest": "5c0b675f35bc0e754c26d231a96d84aa1e44c09d1a0d4c576bd1890d8a1ed7dd",
   "manifestVersion": "1",
-  "outputContractDigest": "bb6191ab073853755b6abc4e48211f1c066e5bad4414e34f122df8ec01f41820",
+  "outputContractDigest": "f76abb3032049a3d821455b856fa3f609f310fdef999e8fdff1df0d00f914318",
   "schema": "hasna.todos.generator_provenance.v1",
   "sourceFreeze": {
     "contracts": {
@@ -28,15 +28,15 @@
   },
   "sourceModules": [
     {
-      "contentDigest": "f46ed342b97d84d3d4d076a62bc11f9dc0bdb0ccda57047b61bb96bd97c6bc4a",
+      "contentDigest": "6ed8d4ae6cff99d88908bdcd67345385939409c4cc9fb0f4a8afbed4b8bb409f",
       "module": "src/todos/operations.ts"
     },
     {
-      "contentDigest": "38457fb1001062d279e6b90a53bd5e126fc62afe2a3cb6eff6145842341fa2a3",
+      "contentDigest": "974d8ebdb0e82eee79544e3571859e89f15db21ed91a1f944a31a327ac16b450",
       "module": "src/todos/capabilities.ts"
     },
     {
-      "contentDigest": "b65d185367e004fd24ad42ff1da041a440c6ee9675b17ed44712948b438c21c4",
+      "contentDigest": "288038293c5c6d052d27cdc7890bf2777a006242186f52d5b25480ceb30a9970",
       "module": "src/todos/schema-foundation.ts"
     },
     {
