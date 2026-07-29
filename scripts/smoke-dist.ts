@@ -1,6 +1,33 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  LOOPBACK_SKIP_ENV,
+  loopbackUnavailableMessage,
+  resolveLoopbackRequirement,
+} from "../src/testing/loopback.js";
+
+// This script is `smoke:dist`, which `verify:release` runs, which is both
+// `prepack` and `prepublishOnly`. It is therefore the last thing standing
+// between a credential-forwarding regression and npm, so it is fail-closed:
+// it refuses to run at all unless it can bind the servers the
+// authenticated-redirect smoke needs. A skip is not a pass. CONTRACTS_ALLOW_-
+// LOOPBACK_SKIP names the skip for the test suites; here it only changes the
+// wording of the refusal, because the publish gate never reports success on a
+// run that did not exercise the credential boundary.
+const REDIRECT_SMOKE_LABEL = "dist authenticated-redirect credential smoke";
+const redirectSmoke = resolveLoopbackRequirement(["loopback", "wildcard"]);
+if (redirectSmoke.decision === "skip") {
+  console.error(
+    `dist smoke UNVERIFIED: ${REDIRECT_SMOKE_LABEL} cannot run on this runtime `
+    + `(missing ${redirectSmoke.missing.join(", ")} bind) and ${LOOPBACK_SKIP_ENV} `
+    + "does not apply to the publish gate.",
+  );
+  process.exit(2);
+}
+if (redirectSmoke.decision === "fail") {
+  throw new Error(loopbackUnavailableMessage(REDIRECT_SMOKE_LABEL, redirectSmoke.missing));
+}
 
 const root = join(import.meta.dir, "..");
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { version: string };

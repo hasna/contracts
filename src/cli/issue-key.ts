@@ -3,15 +3,32 @@
 // Mints a Hasna API key, persists ONLY the hashed record to the app's Postgres,
 // and prints the plaintext secret exactly once (that is the command's purpose —
 // it is a freshly generated secret, not the disclosure of an at-rest credential).
+// The secret exists only in this process, so every exit path after minting prints
+// it, including persistence failures.
+//
+// PERSISTENCE IS POSTGRES-ONLY, DELIBERATELY. Writing the hashed record through an
+// app's cloud `/v1` API would need an `api-keys` operation that is declared in the
+// operation manifest, published in the served OpenAPI document, and implemented by
+// the app. None of that exists yet, so this command ships no client for it: an
+// HTTP writer aimed at an undeclared route cannot report honestly whether the
+// record was stored. For the same reason the client-transport env
+// (`HASNA_<APP>_STORAGE_MODE`, `HASNA_<APP>_API_URL`, `HASNA_<APP>_API_KEY`) is not
+// consulted here — it selects the transport for app data, not for this record, and
+// must never block or divert the database write.
 
-import { mintApiKey } from "../auth/keys";
+import { mintApiKey, type MintedApiKey } from "../auth/keys";
 import { normalizeTenantId } from "../auth/tenant";
 import { ApiKeyStore, type AuthQueryClient } from "../auth/store";
+
+type IssueKeyStore = Pick<ApiKeyStore, "ensureSchema" | "insertMinted">;
+type IssueKeyStoreHandle = { store: IssueKeyStore; close: () => Promise<void> };
+type IssueKeyConnectStore = (connectionString: string, table: string) => Promise<IssueKeyStoreHandle>;
 
 export interface IssueKeyDeps {
   report: (options: { json?: boolean }, error: string, details?: Record<string, unknown>) => void;
   env?: NodeJS.ProcessEnv;
   now?: () => number;
+  connectStore?: IssueKeyConnectStore;
 }
 
 function envToken(app: string): string {
@@ -36,7 +53,7 @@ function parseScopesCsv(csv: unknown): string[] {
     .filter((s) => s.length > 0);
 }
 
-async function connectStore(connectionString: string, table: string): Promise<{ store: ApiKeyStore; close: () => Promise<void> }> {
+async function connectStore(connectionString: string, table: string): Promise<IssueKeyStoreHandle> {
   let pgModule: any;
   try {
     pgModule = await import("pg");
@@ -116,7 +133,7 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
     return;
   }
 
-  let minted;
+  let minted: MintedApiKey;
   try {
     minted = mintApiKey({
       app,
@@ -133,27 +150,71 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
     return;
   }
 
-  let stored = false;
   const table = (options.table as string | undefined) ?? "api_keys";
+  const dbEnvName = databaseUrlEnvName(app, options.databaseUrlEnv as string | undefined);
+  const expiresAt = minted.claims.exp === null ? null : new Date(minted.claims.exp * 1000).toISOString();
+  const issuedAt = new Date(minted.claims.iat * 1000).toISOString();
+
+  // The plaintext token is derived at mint time and never persisted anywhere.
+  // EVERY exit path after minting must hand it to the operator: a persistence
+  // failure that swallows it destroys an unrecoverable credential.
+  const keyMaterial = {
+    app,
+    kid: minted.kid,
+    agent: agent ?? null,
+    tid: tid ?? null,
+    scopes,
+    issuedAt,
+    expiresAt,
+    tokenHash: minted.tokenHash,
+    bootstrap,
+    // The secret token, shown ONCE. Store it now; it cannot be recovered.
+    token: minted.token,
+  };
+
+  const printKeyBlock = (record: string, storeError: string | null): void => {
+    console.log(`Issued API key for app '${app}' (kid ${minted.kid})${bootstrap ? " [bootstrap]" : ""}`);
+    console.log(`  scopes:    ${scopes.join(", ")}`);
+    console.log(`  agent:     ${agent ?? "-"}`);
+    console.log(`  tenant:    ${tid ?? "- (untenanted)"}`);
+    console.log(`  issued:    ${issuedAt}`);
+    console.log(`  expires:   ${expiresAt ?? "never"}`);
+    console.log(`  record:    ${record}`);
+    if (storeError) console.log(`  storeError: ${storeError}`);
+    console.log(`  tokenHash: ${minted.tokenHash}`);
+    console.log("");
+    console.log("  API key (shown once — copy it now, it cannot be recovered):");
+    console.log(`  ${minted.token}`);
+  };
+
+  /** Surface a persistence failure WITHOUT losing the already-minted secret. */
+  const reportStoreFailure = (message: string, code: string, details: Record<string, unknown> = {}): void => {
+    deps.report({ json }, message, { code, ...details, stored: false, ...keyMaterial });
+    if (!json) printKeyBlock("NOT STORED", message);
+  };
+
+  let stored = false;
   if (options.store !== false) {
-    const dbEnvName = databaseUrlEnvName(app, options.databaseUrlEnv as string | undefined);
+    const createdBy = agent ?? "issue-key";
     const connectionString = env[dbEnvName];
     if (!connectionString) {
-      deps.report({ json }, `No database URL found. Set ${dbEnvName}, or pass --no-store to skip persistence.`, {
-        code: "missing_database_url",
-        databaseUrlEnv: dbEnvName,
-      });
+      reportStoreFailure(
+        `No database URL found. Set ${dbEnvName}, or pass --no-store to skip persistence.`,
+        "missing_database_url",
+        { databaseUrlEnv: dbEnvName },
+      );
       return;
     }
-    let handle: { store: ApiKeyStore; close: () => Promise<void> } | undefined;
+    let handle: IssueKeyStoreHandle | undefined;
     try {
-      handle = await connectStore(connectionString, table);
+      const connect = deps.connectStore ?? connectStore;
+      handle = await connect(connectionString, table);
       await handle.store.ensureSchema();
-      await handle.store.insertMinted(minted, agent ?? "issue-key");
+      await handle.store.insertMinted(minted, createdBy);
       stored = true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      deps.report({ json }, `Could not persist key record: ${message}`, { code: "store_failed" });
+      reportStoreFailure(`Could not persist key record: ${message}`, "store_failed");
       return;
     } finally {
       if (handle) {
@@ -166,43 +227,10 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
     }
   }
 
-  const expiresAt = minted.claims.exp === null ? null : new Date(minted.claims.exp * 1000).toISOString();
-  const issuedAt = new Date(minted.claims.iat * 1000).toISOString();
-
   if (json) {
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          app,
-          kid: minted.kid,
-          agent: agent ?? null,
-          tid: tid ?? null,
-          scopes,
-          issuedAt,
-          expiresAt,
-          tokenHash: minted.tokenHash,
-          stored,
-          bootstrap,
-          // The secret token, shown ONCE. Store it now; it cannot be recovered.
-          token: minted.token,
-        },
-        null,
-        2,
-      ),
-    );
+    console.log(JSON.stringify({ ok: true, ...keyMaterial, stored }, null, 2));
     return;
   }
 
-  console.log(`Issued API key for app '${app}' (kid ${minted.kid})${bootstrap ? " [bootstrap]" : ""}`);
-  console.log(`  scopes:    ${scopes.join(", ")}`);
-  console.log(`  agent:     ${agent ?? "-"}`);
-  console.log(`  tenant:    ${tid ?? "- (untenanted)"}`);
-  console.log(`  issued:    ${issuedAt}`);
-  console.log(`  expires:   ${expiresAt ?? "never"}`);
-  console.log(`  record:    ${stored ? `stored (${table})` : "not stored (--no-store)"}`);
-  console.log(`  tokenHash: ${minted.tokenHash}`);
-  console.log("");
-  console.log("  API key (shown once — copy it now, it cannot be recovered):");
-  console.log(`  ${minted.token}`);
+  printKeyBlock(stored ? `stored (${table})` : "not stored (--no-store)", null);
 }

@@ -13,6 +13,26 @@ import {
   toV1BaseUrl,
 } from "./transport.js";
 import { __resetCredentialDeprecationNotices, resolveCredential } from "./credentials.js";
+import { createLoopbackTestGate } from "../testing/loopback.js";
+
+// Each suite below is gated on the bind it actually performs, not on a single
+// combined probe: a sandbox that refuses 0.0.0.0 usually still allows
+// 127.0.0.1, and the redirect-loop and Host-override boundaries only ever bind
+// 127.0.0.1. The gates are fail-closed — an unavailable bind produces a failing
+// case, not a silent skip — unless CONTRACTS_ALLOW_LOOPBACK_SKIP=1 is set, and
+// the positive control below fails in that case so no run is ever green
+// without these suites.
+const loopbackGate = createLoopbackTestGate(["loopback"], { describe, test });
+const wildcardGate = createLoopbackTestGate(["wildcard"], { describe, test });
+const crossAuthorityGate = createLoopbackTestGate(["loopback", "wildcard"], { describe, test });
+
+test("positive control: the loopback-gated security suites actually ran", () => {
+  expect({
+    loopback: loopbackGate.requirement.decision,
+    wildcard: wildcardGate.requirement.decision,
+    crossAuthority: crossAuthorityGate.requirement.decision,
+  }).toEqual({ loopback: "run", wildcard: "run", crossAuthority: "run" });
+});
 
 describe("resolveClientTransport — the client-flip contract", () => {
   test("no env => sqlite", () => {
@@ -485,7 +505,7 @@ describe("resolveClientTransport — the client-flip contract", () => {
 describe("authenticated redirect boundary", () => {
   const API_KEY = ["fixture", "redirect", "value"].join("-");
 
-  test("301/302/303/307/308 never forward credentials or bodies to a redirected authority", async () => {
+  crossAuthorityGate.test("301/302/303/307/308 never forward credentials or bodies to a redirected authority", async () => {
     const cases: Array<{
       status: 301 | 302 | 303 | 307 | 308;
       method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
@@ -575,7 +595,7 @@ describe("authenticated redirect boundary", () => {
     }
   });
 
-  test("same-origin redirects and redirect loops fail after exactly one request", async () => {
+  loopbackGate.test("same-origin redirects and redirect loops fail after exactly one request", async () => {
     let sameOriginDestinationHits = 0;
     let loopHits = 0;
     let source: ReturnType<typeof Bun.serve>;
@@ -745,7 +765,7 @@ describe("authenticated authority-header boundary", () => {
     }
   });
 
-  test("real Bun HTTP routing never receives an authenticated Host override", async () => {
+  loopbackGate.test("real Bun HTTP routing never receives an authenticated Host override", async () => {
     const received: Array<{
       host: string | null;
       apiKey: string | null;
@@ -804,7 +824,7 @@ interface Item {
   text: string;
 }
 
-describe("end-to-end data-source flip (real HTTP loopback)", () => {
+wildcardGate.describe("end-to-end data-source flip (real HTTP loopback)", () => {
   const EXPECTED_KEY = "hasna_demo_e2e_secret";
   const cloudStore = new Map<string, Item>();
   const seenAuth: string[] = [];

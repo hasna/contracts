@@ -6,6 +6,18 @@ import {
   type HasnaRequestOptions,
 } from "./transport.js";
 import { createHasnaStorageClient, resolveStorageClient } from "./storage.js";
+import { createLoopbackTestGate } from "../testing/loopback.js";
+
+// The resolver suite below binds with `Bun.serve({ port })` and no hostname,
+// which Bun binds on the wildcard address, so that is the only capability it
+// needs. The gate is fail-closed: an unavailable bind produces a failing case,
+// never a silent skip, unless CONTRACTS_ALLOW_LOOPBACK_SKIP=1 is set — and the
+// positive control below fails in that case.
+const wildcardGate = createLoopbackTestGate(["wildcard"], { describe, test });
+
+test("positive control: the loopback-gated resolver suite actually ran", () => {
+  expect(wildcardGate.requirement.decision).toBe("run");
+});
 
 // A scriptable fetch stub that records requests and returns queued responses.
 function makeFetch(handler: (req: { method: string; url: string; headers: Record<string, string>; body: unknown }) => { status: number; body?: unknown; text?: string }) {
@@ -163,7 +175,7 @@ describe("retries + idempotency", () => {
 });
 
 // End-to-end: a demo app storage resolver picks the HTTP client on flip, local otherwise.
-describe("resolveStorageClient — the resolver an app wires", () => {
+wildcardGate.describe("resolveStorageClient — the resolver an app wires", () => {
   const KEY = "hasna_demo_resolver_secret";
   const cloud = new Map<string, { id: string; title: string }>();
   let server: ReturnType<typeof Bun.serve>;
