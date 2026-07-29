@@ -5,9 +5,12 @@ dist/
 .DS_Store
 
 # `.mutation-audit-inflight.json` was here. The mutation audit's in-flight record
-# now lives under the system temp dir instead: its payload is the pristine text of
-# the file being mutated, and this repo's own scanners read that text as findings,
-# so its mere presence in the tree failed four tests and gave every mutation a
-# false-failure floor. Ignoring it was never enough — the scanners do not consult
-# this file. scripts/mutation-audit.ts refuses to run if the record would land
-# inside the scanned tree.
+# now lives in the per-user state dir instead ($XDG_STATE_HOME, default
+# ~/.local/state): its payload is the pristine text of the file being mutated, and
+# this repo's own scanners read that text as findings, so its mere presence in the
+# tree failed four tests and gave every mutation a false-failure floor. Ignoring it
+# was never enough — the scanners do not consult this file. Not the system temp dir
+# either: /tmp is world-writable, and a record anyone can write is an arbitrary file
+# write, because the audit hands its contents to writeFileSync to restore from.
+# scripts/mutation-audit.ts refuses to run if the record would land inside the
+# scanned tree, or in a directory that is not private to the running user.
