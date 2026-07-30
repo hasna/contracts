@@ -277,9 +277,19 @@ appending a `=`. Key those on `jti`, never on the token text.
 Offline verification cannot observe a revocation, and the reference issuer has
 no fleet-wide revocation today: a revoked token stays acceptable for the
 remainder of its (≤24h) life. The contract therefore **requires `jti`**, so
-revocation is at least possible, and `createIdentityVerifier` accepts the same
-optional `isRevoked` hook shape as the API-key middleware — keyed by `jti`
-instead of `kid`. A service needing prompt revocation supplies it.
+revocation is at least possible, and `createIdentityVerifier` accepts an
+optional `isRevoked` hook — keyed by `jti` instead of `kid`. A service needing
+prompt revocation supplies it. The short TTL is what makes the optional hook
+tolerable here.
+
+The **API-key middleware is stricter**, because API keys live for months, not
+hours: `verifyApiKey` requires a `keyStatus` hook (`store.keyStatus`) that
+denies unknown, revoked, and expired kids alike, and throws at construction if
+no status hook is wired. The boolean `isRevoked` hook is deprecated on that
+surface — it returns `false` both for an active key and for one that was never
+registered, which made an unregistered key irrevocable and, until 2026-07-30,
+silently ACCEPTED (todos 0cbc57a2). `allowUnregisteredKeys: true` is the
+explicit, greppable opt-out for services mid-migration.
 
 ### `tid` -> org
 

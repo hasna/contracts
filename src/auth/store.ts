@@ -255,8 +255,22 @@ export class ApiKeyStore {
   }
 
   /**
-   * Strict checker for {@link import("./middleware.js")}: denies unknown OR
-   * revoked kids (an unrecorded token cannot authenticate).
+   * Bound status resolver for `verifyApiKey({ keyStatus })` — the recommended
+   * wiring. Reports WHICH way a key failed (`unknown` / `revoked` / `expired`)
+   * rather than collapsing all three into one boolean, so the audit trail can
+   * distinguish a key we turned off from a key we never issued.
+   *
+   * Bound as a property, like {@link isRevoked}, so `keyStatus: store.keyStatus`
+   * works without the caller remembering to bind `this`.
+   */
+  keyStatus = async (kid: string): Promise<ApiKeyStatus> => {
+    return this.status(kid);
+  };
+
+  /**
+   * Strict boolean checker: denies unknown OR revoked OR expired kids (an
+   * unrecorded token cannot authenticate). Prefer {@link keyStatus}, which
+   * carries the reason; this remains for `isRevoked`-shaped call sites.
    */
   statusChecker(): (kid: string) => Promise<boolean> {
     return async (kid: string): Promise<boolean> => {
