@@ -64,25 +64,29 @@ describe("resolveClientTransport — the client-flip contract", () => {
     expect(JSON.stringify(r)).not.toContain("hasna_todos_abc");
   });
 
-  test("FLIP: url+key with NO mode env => inferred http (fleet-flip contract)", () => {
+  test("url+key with NO mode env stays sqlite — presence never infers server data (owner ruling 2026-07-29)", () => {
     const r = resolveClientTransport("todos", {
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
       HASNA_TODOS_API_KEY: "hasna_todos_flip",
     });
-    expect(r.transport).toBe("http");
-    expect(r.mode).toBe("postgres");
-    expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
-    expect(r.modeSource).toBe("HASNA_TODOS_API_URL+HASNA_TODOS_API_KEY");
+    expect(r.transport).toBe("sqlite");
+    expect(r.mode).toBe("sqlite");
+    expect(r.baseUrl).toBeNull();
+    expect(r.modeSource).toBe("default");
+    expect(r.misconfigured).toBe(false);
+    expect(r.apiKeyPresent).toBe(true);
+    expect(r.warning).toContain("HASNA_TODOS_STORAGE_MODE");
     expect(JSON.stringify(r)).not.toContain("hasna_todos_flip");
   });
 
-  test("FLIP revert: url present but key removed => back to sqlite (not misconfigured)", () => {
+  test("url without key and no mode env stays sqlite (not misconfigured), with the same visibility warning", () => {
     const r = resolveClientTransport("todos", {
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
     });
     expect(r.transport).toBe("sqlite");
     expect(r.mode).toBe("sqlite");
     expect(r.misconfigured).toBe(false);
+    expect(r.warning).toContain("HASNA_TODOS_STORAGE_MODE");
   });
 
   test("removed placement words in the mode env throw instead of aliasing", () => {
@@ -1190,6 +1194,64 @@ describe("credential resolution at the seam", () => {
     });
 
     expect(r.transport).toBe("sqlite");
+  });
+
+  // -------------------------------------------------------------------------
+  // OWNER RULING 2026-07-29: a local->network transition is EXPLICITLY
+  // signalled, never inferred — not from a URL plus an API key in the
+  // environment, and not from a URL plus a credential file appearing on disk.
+  // These tests fail if either half of that inference ever returns.
+  // -------------------------------------------------------------------------
+
+  test("RULING: url in env + credential file on DISK, no mode env => stays sqlite (disk half never infers)", () => {
+    const home = credHome();
+    writeKeyFile(home, "todos", "disk-key-must-not-flip");
+
+    const r = resolveClientTransport("todos", {
+      HOME: home,
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
+    });
+
+    expect(r.transport).toBe("sqlite");
+    expect(r.mode).toBe("sqlite");
+    expect(r.modeSource).toBe("default");
+    expect(r.baseUrl).toBeNull();
+    expect(r.misconfigured).toBe(false);
+    expect(r.warning).toContain("HASNA_TODOS_STORAGE_MODE");
+    expect(JSON.stringify(r)).not.toContain("disk-key-must-not-flip");
+  });
+
+  test("RULING: url + key both in ENV, no mode env => stays sqlite (env half never infers)", () => {
+    const home = credHome();
+
+    const r = resolveClientTransport("todos", {
+      HOME: home,
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
+      HASNA_TODOS_API_KEY: "env-key-must-not-flip",
+    });
+
+    expect(r.transport).toBe("sqlite");
+    expect(r.mode).toBe("sqlite");
+    expect(r.modeSource).toBe("default");
+    expect(r.baseUrl).toBeNull();
+    expect(r.misconfigured).toBe(false);
+    expect(r.apiKeyPresent).toBe(true);
+    expect(JSON.stringify(r)).not.toContain("env-key-must-not-flip");
+  });
+
+  test("RULING positive control: the explicit signal still routes — postgres mode + url + disk credential => http", () => {
+    const home = credHome();
+    const diskPath = writeKeyFile(home, "todos", "explicit-mode-disk-key");
+
+    const r = resolveClientTransport("todos", {
+      HOME: home,
+      HASNA_TODOS_STORAGE_MODE: "postgres",
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
+    });
+
+    expect(r.transport).toBe("http");
+    expect(r.apiKeyTier).toBe("disk");
+    expect(r.apiKeySource).toBe(diskPath);
   });
 
   test("postgres backend with NO env key now resolves from disk instead of degrading to sqlite", () => {
