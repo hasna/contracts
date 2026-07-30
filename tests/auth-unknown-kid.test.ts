@@ -358,6 +358,57 @@ describe("an unavailable status lookup denies rather than throwing or allowing",
     expect(events).toEqual(["deny:status_unavailable"]);
   });
 
+  test("REGRESSION: a throwing isRevoked ALSO returns 503 — the deprecated path is still a live path", async () => {
+    // Found as a P3 in review: the fix wrapped `keyStatus` but left `isRevoked`
+    // unwrapped, while `authenticate`'s docstring promised "never throws". A
+    // deprecated path still runs in production; 16 fleet services are on it
+    // today. Qualifying the docstring would have moved the defect into prose.
+    const known = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
+    const verifier = verifyApiKey({
+      app: "todos",
+      signingSecret: SIGNING,
+      isRevoked: () => {
+        throw new Error("connection terminated unexpectedly");
+      },
+      allowUnregisteredKeys: true,
+    });
+
+    const decision = await verifier.authenticate(headersFor(known.token));
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) {
+      expect(decision.reason).toBe("status_unavailable");
+      expect(decision.status).toBe(503);
+    }
+  });
+
+  test("a rejecting async isRevoked is handled the same way", async () => {
+    const known = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
+    const events: string[] = [];
+    const verifier = verifyApiKey({
+      app: "todos",
+      signingSecret: SIGNING,
+      isRevoked: async () => Promise.reject(new Error("pool exhausted")),
+      allowUnregisteredKeys: true,
+      audit: (e) => void events.push(`${e.outcome}:${e.reason}`),
+    });
+    const decision = await verifier.authenticate(headersFor(known.token));
+    expect(decision.ok).toBe(false);
+    expect(events).toEqual(["deny:status_unavailable"]);
+  });
+
+  test("POSITIVE CONTROL: a healthy isRevoked still allows, so the wrap is not blanket-deny", async () => {
+    const store = await freshStore();
+    const known = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
+    await store.insertMinted(known, "test");
+    const verifier = verifyApiKey({
+      app: "todos",
+      signingSecret: SIGNING,
+      isRevoked: store.isRevoked,
+      allowUnregisteredKeys: true,
+    });
+    expect((await verifier.authenticate(headersFor(known.token))).ok).toBe(true);
+  });
+
   test("POSITIVE CONTROL: a healthy resolver still allows, so 503 is not blanket-deny", async () => {
     const store = await freshStore();
     const known = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });

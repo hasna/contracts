@@ -406,7 +406,24 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
         }
       }
     } else if (ownIsRevoked) {
-      const revoked = await ownIsRevoked(verified.kid);
+      // Same treatment as `keyStatus` above. This path is deprecated, but a
+      // deprecated path still runs in production, and `isRevoked` is the same
+      // per-request DB read — so the same Postgres blip hung the same request.
+      // Wrapping it is what makes `authenticate`'s "never throws" contract
+      // true; leaving it unwrapped and softening the docstring instead would
+      // just move the defect from the code into the prose.
+      let revoked: boolean;
+      try {
+        revoked = await ownIsRevoked(verified.kid);
+      } catch {
+        await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, reason: "status_unavailable", scopesRequired: requiredScopes, method, path, status: 503, at });
+        return {
+          ok: false,
+          status: 503,
+          reason: "status_unavailable",
+          message: "Could not verify API key status. Try again shortly.",
+        };
+      }
       if (revoked) {
         await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, reason: "revoked", scopesRequired: requiredScopes, method, path, status: 401, at });
         return { ok: false, status: 401, reason: "revoked", message: "API key has been revoked." };
