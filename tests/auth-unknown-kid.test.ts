@@ -304,21 +304,43 @@ describe("a polluted prototype cannot re-open the hole", () => {
     if (!decision.ok) expect(decision.reason).toBe("unknown_key");
   });
 
+  // These three assert the NO-HOOK error specifically, not merely "some error
+  // mentioning keyStatus". The distinction is load-bearing: the isRevoked-branch
+  // message also contains the string "keyStatus: store.keyStatus" (it names the
+  // fix), so a /keyStatus/ matcher passes whether or not the pollution defense
+  // works. Review measured exactly that — the isRevoked test below survived
+  // mutation C while its three siblings died. Only NO_HOOK_ERROR proves the
+  // polluted property was invisible to the construction gate.
+  const NO_HOOK_ERROR = /requires a key-status hook/;
+  const ISREVOKED_BRANCH_ERROR = /was given only 'isRevoked'/;
+
   test("REGRESSION: Object.prototype.allowUnregisteredKeys does NOT silence the construction throw", async () => {
     pollute("allowUnregisteredKeys", true);
-    expect(() => verifyApiKey({ app: "todos", signingSecret: SIGNING })).toThrow(/keyStatus/);
+    expect(() => verifyApiKey({ app: "todos", signingSecret: SIGNING })).toThrow(NO_HOOK_ERROR);
   });
 
   test("an injected Object.prototype.keyStatus cannot supply the verdict", async () => {
     // A polluted resolver answering "active" would authenticate everything.
     // Construction must not see it as a wired hook at all.
     pollute("keyStatus", () => "active");
-    expect(() => verifyApiKey({ app: "todos", signingSecret: SIGNING })).toThrow(/keyStatus/);
+    expect(() => verifyApiKey({ app: "todos", signingSecret: SIGNING })).toThrow(NO_HOOK_ERROR);
   });
 
   test("an injected Object.prototype.isRevoked cannot satisfy the wiring requirement", async () => {
     pollute("isRevoked", () => false);
-    expect(() => verifyApiKey({ app: "todos", signingSecret: SIGNING })).toThrow(/keyStatus/);
+    let message = "";
+    try {
+      verifyApiKey({ app: "todos", signingSecret: SIGNING });
+      throw new Error("expected verifyApiKey to throw, but construction succeeded");
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    // Must be the NO-HOOK error: the polluted isRevoked was never seen.
+    expect(message).toMatch(NO_HOOK_ERROR);
+    // And must NOT be the isRevoked branch, which is what a plain read produces
+    // — that branch is the failure this test exists to detect, and it happens to
+    // mention keyStatus, which is how a looser matcher missed it entirely.
+    expect(message).not.toMatch(ISREVOKED_BRANCH_ERROR);
   });
 });
 
