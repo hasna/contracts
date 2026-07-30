@@ -4,6 +4,11 @@ All notable changes to `@hasna/contracts` are documented here.
 
 ## [0.8.5] - 2026-07-29
 
+### CI: gate changes on typechecking and tests
+
+Pull requests and pushes to `main` now install from the frozen Bun lockfile,
+then run the typechecker and test suite as explicit CI steps.
+
 ### Credential resolution: env holds a pointer, disk holds the secret, resolved at call time
 
 MEASURED FAILURE THIS KILLS. A tmux shell started before a key rotation held the
