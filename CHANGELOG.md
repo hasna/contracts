@@ -2,6 +2,32 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.8.6] - 2026-07-30
+
+### BREAKING: client transport never infers the backend — explicit signal only (owner ruling 2026-07-29)
+
+`resolveClientTransport()` selects the `postgres` backend ONLY from an explicit
+mode env (`HASNA_<APP>_STORAGE_MODE=postgres` or an alias). The presence-based
+inference shipped in 0.8.5 — a URL in the environment plus a resolvable
+credential, where a credential file appearing on DISK satisfied the credential
+half just as an env var did — is removed entirely, both halves:
+
+- URL + API key in the environment no longer infer `postgres` (the pre-0.8.5
+  `urlHit && keyHit` form).
+- URL + a credential file on disk no longer infer `postgres` (the 0.8.5
+  chain-backed `urlHit` form).
+
+Endpoints and credentials are connection material, never a transition signal.
+A URL configured with no explicit mode env now stays on the local sqlite store
+with `misconfigured: false` and a `warning` naming the missing
+`HASNA_<APP>_STORAGE_MODE=postgres`, so the ambiguous state is visible instead
+of silently local. Regression tests assert both halves stay dead.
+
+MIGRATION: machines relying on the fleet env-flip (url+key with no mode var)
+must add the explicit mode env before upgrading, or they will read their local
+sqlite store (loudly, via the warning). 0.8.5 itself is held from rollout
+because it carries the banned inference.
+
 ## [0.8.5] - 2026-07-29
 
 ### CI: gate changes on typechecking and tests

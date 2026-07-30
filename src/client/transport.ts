@@ -31,14 +31,13 @@
 //     HASNA_<NAME>_API_KEY -> value from the app-owned vault (legacy, deprecated)
 //     <NAME>_API_KEY                                         (legacy alias)
 //
-// DECISION: transport is `http` IFF the resolved backend is `postgres` AND a
-// credential resolves. The backend is `postgres` when either (a) an explicit
-// mode env resolves to postgres, OR (b) no mode env is set but the API URL is
-// present AND the credential chain resolves a key from ANY tier — the fleet
-// env-flip writes an endpoint plus a credential and NO STORAGE_MODE, so that
-// pair IS the server-data intent. The credential half of the signal is satisfied
-// by a file ON DISK exactly as it is by an environment variable; the URL half is
-// env-only, so a credential file alone never routes anything to the network.
+// DECISION: transport is `http` IFF an explicit mode env resolves the backend
+// to `postgres` AND a credential resolves. Endpoints and credentials are
+// CONNECTION MATERIAL, never a transition signal: a URL in the environment, an
+// API key in the environment, a credential file appearing on disk — none of
+// them, alone or in combination, moves a client off its local sqlite data.
+// A local->network transition is explicitly signalled, never inferred (owner
+// ruling 2026-07-29).
 // When a credential resolves but no explicit URL is set, the base URL falls back to
 // `https://<app>.<domain>` where `<domain>` comes from
 // `HASNA_FLEET_API_DOMAIN` (REQUIRED for a real deployment) or else a neutral,
@@ -398,21 +397,20 @@ export interface ResolveClientTransportOptions {
  * Resolve how a client should reach an app's data given the environment.
  *
  * Precedence for the backend: the first present of `HASNA_<NAME>_STORAGE_MODE`,
- * `HASNA_<NAME>_MODE`, `<NAME>_STORAGE_MODE`, `<NAME>_MODE`, else `sqlite` —
- * or `postgres` when the API URL is set AND the credential chain resolves a key
- * from any tier.
+ * `HASNA_<NAME>_MODE`, `<NAME>_STORAGE_MODE`, `<NAME>_MODE`, else `sqlite`.
+ * There is NO other path to `postgres`.
  *
- * THE CREDENTIAL CHAIN PARTICIPATES IN THE BACKEND DECISION. It runs BEFORE the
- * backend is settled whenever a URL env is present and no explicit mode env is,
- * because the chain's answer is the second half of the flip signal: a client
- * whose endpoint is in the environment and whose key is on disk must resolve to
- * `postgres` rather than silently read its sqlite file. What the chain cannot do
- * is manufacture that signal on its own — the URL is still required and still
- * env-only, so a credential file with no endpoint configured routes nothing to
- * the network. Once `postgres` is settled that SAME resolution is reused rather
- * than re-run, and it resolves at CALL TIME through {@link resolveCredential}:
- * argument, then a deliberate override/profile pointer, then disk, then the
- * deprecated legacy env var.
+ * THE CREDENTIAL CHAIN NEVER PARTICIPATES IN THE BACKEND DECISION. Endpoints
+ * and credentials are connection material: a URL in the environment, a key in
+ * the environment, or a credential file appearing on disk — alone or in any
+ * combination — never moves a client from its local sqlite file to the
+ * network. A local->network transition is explicitly signalled via the mode
+ * env, never inferred (owner ruling 2026-07-29). When a URL is configured but
+ * no explicit mode selects server data, the client stays on sqlite and says so
+ * in `warning`, so the ambiguity is visible instead of a silent local read.
+ * Once `postgres` is explicitly selected, the credential resolves at CALL TIME
+ * through {@link resolveCredential}: argument, then a deliberate
+ * override/profile pointer, then disk, then the deprecated legacy env var.
  */
 export function resolveClientTransport(
   name: string,
@@ -427,51 +425,30 @@ export function resolveClientTransport(
   let mode: StorageMode = "sqlite";
   let modeSource = "default";
   const warnings: string[] = [];
-  // Resolved at most once per call and reused: the chain has side effects (the
-  // once-per-app deprecation) and reads the disk, so running it twice would both
-  // double the work and risk the two runs disagreeing.
-  let credential: ResolvedCredential | null | undefined;
 
   if (modeHit) {
     mode = normalizeStorageMode(modeHit.value).mode;
     modeSource = modeHit.key;
   } else if (urlHit) {
-    // Flip signal: the fleet env-flip writes EXACTLY HASNA_<APP>_API_URL +
-    // HASNA_<APP>_API_KEY per app and NO explicit STORAGE_MODE (see machines
-    // FLEET-FLIP.md). An endpoint plus a resolvable credential IS the
-    // server-data intent, so infer `postgres`. Revert removes both vars, so the
-    // client falls back to its sqlite file. Without this, a flipped client with
-    // only url+key silently kept reading its local store.
-    //
-    // THE CREDENTIAL HALF OF THAT SIGNAL COMES FROM THE CHAIN, not from
-    // `HASNA_<APP>_API_KEY` alone — so a credential on DISK satisfies it just as
-    // an environment variable does. Reading it only from the env var meant the
-    // state this module TELLS operators to migrate to — endpoint in the
-    // environment, credential on disk — resolved to `sqlite` with
-    // `misconfigured: false` and no warning, silently serving the local dataset
-    // while a perfectly good credential sat on disk. That is the false green this
-    // module forbids, and the deprecation notice was walking people straight into
-    // it.
-    //
-    // The URL is still required and still env-only, so this cannot flip a client
-    // that has no endpoint configured: a credential file alone never routes
-    // anything to the network.
-    credential = resolveCredential(name, env, options.credentials);
-    if (credential) {
-      mode = "postgres";
-      modeSource = `${urlHit.key}+${credential.source}`;
-    }
+    // A URL with no explicit mode env is AMBIGUOUS CONFIG, not a transition
+    // signal. The former inference here — an endpoint plus a resolvable
+    // credential (env var OR a credential file appearing on disk) flipping the
+    // backend to `postgres` — was removed under the owner ruling of
+    // 2026-07-29: a local->network transition is explicitly signalled, never
+    // inferred. The client stays on its sqlite file; the warning makes that
+    // visible so a machine still carrying only url+key from the old fleet flip
+    // is diagnosable instead of silently local. NOTHING is resolved from the
+    // credential chain here — running it would be pure side effect for a
+    // client that authenticates to nothing.
+    warnings.push(
+      `${urlHit.key} is set but no explicit storage mode selects server data for '${name}'; ` +
+        `staying on the local sqlite store. Set ${keys.modeKeys[0]}=postgres to use the server, ` +
+        `or unset ${urlHit.key} to silence this warning.`,
+    );
   }
 
-  // sqlite backend: never route to the network, regardless of URL/key presence.
-  //
-  // The credential chain may ALREADY have run above — it is half of the flip
-  // signal whenever a URL is set with no explicit mode env — but reaching here
-  // means either that it produced nothing, or that an explicit mode env settled
-  // the backend as `sqlite` before the question was ever asked. Nothing further
-  // is resolved from here on: a client reading its own file authenticates to
-  // nothing, so resolving a secret would be pure side effect (including a
-  // spurious deprecation warning for an env var this process never uses).
+  // sqlite backend: never route to the network, regardless of URL/key presence
+  // in the environment or of any credential file on disk.
   if (mode === "sqlite") {
     return {
       transport: "sqlite",
@@ -487,11 +464,11 @@ export function resolveClientTransport(
     };
   }
 
-  // postgres backend: resolve the credential through the chain, at call time. A
-  // CredentialResolutionError from a deliberate tier propagates on purpose —
-  // an override or profile that cannot be honoured must fail loudly rather
-  // than authenticate as a different principal.
-  if (credential === undefined) credential = resolveCredential(name, env, options.credentials);
+  // postgres backend (explicitly selected): resolve the credential through the
+  // chain, at call time. A CredentialResolutionError from a deliberate tier
+  // propagates on purpose — an override or profile that cannot be honoured
+  // must fail loudly rather than authenticate as a different principal.
+  const credential: ResolvedCredential | null = resolveCredential(name, env, options.credentials);
 
   // Server data (postgres) but no credential from any tier: a client never opens
   // PostgreSQL directly, and without a key it cannot reach the server either —

@@ -47,25 +47,46 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// P0 — the state this change TELLS operators to migrate to (endpoint in the
-// environment, credential on disk) resolved to `local`, silently serving the
-// local dataset while a good credential sat on disk. The 401 guidance walked
-// people straight into it.
+// P0 (REVERSED by the owner ruling of 2026-07-29) — the original review made
+// "endpoint in env + credential on disk" resolve to http, on the theory that
+// the recommended steady state must not be a silent sqlite read. The owner
+// ruled the opposite way: a local->network transition is EXPLICITLY signalled,
+// never inferred from a credential file appearing on disk. The steady state
+// therefore includes an explicit mode env; without it the client stays on
+// sqlite and the ambiguity is surfaced as a warning, not as a route change.
 // ---------------------------------------------------------------------------
 
-describe("the recommended steady state is not a silent sqlite read", () => {
-  test("URL in env + credential on disk resolves to http, not silently to sqlite", () => {
+describe("endpoint + disk credential never infer server data (owner ruling 2026-07-29)", () => {
+  test("URL in env + credential on disk stays sqlite, with a warning naming the missing explicit mode", () => {
     const home = makeHome();
-    const diskPath = writeCloudEnv(home, "todos", "HASNA_TODOS_API_KEY=good-disk-key\n");
+    writeCloudEnv(home, "todos", "HASNA_TODOS_API_KEY=good-disk-key\n");
 
     const r = resolveClientTransport("todos", {
       HOME: home,
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
     });
 
+    expect(r.transport).toBe("sqlite");
+    expect(r.mode).toBe("sqlite");
+    expect(r.modeSource).toBe("default");
+    expect(r.misconfigured).toBe(false);
+    expect(r.warning).toContain("HASNA_TODOS_STORAGE_MODE");
+    expect(JSON.stringify(r)).not.toContain("good-disk-key");
+  });
+
+  test("the explicit signal completes the same setup: mode env + URL + disk credential => http", () => {
+    const home = makeHome();
+    const diskPath = writeCloudEnv(home, "todos", "HASNA_TODOS_API_KEY=good-disk-key\n");
+
+    const r = resolveClientTransport("todos", {
+      HOME: home,
+      HASNA_TODOS_STORAGE_MODE: "postgres",
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
+    });
+
     expect(r.transport).toBe("http");
     expect(r.apiKeyTier).toBe("disk");
-    expect(r.modeSource).toBe(`HASNA_TODOS_API_URL+${diskPath}`);
+    expect(r.apiKeySource).toBe(diskPath);
   });
 
   test("BOUNDARY: a URL alone, with no credential anywhere, stays sqlite and not misconfigured", () => {

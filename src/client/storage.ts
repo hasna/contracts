@@ -13,9 +13,9 @@
 //   delete -> DELETE /v1/<resource>/<id>       -> void       (204/404 => ok)
 //
 // An app's storage resolver selects this client when the client-flip contract
-// resolves to `http` (backend postgres AND API_URL+API_KEY set), and falls
-// through to the local sqlite store otherwise. See `resolveClientTransport` /
-// `createClientTransport` in ./transport.ts.
+// resolves to `http` (backend EXPLICITLY set to postgres via a mode env, and a
+// credential resolves), and falls through to the local sqlite store otherwise.
+// See `resolveClientTransport` / `createClientTransport` in ./transport.ts.
 //
 // Guarantees carried up from the transport: JSON in/out, per-request timeout,
 // retries with exponential backoff + jitter for transient failures, and
@@ -213,8 +213,8 @@ export type ResolveStorageClientResult =
 
 /**
  * The one call an app's storage resolver makes. Reads the client-flip env for
- * `name`; when it resolves to `http` (backend postgres + API_URL + API_KEY),
- * returns a ready {@link HasnaStorageClient}. Otherwise returns
+ * `name`; when it resolves to `http` (backend explicitly set to postgres and a
+ * credential resolves), returns a ready {@link HasnaStorageClient}. Otherwise returns
  * `{ transport: 'sqlite', client: null }` so the app uses its local store.
  * Throws if server data was requested but is misconfigured (so callers never
  * silently read the wrong dataset).

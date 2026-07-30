@@ -18,7 +18,7 @@ import { CONTRACTS_PACKAGE_VERSION } from "../src/schemas.js";
 import { scanNoCloudTarget } from "../src/no-cloud.js";
 
 const root = join(import.meta.dir, "..");
-const expectedUnreleasedVersion = "0.8.5";
+const expectedUnreleasedVersion = "0.8.6";
 const forbiddenInternalDomains = [["hasna", "xyz"].join(".")];
 
 function commandText(bytes: Uint8Array): string {
