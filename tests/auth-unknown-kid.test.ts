@@ -14,7 +14,7 @@
 // deny-unknown status resolver, or must opt in to the permissive behaviour
 // EXPLICITLY and greppably. Silence is no longer a vote for "allow".
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { mintApiKey } from "../src/auth/keys";
 import { ApiKeyStore, type AuthQueryClient, type Row } from "../src/auth/store";
 import { verifyApiKey } from "../src/auth/middleware";
@@ -266,6 +266,138 @@ describe("explicit, greppable opt-out preserves the old behaviour", () => {
     const revoked = await verifier.authenticate(headersFor(known.token));
     expect(revoked.ok).toBe(false);
     if (!revoked.ok) expect(revoked.reason).toBe("revoked");
+  });
+});
+
+describe("a polluted prototype cannot re-open the hole", () => {
+  // The options bag is caller-built, so a plain read resolves through the
+  // prototype chain. One `Object.prototype.allowUnregisteredKeys = true` write
+  // would otherwise flip every correctly-wired strict verifier back to
+  // accepting unknown kids AND silence the construction-time throw — both
+  // defenses defeated by a single write. This mirrors the existing
+  // `expectedTid` pollution test in tests/auth-tenant.test.ts.
+  const POLLUTED: string[] = [];
+  function pollute(prop: string, value: unknown): void {
+    Object.defineProperty(Object.prototype, prop, { value, configurable: true, enumerable: false, writable: true });
+    POLLUTED.push(prop);
+  }
+  afterEach(() => {
+    for (const prop of POLLUTED.splice(0)) {
+      delete (Object.prototype as Record<string, unknown>)[prop];
+    }
+  });
+
+  test("REGRESSION: Object.prototype.allowUnregisteredKeys does NOT make a strict verifier accept an unknown kid", async () => {
+    const store = await freshStore();
+    const ghost = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
+
+    // Pollute BEFORE construction. The flag is captured once at construction,
+    // so polluting afterwards exercises nothing — an earlier draft of this test
+    // did exactly that and stayed green against deliberately broken code.
+    // Pre-construction is also the realistic order: a pollution gadget fires
+    // during startup or request parsing, before or as the verifier is built.
+    pollute("allowUnregisteredKeys", true);
+
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, keyStatus: store.keyStatus });
+    const decision = await verifier.authenticate(headersFor(ghost.token));
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("unknown_key");
+  });
+
+  test("REGRESSION: Object.prototype.allowUnregisteredKeys does NOT silence the construction throw", async () => {
+    pollute("allowUnregisteredKeys", true);
+    expect(() => verifyApiKey({ app: "todos", signingSecret: SIGNING })).toThrow(/keyStatus/);
+  });
+
+  test("an injected Object.prototype.keyStatus cannot supply the verdict", async () => {
+    // A polluted resolver answering "active" would authenticate everything.
+    // Construction must not see it as a wired hook at all.
+    pollute("keyStatus", () => "active");
+    expect(() => verifyApiKey({ app: "todos", signingSecret: SIGNING })).toThrow(/keyStatus/);
+  });
+
+  test("an injected Object.prototype.isRevoked cannot satisfy the wiring requirement", async () => {
+    pollute("isRevoked", () => false);
+    expect(() => verifyApiKey({ app: "todos", signingSecret: SIGNING })).toThrow(/keyStatus/);
+  });
+});
+
+describe("an unavailable status lookup denies rather than throwing or allowing", () => {
+  test("REGRESSION: a throwing keyStatus resolver returns 503, never an allow and never an exception", async () => {
+    // keyStatus is a per-request DB read in every real store. A Postgres blip
+    // must not become an unhandled rejection (which hangs the request under
+    // Express 4) and must certainly not become an allow.
+    const known = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
+    const verifier = verifyApiKey({
+      app: "todos",
+      signingSecret: SIGNING,
+      keyStatus: () => {
+        throw new Error("connection terminated unexpectedly");
+      },
+    });
+
+    const decision = await verifier.authenticate(headersFor(known.token));
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) {
+      expect(decision.reason).toBe("status_unavailable");
+      expect(decision.status).toBe(503);
+    }
+  });
+
+  test("a rejecting async resolver is handled the same way", async () => {
+    const known = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
+    const events: string[] = [];
+    const verifier = verifyApiKey({
+      app: "todos",
+      signingSecret: SIGNING,
+      keyStatus: async () => Promise.reject(new Error("pool exhausted")),
+      audit: (e) => void events.push(`${e.outcome}:${e.reason}`),
+    });
+    const decision = await verifier.authenticate(headersFor(known.token));
+    expect(decision.ok).toBe(false);
+    expect(events).toEqual(["deny:status_unavailable"]);
+  });
+
+  test("POSITIVE CONTROL: a healthy resolver still allows, so 503 is not blanket-deny", async () => {
+    const store = await freshStore();
+    const known = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
+    await store.insertMinted(known, "test");
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, keyStatus: store.keyStatus });
+    expect((await verifier.authenticate(headersFor(known.token))).ok).toBe(true);
+  });
+});
+
+describe("an unrecognized status value is treated as unknown, not minted into the audit trail", () => {
+  test("REGRESSION: a store returning 'Active' (wrong case) denies as unknown_key, not as 'Active'", async () => {
+    const known = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
+    const events: (string | null)[] = [];
+    const verifier = verifyApiKey({
+      app: "todos",
+      signingSecret: SIGNING,
+      keyStatus: () => "Active" as never,
+      audit: (e) => void events.push(e.reason),
+    });
+
+    const decision = await verifier.authenticate(headersFor(known.token));
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("unknown_key");
+    // The contract's reason vocabulary must not grow a value a store invented.
+    expect(events).toEqual(["unknown_key"]);
+  });
+
+  test("an unrecognized status is NOT tolerated by allowUnregisteredKeys", async () => {
+    // Only a genuine "unknown" is opted out of; a value we cannot interpret is
+    // not evidence that the key is merely unregistered.
+    const known = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
+    const verifier = verifyApiKey({
+      app: "todos",
+      signingSecret: SIGNING,
+      keyStatus: () => "totally-bogus" as never,
+      allowUnregisteredKeys: true,
+    });
+    const decision = await verifier.authenticate(headersFor(known.token));
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("unknown_key");
   });
 });
 
