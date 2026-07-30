@@ -204,7 +204,7 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
         },
         engines: {
           type: "array",
-          items: { enum: ["sqlite", "postgres"] },
+          items: { enum: ["sqlite", "json", "postgres"] },
           minItems: 1,
           uniqueItems: true,
           description: "Supported storage engines; capability metadata independent of the active backend."
