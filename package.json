@@ -90,6 +90,7 @@
     "src/hasna.contract.schema.json",
     "docs",
     "examples",
+    "templates/adopter",
     "generated/todos/v1",
     "CONTRACT.md",
     "docker-compose.yml",
