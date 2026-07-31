@@ -4,8 +4,8 @@
 //   1. hasna.contract.json is present and valid (manifest + class rules).
 //   2. Declared bins and SDK exports match package.json.
 //   3. Required API/SDK/MCP/CLI surfaces are declared or explicitly waived.
-//   4. Store-owning repos declare SQLite + PostgreSQL capability and a live-PG
-//      gate, or carry an explicit, unexpired storage-engine waiver.
+//   4. Store-owning repos declare a supported local engine + PostgreSQL capability
+//      and a live-PG gate, or carry an explicit, unexpired storage-engine waiver.
 //   5. Public manifests do not expose private infrastructure references.
 //   6. Env parsing follows the HASNA_<NAME>_STORAGE_MODE spec and any mode env
 //      value normalizes to the sqlite|postgres backend enum (mode enum compliance).
@@ -18,6 +18,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   HealthResponseSchema,
+  LOCAL_STORAGE_ENGINES,
   SERVICE_SURFACE_KINDS,
   STORAGE_ENGINES,
   WAIVABLE_STORAGE_ENGINES,
@@ -869,11 +870,18 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
   } else {
     const engines = manifest.storage?.engines ?? [];
     const declaredEngines = new Set(engines);
-    const missingEngines = STORAGE_ENGINES.filter(
-      (engine) => !declaredEngines.has(engine) && !storageWaivers.answeredEngines.has(engine)
-    );
     const failures = [...storageWaivers.failures];
-    if (missingEngines.length > 0) failures.push(`missing storage engines: ${missingEngines.join(", ")}`);
+    if (manifest.class === "cli-with-store") {
+      const missingEngines = STORAGE_ENGINES.filter(
+        (engine) => !declaredEngines.has(engine) && !storageWaivers.answeredEngines.has(engine)
+      );
+      if (missingEngines.length > 0) failures.push(`missing storage engines: ${missingEngines.join(", ")}`);
+    } else {
+      if (!LOCAL_STORAGE_ENGINES.some((engine) => declaredEngines.has(engine))) {
+        failures.push(`missing local storage engine: ${LOCAL_STORAGE_ENGINES.join(" or ")}`);
+      }
+      if (!declaredEngines.has("postgres")) failures.push("missing storage engine: postgres");
+    }
     // `storage.envPrefix` and `storage.pgTestGate` both exist to serve the
     // PostgreSQL contract: the DATABASE_URL derivation and the live-PG proof.
     // Neither is required while a waiver speaks for PostgreSQL, because there
@@ -892,7 +900,9 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
           ? failures.join("; ")
           : storageWaivers.summaries.length > 0
             ? `${declaredDetail}; ${storageWaivers.summaries.join("; ")}`
-            : "sqlite and postgres capabilities plus live-PG gate declared"
+            : declaredEngines.has("json")
+              ? "json and postgres capabilities plus live-PG gate declared"
+              : "sqlite and postgres capabilities plus live-PG gate declared"
     });
   }
 

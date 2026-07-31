@@ -5088,7 +5088,9 @@ export const StorageModeSchema = z.enum(STORAGE_MODES);
 export type StorageMode = z.infer<typeof StorageModeSchema>;
 
 export const STORAGE_ENGINES = ["sqlite", "postgres"] as const;
-export const StorageEngineSchema = z.enum(STORAGE_ENGINES);
+export const STORAGE_ENGINE_VALUES = ["sqlite", "json", "postgres"] as const;
+export const LOCAL_STORAGE_ENGINES = ["sqlite", "json"] as const;
+export const StorageEngineSchema = z.enum(STORAGE_ENGINE_VALUES);
 export type StorageEngine = z.infer<typeof StorageEngineSchema>;
 
 /**
@@ -5620,12 +5622,21 @@ export const ServiceContractManifestSchema = z
     if (value.class === "service") {
       if (!value.storage) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "service repos must declare storage", path: ["storage"] });
-      } else if (value.storage.engines && (!value.storage.engines.includes("sqlite") || !value.storage.engines.includes("postgres"))) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "service storage.engines must declare both sqlite and postgres",
-          path: ["storage", "engines"]
-        });
+      } else if (value.storage.engines) {
+        if (!value.storage.engines.includes("postgres")) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "service storage.engines must declare postgres alongside sqlite or json; both sqlite and postgres remain supported",
+            path: ["storage", "engines"]
+          });
+        }
+        if (!LOCAL_STORAGE_ENGINES.some((engine) => value.storage?.engines?.includes(engine))) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "service storage.engines must declare a local engine (sqlite or json)",
+            path: ["storage", "engines"]
+          });
+        }
       }
       if (!hasBin("-serve")) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `service repos must ship the "${value.name}-serve" bin`, path: ["bins"] });
