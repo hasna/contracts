@@ -92,6 +92,89 @@ An app **MUST NOT** read secret *values* to decide the backend; it only
 detects `DATABASE_URL` presence. Selecting `postgres` without a database URL
 is a misconfiguration and MUST warn.
 
+### 3a. Credential resolution — env holds a pointer, disk holds the secret
+
+Environment variables are a snapshot taken at process start; credentials are
+mutable state. Storing a rotating secret in a frozen snapshot is a defect, and
+it has a measured failure mode: a shell started before a key rotation keeps
+sending the old key for its entire life, so every command from that shell fails
+`401` while a fresh shell on the same machine in the same second succeeds.
+
+Apps **MUST NOT** read `HASNA_<NAME>_API_KEY` from `process.env` themselves.
+The credential is resolved by the transport, at call time, through
+`resolveCredential()` (re-exported from `@hasna/contracts/client`). Precedence:
+
+| # | Tier | Source | Notes |
+| --- | --- | --- | --- |
+| 1 | argument | `--api-key` / `--profile` passed by the caller | Deliberate. |
+| 2 | override | `HASNA_<NAME>_API_KEY_OVERRIDE`, or the `HASNA_PROFILE` pointer | Deliberate. Nothing sets these automatically. |
+| 3 | **disk** | `$HOME/.hasna/cloud/<name>.env`, then `$HOME/.config/hasna/<name>-cloud.env` | **The default path.** Re-read on every call. |
+| 4 | legacy env | `HASNA_<NAME>_API_KEY` / `<NAME>_API_KEY` | Deprecated fallback, used only when the disk yields nothing. Warns once per app. |
+
+Rules:
+
+- **A deliberate tier never falls through.** If tier 1 or 2 selects a
+  credential, the chain stops there. An override that is revoked MUST surface
+  as a `401`; silently continuing to the next tier would authenticate as a
+  different principal than the operator named. There is **no retry-on-401**:
+  with a single static key, a retry makes identity nondeterministic per call
+  and is precisely what rescues a revoked override as the wrong tenant.
+- **Tier 3 is re-read per request**, not cached and not resolved once when the
+  client is built — a cache is the same snapshot defect at a smaller timescale.
+  This is what makes a rotation heal in any shell, however old.
+- **A credential alone never routes anything to the network.** An explicit
+  `HASNA_<NAME>_STORAGE_MODE` always wins, and it is still read only from the
+  environment. Where no mode is set, the legacy flip signal (`API_URL` +
+  `API_KEY` both present) still applies, but its credential half is satisfied by
+  **any** tier of the chain, not only by the legacy env var. The **API URL is
+  still required and still env-only**, so a credential file on disk cannot flip
+  a client that has no endpoint configured.
+
+  This matters because the steady state this section tells operators to migrate
+  to — endpoint in the environment, credential on disk — would otherwise resolve
+  to `sqlite` with `misconfigured: false` and no warning, silently serving the
+  local dataset while a valid credential sat on disk. That is the false green
+  this section forbids, so the inference has to see the whole chain.
+- **`HOME` comes from the same env object** the caller passes. An env with no
+  `HOME` performs no disk read, which is what keeps the behaviour hermetic and
+  test suites independent of the machine running them.
+- **Never fall back to local data on an auth failure.** Offline reads are a
+  legitimate feature, but they MUST be a deliberate mode chosen *before* the
+  request. A `401`-to-local fallback prints healthy output while authentication
+  is broken — a false green, strictly worse than the loud failure.
+- **A credential source that cannot produce a usable key fails loudly.** A key
+  carrying bytes that are illegal in an HTTP header is rejected by name, never
+  forwarded — otherwise `fetch` throws a `TypeError` that embeds the whole
+  header value, i.e. the plaintext key, into logs and stack traces. Credential
+  files are read only when they are regular files under a size cap, so a FIFO
+  or a character device planted in the credential directory cannot wedge a
+  per-request read.
+- **Every credential is built by one of exactly two constructors** —
+  `resolveCredential()` for the chain, `explicitCredential()` for a key a caller
+  passes directly as a string to `createHasnaHttpTransport({ apiKey })`. Both
+  validate and seal. A construction site that skips them is a bypass of this
+  whole section, and the string branch WAS one: it built a plain object literal,
+  so the single most-used public entry point ran neither the header-byte check
+  nor the seal.
+- Errors name **which source** supplied the rejected key, and say what to do
+  about it. Where two sources disagree, the report names the **paths** only: a
+  digest of a secret is still a derived encoding of it, and a truncated one is a
+  confirmation oracle.
+- **A key value is never logged, embedded, serialized, or printed**, and each of
+  those is enforced separately because one mechanism does not cover them all:
+
+  | Channel | Enforcement |
+  | --- | --- |
+  | `Object.keys`, `{ ...resolution }`, `JSON.stringify` | the field is **non-enumerable** |
+  | `console.log`, `Bun.inspect` | a **non-enumerable `Symbol.for("nodejs.util.inspect.custom")` hook** that renders `apiKey: "[redacted]"` |
+
+  Non-enumerability alone is NOT sufficient: under Bun — the engine this package
+  declares — an inspector prints own non-enumerable properties, so
+  `console.log(resolution)` spilled the key in plaintext while this section
+  claimed it could not. A redacting `toJSON` is not an alternative; a
+  non-enumerable one is never invoked by `JSON.stringify` in this runtime, and an
+  enumerable one would put a function into `Object.keys` and into every spread.
+
 ---
 
 ## 4. Health endpoints (services)
@@ -454,6 +537,68 @@ Checks:
 14. `published_artifact_gate` — a repo that publishes declares
    `metadata.release.artifactScan.script` and its `prepack` script transitively
    reaches it. See clause C.
+15. `credential_seam_compliance` — no source file resolves a Hasna client
+   credential by hand. Reading `HASNA_<NAME>_API_KEY` (or the `<NAME>_API_KEY`
+   alias) out of `process.env` keeps the stale-snapshot defect that §3a exists
+   to remove, so it fails. The rule asks `clientTransportEnvKeys()` for the
+   names it polices rather than approximating them, so it cannot drift from the
+   seam.
+
+   It also fails a repo that **defines** `resolveClientTransport`,
+   `createClientTransport`, `createHasnaHttpTransport`, or
+   `resolveStorageClient` itself — a vendored fork of the seam. A fork builds
+   its key names by template and reads them through a computed loop, so no
+   literal name ever appears and a name-based rule sees nothing: measured, one
+   repo scored zero findings while shipping a complete copy of the pre-fix
+   resolver on its live storage path. Without this clause the cheapest way to
+   turn the gate green is to fork the transport, and the gate would reward the
+   exact thing it exists to prevent. Importing and calling those functions is
+   the compliant path and never matches.
+
+   It is deliberately narrow, because a mandatory gate that fires on compliant
+   code gets switched off — and then it protects nothing, the same end state as
+   a check that cannot fail. It matches **read expressions only**: writing the
+   variable, naming it in an error message, listing it in a redaction
+   allowlist, or forwarding it to a child process are all compliant. Comments
+   and JSDoc are masked. Tests, `scripts/`, `dist/`, and shipped `bin/` bundles
+   are excluded. Three exclusions are worth stating explicitly, because each was
+   measured against the fleet rather than guessed:
+
+   - **Both of the app's OWN key names are policed** — `HASNA_<APP>_API_KEY`
+     and the bare `<APP>_API_KEY` alias — because the seam resolves both, so a
+     hand-read of either is the same defect. The name list is taken from
+     `clientTransportEnvKeys()` unfiltered; narrowing it here would reintroduce
+     exactly the drift that function is consulted to prevent. A third-party
+     credential that happens to wear an app's name — one repo's
+     `RECORDINGS_API_KEY` holds an OpenAI key — clears through a **waiver**,
+     which a reviewer reads in the report, rather than through the class going
+     unpoliced fleet-wide. Other services' bare aliases stay out of scope: a
+     foreign name is only recognised in the namespaced `HASNA_` form.
+   - **Top-level inbound surfaces (`src/server/`, `src/http/`, `src/api/`,
+     `src/mcp/`) are excluded**, including everything beneath them. A server
+     reads its own key to *compare* against a caller's, which is the opposite of
+     resolving one to send. The name is identical, so only location can separate
+     them — and the location must be TOP-LEVEL. Matching those directory names at
+     any depth silently exempted `src/client/api/…`, the most likely place for a
+     real client bypass to sit; every measured fleet case is directly under
+     `src/`. Widening this requires widening the rule and this clause together.
+   - `HASNA_<APP>_SERVE_API_KEY` and `HASNA_<APP>_BOOTSTRAP_API_KEY`, and
+     third-party keys wearing the prefix (`HASNA_BRAIN_ANTHROPIC_API_KEY`),
+     fall outside the single-segment client-flip grammar and are excluded
+     structurally rather than by an allowlist anyone has to maintain.
+
+   The pressure valve is an explicit waiver comment on the read or the line
+   above it:
+
+   ```ts
+   // hasna-credential-seam-waiver: server-side validation of the inbound key, not a client resolve
+   const expected = process.env.HASNA_FACTORY_API_KEY;
+   ```
+
+   A waiver with no usable justification is **rejected**, not honoured — it
+   would silence the gate while recording nothing a reviewer can weigh. Every
+   accepted waiver is echoed into the report, so it stays a thing a human
+   reads.
 
 The kit is dev-dependency friendly: `@hasna/contracts` can be a `devDependency`
 and the checks run under `bun test` with no runtime footprint in the app.

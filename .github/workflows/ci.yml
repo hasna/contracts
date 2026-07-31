@@ -11,7 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - run: bun install
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
         # The loopback security suites and both publish gates are fail-closed.
         # Pinning every seam to empty here means CI can never inherit an
         # environment that downgrades them: a runner that loses bind capability

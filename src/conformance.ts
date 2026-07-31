@@ -4,8 +4,8 @@
 //   1. hasna.contract.json is present and valid (manifest + class rules).
 //   2. Declared bins and SDK exports match package.json.
 //   3. Required API/SDK/MCP/CLI surfaces are declared or explicitly waived.
-//   4. Store-owning repos declare SQLite + PostgreSQL capability and a live-PG
-//      gate, or carry an explicit, unexpired storage-engine waiver.
+//   4. Store-owning repos declare a supported local engine + PostgreSQL capability
+//      and a live-PG gate, or carry an explicit, unexpired storage-engine waiver.
 //   5. Public manifests do not expose private infrastructure references.
 //   6. Env parsing follows the HASNA_<NAME>_STORAGE_MODE spec and any mode env
 //      value normalizes to the sqlite|postgres backend enum (mode enum compliance).
@@ -18,6 +18,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   HealthResponseSchema,
+  LOCAL_STORAGE_ENGINES,
   SERVICE_SURFACE_KINDS,
   STORAGE_ENGINES,
   WAIVABLE_STORAGE_ENGINES,
@@ -31,6 +32,7 @@ import { loadServiceContractManifest, type LoadServiceContractResult } from "./s
 import { normalizeStorageMode, storageEnvKeys, type Env } from "./mode";
 import { API_KEY_TOKEN_PATTERN } from "./auth/keys";
 import { scanNoCloudTarget } from "./no-cloud";
+import { scanCredentialSeam } from "./credential-seam";
 
 export type ConformanceStatus = "pass" | "fail" | "skip";
 
@@ -55,6 +57,8 @@ export interface RepoConformanceOptions {
   healthSample?: unknown;
   /** Skip the no-cloud scan (useful when a caller runs it separately). */
   skipNoCloudScan?: boolean;
+  /** Skip the credential-seam scan (useful when a caller runs it separately). */
+  skipCredentialSeamScan?: boolean;
   /** Public manifests are checked for private infrastructure references. */
   manifestTier?: "public" | "private";
   /** Clock used for time-boxed checks such as storage-waiver expiry. */
@@ -609,6 +613,54 @@ function publishedArtifactGateCheck(repoRoot: string, manifest: ServiceContractM
     : { id: "published_artifact_gate", status: "fail", detail: failures.join("; ") };
 }
 
+/**
+ * Nobody resolves a client credential by hand.
+ *
+ * A repo that reads `HASNA_<NAME>_API_KEY` out of `process.env` keeps the
+ * defect the credential provider chain removes: an environment snapshot taken
+ * at process start, which serves a revoked key for the whole life of the shell.
+ * See `src/credential-seam.ts` for why this rule is narrow and what it
+ * deliberately does not flag.
+ */
+function credentialSeamCheck(repoRoot: string, appName: string, skip?: boolean): ConformanceCheck {
+  if (skip) {
+    return { id: "credential_seam_compliance", status: "skip", detail: "skipped by caller" };
+  }
+  let scan;
+  try {
+    scan = scanCredentialSeam(repoRoot, { appName });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { id: "credential_seam_compliance", status: "fail", detail: `credential-seam scan error: ${message}` };
+  }
+
+  const failures: string[] = [];
+  for (const finding of scan.findings) {
+    failures.push(`${finding.path}:${finding.line} ${finding.message}`);
+  }
+  // A waiver with no usable justification is worse than no waiver: it silences
+  // the gate while recording nothing a reviewer can weigh.
+  for (const waiver of scan.invalidWaivers) {
+    failures.push(
+      `${waiver.path}:${waiver.line} carries a credential-seam waiver with no usable justification ` +
+        `('${waiver.reason}'); state why this read cannot go through the seam.`,
+    );
+  }
+  if (failures.length > 0) {
+    return { id: "credential_seam_compliance", status: "fail", detail: failures.join("; ") };
+  }
+
+  const waived =
+    scan.waivers.length > 0
+      ? `; explicitly waived: ${scan.waivers.map((waiver) => `${waiver.path}:${waiver.line} (${waiver.reason})`).join("; ")}`
+      : "";
+  return {
+    id: "credential_seam_compliance",
+    status: "pass",
+    detail: `no hand-rolled client credential reads across ${scan.filesScanned} source files${waived}`,
+  };
+}
+
 export function runRepoConformance(repoRoot: string, options: RepoConformanceOptions = {}): RepoConformanceReport {
   const checks: ConformanceCheck[] = [];
   const loaded: LoadServiceContractResult = loadServiceContractManifest(repoRoot);
@@ -818,11 +870,18 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
   } else {
     const engines = manifest.storage?.engines ?? [];
     const declaredEngines = new Set(engines);
-    const missingEngines = STORAGE_ENGINES.filter(
-      (engine) => !declaredEngines.has(engine) && !storageWaivers.answeredEngines.has(engine)
-    );
     const failures = [...storageWaivers.failures];
-    if (missingEngines.length > 0) failures.push(`missing storage engines: ${missingEngines.join(", ")}`);
+    if (manifest.class === "cli-with-store") {
+      const missingEngines = STORAGE_ENGINES.filter(
+        (engine) => !declaredEngines.has(engine) && !storageWaivers.answeredEngines.has(engine)
+      );
+      if (missingEngines.length > 0) failures.push(`missing storage engines: ${missingEngines.join(", ")}`);
+    } else {
+      if (!LOCAL_STORAGE_ENGINES.some((engine) => declaredEngines.has(engine))) {
+        failures.push(`missing local storage engine: ${LOCAL_STORAGE_ENGINES.join(" or ")}`);
+      }
+      if (!declaredEngines.has("postgres")) failures.push("missing storage engine: postgres");
+    }
     // `storage.envPrefix` and `storage.pgTestGate` both exist to serve the
     // PostgreSQL contract: the DATABASE_URL derivation and the live-PG proof.
     // Neither is required while a waiver speaks for PostgreSQL, because there
@@ -841,7 +900,9 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
           ? failures.join("; ")
           : storageWaivers.summaries.length > 0
             ? `${declaredDetail}; ${storageWaivers.summaries.join("; ")}`
-            : "sqlite and postgres capabilities plus live-PG gate declared"
+            : declaredEngines.has("json")
+              ? "json and postgres capabilities plus live-PG gate declared"
+              : "sqlite and postgres capabilities plus live-PG gate declared"
     });
   }
 
@@ -910,6 +971,9 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
 
   // Check 9: published-artifact scanning is bound to prepack (clause C).
   checks.push(publishedArtifactGateCheck(repoRoot, manifest));
+
+  // Check 10: nobody hand-rolls a client credential outside the seam.
+  checks.push(credentialSeamCheck(repoRoot, manifest.name, options.skipCredentialSeamScan));
 
   // Check 8: no forbidden shared cloud runtimes (reuse the no-cloud guard).
   if (options.skipNoCloudScan) {

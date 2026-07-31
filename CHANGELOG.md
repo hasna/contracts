@@ -2,7 +2,31 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
-## [0.8.5] - 2026-07-29
+## [0.8.6] - 2026-07-30
+
+### BREAKING: client transport never infers the backend — explicit signal only (owner ruling 2026-07-29)
+
+`resolveClientTransport()` selects the `postgres` backend ONLY from an explicit
+mode env (`HASNA_<APP>_STORAGE_MODE=postgres` or an alias). The presence-based
+inference shipped in 0.8.5 — a URL in the environment plus a resolvable
+credential, where a credential file appearing on DISK satisfied the credential
+half just as an env var did — is removed entirely, both halves:
+
+- URL + API key in the environment no longer infer `postgres` (the pre-0.8.5
+  `urlHit && keyHit` form).
+- URL + a credential file on disk no longer infer `postgres` (the 0.8.5
+  chain-backed `urlHit` form).
+
+Endpoints and credentials are connection material, never a transition signal.
+A URL configured with no explicit mode env now stays on the local sqlite store
+with `misconfigured: false` and a `warning` naming the missing
+`HASNA_<APP>_STORAGE_MODE=postgres`, so the ambiguous state is visible instead
+of silently local. Regression tests assert both halves stay dead.
+
+MIGRATION: machines relying on the fleet env-flip (url+key with no mode var)
+must add the explicit mode env before upgrading, or they will read their local
+sqlite store (loudly, via the warning). 0.8.5 itself is held from rollout
+because it carries the banned inference.
 
 ### `schemas --json` identifies the installed CLI version
 
@@ -11,6 +35,121 @@ All notable changes to `@hasna/contracts` are documented here.
   installations before relying on their registry contents.
 - The `schemas` field contains every id in `ContractSchemaRegistry`; schema ids
   and the human-readable `contracts schemas` output are unchanged.
+
+## [0.8.5] - 2026-07-29
+
+### CI: gate changes on typechecking and tests
+
+Pull requests and pushes to `main` now install from the frozen Bun lockfile,
+then run the typechecker and test suite as explicit CI steps.
+
+### Credential resolution: env holds a pointer, disk holds the secret, resolved at call time
+
+MEASURED FAILURE THIS KILLS. A tmux shell started before a key rotation held the
+stale `HASNA_ACCOUNTS_API_KEY` for its whole life; every command from it failed
+`401 "API key has been revoked"`, while a fresh login shell on the same machine
+in the same second returned `200`. The credential on disk was correct
+throughout — only the process env was stale. Environment variables are a
+snapshot taken at process start; credentials are mutable state.
+
+`resolveClientTransport()` stays the entry point and gains a credential provider
+chain resolved on every call: an explicit `--api-key`/`--profile` argument, then
+a deliberate `HASNA_<NAME>_API_KEY_OVERRIDE` / `HASNA_PROFILE` pointer, then
+**disk** (`$HOME/.hasna/cloud/<name>.env`, then
+`$HOME/.config/hasna/<name>-cloud.env`), and finally the legacy
+`HASNA_<NAME>_API_KEY` process env — demoted to a deprecated fallback used only
+when the disk yields nothing. That demotion is what fixes stale shells
+immediately, without waiting for shells to cycle. See CONTRACT.md §3a.
+
+WHAT WAS DELIBERATELY NOT BUILT: env-first with a retry-on-401 that re-reads
+disk. In mature CLIs retry-on-401 signals two-tier auth — a durable secret
+minting short-lived tokens. With a single static key it makes identity
+nondeterministic per call and, the correctness bug, SILENTLY RESCUES A REVOKED
+DELIBERATE OVERRIDE as the wrong principal. A deliberate tier therefore never
+falls through, and `401`/`403` are terminal regardless of retry policy.
+
+THE BACKEND DECISION STAYS ENDPOINT-GATED. A client routes to the network only
+when an API URL is configured in the environment, so a credential file on disk
+can never by itself flip a client that reads its sqlite store. What the chain
+DOES supply is the credential half of the fleet flip signal: with a URL set and
+no explicit `HASNA_<APP>_STORAGE_MODE`, a key resolved from ANY tier — including
+one that exists only on disk — infers the `postgres` backend. Resolving that half
+from `HASNA_<APP>_API_KEY` alone would have left the exact migration this change
+recommends (endpoint in the environment, credential on disk) reading the local
+dataset with `misconfigured: false` and no warning. `HOME` is read from the same
+env object the caller passes, so an env without `HOME` performs no disk read at
+all and the behaviour stays hermetic.
+
+Also fixed: `createClientTransport()` re-read the API key straight out of `env`,
+a second resolution path that diverged from `resolveClientTransport()` on the
+code path most consumers actually take. Both now share the chain, and
+`createHasnaHttpTransport()` accepts a provider so rotation heals inside
+long-lived processes without rebuilding the client — resolved once per request,
+never per retry attempt, so one request is always one identity.
+
+New conformance check `credential_seam_compliance` fails any repo that resolves
+a client credential by hand. It derives the names it polices from
+`clientTransportEnvKeys()` so it cannot drift from the seam, matches read
+expressions only, and structurally excludes server-side `*_SERVE_API_KEY` /
+`*_BOOTSTRAP_API_KEY` reads and third-party keys wearing the `HASNA_` prefix.
+
+#### Fixed: a plaintext key leak on the most-used public entry point
+
+`createHasnaHttpTransport({ apiKey })` accepts a bare string, and that branch
+built its credential as a plain object literal — running NEITHER the
+header-byte check NOR the seal. A key carrying a CR therefore reached `fetch`,
+which rejects it with a `TypeError` that quotes the whole header value:
+
+```
+TypeError: Header 'x-api-key' has invalid value: 'AAAA\nhasna_todos_SUPERSECRET-VALUE'
+```
+
+That is the exact failure `ILLEGAL_IN_HEADER_VALUE` and CONTRACT.md §3a were
+added to close; the first test round only ever exercised `resolveCredential()`,
+so the public constructor was unprotected and untested. Credentials are now
+built by exactly two constructors — `resolveCredential()` for the chain and the
+new exported `explicitCredential()` for a caller-supplied string — and both
+validate and seal. There is no third construction site.
+
+#### Fixed: `credential_seam_compliance` was quietly weakened below its own documentation
+
+Two exclusions had been widened past what CONTRACT.md describes, in the
+direction that lets a bypass through:
+
+- **`INBOUND_SURFACE_DIRS` matched at any depth.** CONTRACT.md documents
+  `src/server/`, `src/http/`, `src/api/`, `src/mcp/` — top-level directories —
+  but the implementation exempted any path containing one of those names as a
+  segment. `src/client/api/client.ts` was therefore silently exempt, which is
+  the single most likely place a real client bypass would sit. Matching is now
+  the documented top-level `src/<dir>/**` form. All four fleet files that
+  motivated the exclusion are directly under `src/`, so nothing measured is
+  given up.
+- **The bare `<APP>_API_KEY` alias had been dropped from policing.** The seam
+  resolves it, so a hand-read of it is the same defect; and the rule's claim to
+  soundness is that it asks `clientTransportEnvKeys()` for the names it polices
+  "rather than approximating them, so the rule and the seam cannot drift apart"
+  — filtering that answer reintroduced exactly that drift, on the app's own
+  canonical alias. The collision it dodged (a repo whose `RECORDINGS_API_KEY`
+  holds an OpenAI key) is now handled by the waiver this rule already ships and
+  echoes into the report, so one auditable line in one repo replaces a permanent
+  silent hole in every repo.
+
+`scripts/` staying in `SKIP_DIRS` is **kept**: it is not in the package's
+`files`, so it is not shipped behaviour, and it is excluded for the same reason
+tests already were. CONTRACT.md documents it.
+
+#### Fixed: CONTRACT.md §3a promised `console.log` safety the runtime did not honour
+
+Non-enumerability keeps the key out of `Object.keys`, spreads, and
+`JSON.stringify`, but it does NOT hide an own property from an inspector: under
+Bun — the declared engine — `console.log(resolution)` printed
+`apiKey: "sk-..."` verbatim. A non-enumerable
+`Symbol.for("nodejs.util.inspect.custom")` hook IS honoured by both
+`console.log` and `Bun.inspect` (unlike `toJSON`, which this runtime never
+invokes when non-enumerable), and adds nothing to `Object.keys` or to any
+spread. The redacted form keeps `tier` and `source`, so a diagnostic dump stays
+useful. §3a now states the two enforcement mechanisms separately rather than
+implying one covers both.
 
 ## [0.8.4] - 2026-07-29
 

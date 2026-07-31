@@ -220,6 +220,49 @@ contracts no-cloud-scan --manifest app-cloud.manifest.json .
 contracts no-cloud-scan --json hasna-todos-0.11.62.tgz
 ```
 
+## Adopter Checklist
+
+A downstream package has finished adopting `@hasna/contracts` only when it
+ships the enforcement half as well as the runtime import:
+
+1. Add `@hasna/contracts` to `dependencies` when production code imports it.
+2. Call `parseContract(...)` at the boundary before returning, publishing, or
+   persisting a shared contract payload.
+3. Copy the starter fixtures into `fixtures/` (or use `examples/`) and replace
+   them with package-owned cases. Keep at least one `.valid.json` and one
+   `.invalid.json` fixture for every adopted schema.
+4. Add the conformance script below and run it in CI. The fixture directory in
+   the script must match the directory chosen in step 3.
+5. Run `contracts no-cloud-scan .` from `prepublishOnly`. Merge it into the
+   existing release gate; do not remove typecheck, test, build, or pack checks.
+
+Copy the published starter fixtures after installing the dependency:
+
+```bash
+mkdir -p fixtures
+cp node_modules/@hasna/contracts/templates/adopter/fixtures/*.json fixtures/
+```
+
+Merge this reference fragment into `package.json` (and preserve any existing
+`prepublishOnly` commands before the two new gates):
+
+```json
+{
+  "dependencies": {
+    "@hasna/contracts": "^0.8.4"
+  },
+  "scripts": {
+    "contracts:conformance": "contracts conformance fixtures",
+    "prepublishOnly": "bun run contracts:conformance && contracts no-cloud-scan ."
+  }
+}
+```
+
+Run `bun run contracts:conformance` locally before relying on the prepublish
+gate. Conformance fails closed on empty fixture sets, malformed JSON, unknown
+schemas, valid fixtures rejected by their schema, and invalid fixtures that the
+schema accepts.
+
 Print the shared declarative secure local-store policy for `.hasna` and
 `.codewith`, optionally filtered to one package-owned store:
 
@@ -422,6 +465,11 @@ Seam](docs/AUTH_RBAC_VERIFIER_CONTRACT.md#identity-seam-offline-eddsa-fleet-toke
 
 **Client env vars (HTTP transport to an operator-run server):**
 
+- `HASNA_<APP>_STORAGE_MODE=postgres` — the REQUIRED explicit signal that the
+  client's data lives behind the HTTP API. Neither an endpoint nor a credential
+  (in the environment or on disk) selects network transport on its own or in
+  combination; a URL configured without this signal stays on the local sqlite
+  store and surfaces a warning.
 - `HASNA_<APP>_API_URL` + `HASNA_<APP>_API_KEY` — the explicit per-app URL
   always wins and is normalized to `/v1`. Explicit URLs require canonical ASCII
   authorities without credentials, controls, IDN/punycode, query strings, or
@@ -444,9 +492,9 @@ Seam](docs/AUTH_RBAC_VERIFIER_CONTRACT.md#identity-seam-offline-eddsa-fleet-toke
 
 The short aliases `<APP>_API_URL` and `<APP>_API_KEY` remain supported after the
 canonical `HASNA_` names. Client configuration uses an HTTP API URL, never a
-database DSN. When relying on the fleet-domain or placeholder default (no
-explicit per-app URL), set `HASNA_<APP>_STORAGE_MODE=cloud`; only an explicit
-URL + API-key pair infers cloud mode when the mode variable is absent.
+database DSN. The same explicit `HASNA_<APP>_STORAGE_MODE=postgres` signal is
+required whether the URL is explicit or comes from the fleet-domain default —
+presence of connection material never infers the backend.
 
 Scope grammar is `<app>:<action>` with wildcards (`*`, `<app>:*`, `*:<action>`).
 
@@ -1024,6 +1072,13 @@ that names the isolation provider, filesystem/network policy, writable roots,
 tool allowlist, environment redaction result, and timestamp for the exact route
 or run. `danger-full-access` plus a worktree is a manual break-glass mode, not a
 safe auto-route default.
+
+Schema ids in the `hasna.*.v1` namespace are minted only by
+`@hasna/contracts`. Packages must use a package-prefixed id for experimental or
+package-local shapes and validate them with package-local validators. A shape
+graduates into `@hasna/contracts` when at least two packages consume it,
+matching the `WorkflowInvocation` rule below; this requires neither a registry
+service nor an approval board.
 
 `WorkflowInvocation` is documented here as the architecture boundary used by
 OpenLoops and neighboring packages. It is not yet a wire schema in the current

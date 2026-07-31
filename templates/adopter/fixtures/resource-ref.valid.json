@@ -1,0 +1,7 @@
+{
+  "schema": "hasna.resource_ref.v1",
+  "id": "adopter_resource_001",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "kind": "artifact",
+  "uri": "artifact://adopter/example"
+}

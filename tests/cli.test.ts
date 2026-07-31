@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CONTRACTS_PACKAGE_VERSION, ContractSchemaRegistry } from "../src/schemas";
@@ -122,6 +122,15 @@ describe("contracts CLI", () => {
     expect(
       payload.results.some((entry: { file: string; expectedValid: boolean }) => entry.file.endsWith("proof-bundle.invalid.json") && !entry.expectedValid)
     ).toBe(true);
+  });
+
+  test("ships a conformant adopter fixture template", () => {
+    const packageJson = JSON.parse(readFileSync(join(import.meta.dir, "..", "package.json"), "utf8"));
+    expect(packageJson.files).toContain("templates/adopter");
+
+    const result = runContracts(["conformance", "--json", "templates/adopter/fixtures"]);
+    expect(result.exitCode).toBe(0);
+    expect(parseStdoutJson(result)).toMatchObject({ ok: true, checked: 2, failed: 0 });
   });
 
   test("runs repo conformance with stable capability check ids", () => {

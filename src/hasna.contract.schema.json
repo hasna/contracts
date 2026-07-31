@@ -345,6 +345,7 @@
           "items": {
             "enum": [
               "sqlite",
+              "json",
               "postgres"
             ]
           },

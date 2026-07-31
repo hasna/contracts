@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
   appendFileSync,
+  copyFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -11,14 +13,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { CONTRACTS_PACKAGE_VERSION } from "../src/schemas.js";
 import { scanNoCloudTarget } from "../src/no-cloud.js";
 
 const root = join(import.meta.dir, "..");
-const expectedUnreleasedVersion = "0.8.5";
+const expectedUnreleasedVersion = "0.8.6";
 const forbiddenInternalDomains = [["hasna", "xyz"].join(".")];
 
 function commandText(bytes: Uint8Array): string {
@@ -59,6 +61,20 @@ function trackedFiles(): string[] {
     throw new Error(`git ls-files failed: ${commandText(result.stderr)}`);
   }
   return commandText(result.stdout).split("\0").filter(Boolean);
+}
+
+function copyTrackedRepository(destination: string): void {
+  for (const path of trackedFiles()) {
+    const target = join(destination, path);
+    mkdirSync(dirname(target), { recursive: true });
+    copyFileSync(join(root, path), target);
+  }
+
+  const dependencies = join(root, "node_modules");
+  if (!existsSync(dependencies)) {
+    throw new Error("published-package fixture requires the repository node_modules");
+  }
+  symlinkSync(dependencies, join(destination, "node_modules"), "dir");
 }
 
 function containsUtf16Domain(bytes: Uint8Array, domain: string, littleEndian: boolean): boolean {
@@ -453,15 +469,20 @@ function forbiddenEncodingFixtures(domain: string): Array<{
 
 describe("published package hostname and provenance boundary", () => {
   let temporaryRoot = "";
+  let builtRepositoryRoot = "";
   let extractedPackageRoot = "";
   let packedArchivePath = "";
+  let repositoryDistExistedBeforeFixture = false;
 
   beforeAll(() => {
+    repositoryDistExistedBeforeFixture = existsSync(join(root, "dist"));
     temporaryRoot = mkdtempSync(join(tmpdir(), "contracts-package-security-"));
+    builtRepositoryRoot = join(temporaryRoot, "repository");
     const extracted = join(temporaryRoot, "extracted");
     mkdirSync(extracted);
+    copyTrackedRepository(builtRepositoryRoot);
 
-    run(["bun", "run", "build"]);
+    run(["bun", "run", "build"], builtRepositoryRoot);
     const packedFilename = run([
       "bun",
       "pm",
@@ -470,7 +491,7 @@ describe("published package hostname and provenance boundary", () => {
       temporaryRoot,
       "--ignore-scripts",
       "--quiet",
-    ]);
+    ], builtRepositoryRoot);
     const archive = isAbsolute(packedFilename)
       ? packedFilename
       : join(temporaryRoot, packedFilename);
@@ -508,7 +529,12 @@ describe("published package hostname and provenance boundary", () => {
   });
 
   test("generated build output contains no forbidden internal domains", () => {
-    expect(findForbiddenInternalDomains(root, ["dist"])).toEqual([]);
+    expect(findForbiddenInternalDomains(builtRepositoryRoot, ["dist"])).toEqual([]);
+  });
+
+  test("building the packed fixture does not create checkout build output", () => {
+    expect(existsSync(join(builtRepositoryRoot, "dist"))).toBe(true);
+    expect(existsSync(join(root, "dist"))).toBe(repositoryDistExistedBeforeFixture);
   });
 
   test("actual packed archive contents contain no forbidden internal domains", () => {
@@ -527,7 +553,14 @@ describe("published package hostname and provenance boundary", () => {
     const evidence = scanNoCloudTarget(packedArchivePath);
     expect(evidence.verdict).toBe("passed");
     expect(evidence.findings).toEqual([]);
-  }, 15_000);
+    // Measured 2026-07-29: 43s idle, 47-53s under load, on unmodified main as
+    // well as on this branch. A per-test budget passed here takes precedence
+    // over the suite-wide `bun test --timeout 120000` that package.json sets,
+    // so the old 15_000 made this the one test that escaped the default and
+    // failed `verify:release` on machine speed rather than on substance.
+    // 120_000 restores parity with that default; the gate still fails on any
+    // real no-cloud finding.
+  }, 120_000);
 
   test("raw-member scan catches an encoded duplicate that extraction overwrites", () => {
     const fixtureRoot = join(temporaryRoot, "duplicate-member-negative-control");
@@ -677,7 +710,7 @@ describe("published package hostname and provenance boundary", () => {
       readFileSync(join(extractedPackageRoot, "hasna.contract.json"), "utf8"),
     ) as { kitVersion: string };
     const generated = (await import(
-      `${pathToFileURL(join(root, "dist/schemas.js")).href}?source=${Date.now()}`
+      `${pathToFileURL(join(builtRepositoryRoot, "dist/schemas.js")).href}?source=${Date.now()}`
     )) as { CONTRACTS_PACKAGE_VERSION: string };
     const packedGenerated = (await import(
       `${pathToFileURL(join(extractedPackageRoot, "dist/schemas.js")).href}?packed=${Date.now()}`
