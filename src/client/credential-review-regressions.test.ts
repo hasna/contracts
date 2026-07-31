@@ -541,6 +541,47 @@ describe("a caller-supplied CredentialProvider gets the credential protections",
     expect(JSON.stringify(thrown)).not.toContain(PLAINTEXT);
   });
 
+  test("sealed provider diagnostic metadata cannot be rewritten into an auth-failure leak", async () => {
+    const home = makeHome();
+    writeCloudEnv(home, "todos", `HASNA_TODOS_API_KEY=${PLAINTEXT}\n`);
+    const resolved = resolveCredential("todos", { HOME: home })!;
+
+    try {
+      (resolved as unknown as { source: string }).source = PLAINTEXT;
+    } catch {
+      // Frozen credentials throw in strict runtimes; either way, the value below
+      // must stay the original safe source path.
+    }
+    try {
+      (resolved.diskCandidates as string[]).push(PLAINTEXT);
+    } catch {
+      // The candidate list is part of the diagnostic snapshot too.
+    }
+
+    expect(Object.isFrozen(resolved)).toBe(true);
+    expect(Object.isFrozen(resolved.diskCandidates)).toBe(true);
+    expect(resolved.source).not.toBe(PLAINTEXT);
+    expect(resolved.diskCandidates).not.toContain(PLAINTEXT);
+
+    const client = createHasnaHttpTransport({
+      name: "todos",
+      baseUrl: "https://todos.your-deployment.example/v1",
+      retry: false,
+      apiKey: () => resolved,
+      fetchImpl: async () => new Response("", { status: 401 }),
+    });
+
+    let thrown: unknown;
+    try {
+      await client.get("/items");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect((thrown as Error).message).not.toContain(PLAINTEXT);
+    expect(JSON.stringify(thrown)).not.toContain(PLAINTEXT);
+  });
+
   test("well-formed provider credentials are sealed per request without breaking rotation", async () => {
     const keys = [`${PLAINTEXT}-before`, `${PLAINTEXT}-after`];
     const seen: Array<{ apiKey: string; authorization: string }> = [];

@@ -60,14 +60,14 @@ export interface ResolvedCredential {
    * are blocked. Note that `{ ...resolved }` therefore DROPS the key — which is
    * the safe direction.
    */
-  apiKey: string;
-  tier: CredentialTier;
+  readonly apiKey: string;
+  readonly tier: CredentialTier;
   /** Where it came from: an env key NAME or an absolute file path. Never a value. */
-  source: string;
+  readonly source: string;
   /** True for tiers an operator sets on purpose. These never fall through. */
-  deliberate: boolean;
+  readonly deliberate: boolean;
   /** True when it came from the deprecated legacy process-env tier. */
-  deprecated: boolean;
+  readonly deprecated: boolean;
   /**
    * The disk paths that were consulted before this credential was chosen.
    *
@@ -75,9 +75,9 @@ export interface ResolvedCredential {
    * credential SHOULD live, instead of advising a fix that silently drops the
    * client onto its local store.
    */
-  diskCandidates: readonly string[];
+  readonly diskCandidates: readonly string[];
   /** Human-readable advisory. Never contains key material. */
-  warning: string | null;
+  readonly warning: string | null;
 }
 
 export interface CredentialChainOptions {
@@ -304,7 +304,15 @@ function sealCredential(fields: {
   diskCandidates: readonly string[];
   warning: string | null;
 }): ResolvedCredential {
-  const { apiKey, ...visible } = fields;
+  const { apiKey } = fields;
+  const visible = {
+    tier: fields.tier,
+    source: fields.source,
+    deliberate: fields.deliberate,
+    deprecated: fields.deprecated,
+    diskCandidates: Object.freeze([...fields.diskCandidates]),
+    warning: fields.warning,
+  };
   const sealed = { ...visible } as ResolvedCredential;
   Object.defineProperty(sealed, "apiKey", {
     value: apiKey,
@@ -342,7 +350,7 @@ function sealCredential(fields: {
     writable: false,
     configurable: false,
   });
-  return sealed;
+  return Object.freeze(sealed);
 }
 
 function isSealedCredential(credential: ResolvedCredential): boolean {
