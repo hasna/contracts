@@ -1062,6 +1062,13 @@ tool allowlist, environment redaction result, and timestamp for the exact route
 or run. `danger-full-access` plus a worktree is a manual break-glass mode, not a
 safe auto-route default.
 
+Schema ids in the `hasna.*.v1` namespace are minted only by
+`@hasna/contracts`. Packages must use a package-prefixed id for experimental or
+package-local shapes and validate them with package-local validators. A shape
+graduates into `@hasna/contracts` when at least two packages consume it,
+matching the `WorkflowInvocation` rule below; this requires neither a registry
+service nor an approval board.
+
 `WorkflowInvocation` is documented here as the architecture boundary used by
 OpenLoops and neighboring packages. It is not yet a wire schema in the current
 catalog; add a `hasna.workflow_invocation.v1` schema only when at least two
