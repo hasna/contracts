@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
   appendFileSync,
+  copyFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -11,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { CONTRACTS_PACKAGE_VERSION } from "../src/schemas.js";
@@ -59,6 +61,20 @@ function trackedFiles(): string[] {
     throw new Error(`git ls-files failed: ${commandText(result.stderr)}`);
   }
   return commandText(result.stdout).split("\0").filter(Boolean);
+}
+
+function copyTrackedRepository(destination: string): void {
+  for (const path of trackedFiles()) {
+    const target = join(destination, path);
+    mkdirSync(dirname(target), { recursive: true });
+    copyFileSync(join(root, path), target);
+  }
+
+  const dependencies = join(root, "node_modules");
+  if (!existsSync(dependencies)) {
+    throw new Error("published-package fixture requires the repository node_modules");
+  }
+  symlinkSync(dependencies, join(destination, "node_modules"), "dir");
 }
 
 function containsUtf16Domain(bytes: Uint8Array, domain: string, littleEndian: boolean): boolean {
@@ -453,15 +469,20 @@ function forbiddenEncodingFixtures(domain: string): Array<{
 
 describe("published package hostname and provenance boundary", () => {
   let temporaryRoot = "";
+  let builtRepositoryRoot = "";
   let extractedPackageRoot = "";
   let packedArchivePath = "";
+  let repositoryDistExistedBeforeFixture = false;
 
   beforeAll(() => {
+    repositoryDistExistedBeforeFixture = existsSync(join(root, "dist"));
     temporaryRoot = mkdtempSync(join(tmpdir(), "contracts-package-security-"));
+    builtRepositoryRoot = join(temporaryRoot, "repository");
     const extracted = join(temporaryRoot, "extracted");
     mkdirSync(extracted);
+    copyTrackedRepository(builtRepositoryRoot);
 
-    run(["bun", "run", "build"]);
+    run(["bun", "run", "build"], builtRepositoryRoot);
     const packedFilename = run([
       "bun",
       "pm",
@@ -470,7 +491,7 @@ describe("published package hostname and provenance boundary", () => {
       temporaryRoot,
       "--ignore-scripts",
       "--quiet",
-    ]);
+    ], builtRepositoryRoot);
     const archive = isAbsolute(packedFilename)
       ? packedFilename
       : join(temporaryRoot, packedFilename);
@@ -508,7 +529,12 @@ describe("published package hostname and provenance boundary", () => {
   });
 
   test("generated build output contains no forbidden internal domains", () => {
-    expect(findForbiddenInternalDomains(root, ["dist"])).toEqual([]);
+    expect(findForbiddenInternalDomains(builtRepositoryRoot, ["dist"])).toEqual([]);
+  });
+
+  test("building the packed fixture does not create checkout build output", () => {
+    expect(existsSync(join(builtRepositoryRoot, "dist"))).toBe(true);
+    expect(existsSync(join(root, "dist"))).toBe(repositoryDistExistedBeforeFixture);
   });
 
   test("actual packed archive contents contain no forbidden internal domains", () => {
@@ -684,7 +710,7 @@ describe("published package hostname and provenance boundary", () => {
       readFileSync(join(extractedPackageRoot, "hasna.contract.json"), "utf8"),
     ) as { kitVersion: string };
     const generated = (await import(
-      `${pathToFileURL(join(root, "dist/schemas.js")).href}?source=${Date.now()}`
+      `${pathToFileURL(join(builtRepositoryRoot, "dist/schemas.js")).href}?source=${Date.now()}`
     )) as { CONTRACTS_PACKAGE_VERSION: string };
     const packedGenerated = (await import(
       `${pathToFileURL(join(extractedPackageRoot, "dist/schemas.js")).href}?packed=${Date.now()}`
