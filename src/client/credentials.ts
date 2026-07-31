@@ -60,14 +60,14 @@ export interface ResolvedCredential {
    * are blocked. Note that `{ ...resolved }` therefore DROPS the key — which is
    * the safe direction.
    */
-  apiKey: string;
-  tier: CredentialTier;
+  readonly apiKey: string;
+  readonly tier: CredentialTier;
   /** Where it came from: an env key NAME or an absolute file path. Never a value. */
-  source: string;
+  readonly source: string;
   /** True for tiers an operator sets on purpose. These never fall through. */
-  deliberate: boolean;
+  readonly deliberate: boolean;
   /** True when it came from the deprecated legacy process-env tier. */
-  deprecated: boolean;
+  readonly deprecated: boolean;
   /**
    * The disk paths that were consulted before this credential was chosen.
    *
@@ -75,9 +75,9 @@ export interface ResolvedCredential {
    * credential SHOULD live, instead of advising a fix that silently drops the
    * client onto its local store.
    */
-  diskCandidates: readonly string[];
+  readonly diskCandidates: readonly string[];
   /** Human-readable advisory. Never contains key material. */
-  warning: string | null;
+  readonly warning: string | null;
 }
 
 export interface CredentialChainOptions {
@@ -284,6 +284,8 @@ function assertUsableCredential(appName: string, source: string, value: string):
  * spread. (A redacting `toJSON` is NOT an alternative — see below.)
  */
 const INSPECT_CUSTOM = Symbol.for("nodejs.util.inspect.custom");
+const CREDENTIAL_SEAL = Symbol.for("hasna:contracts:sealedCredential");
+export const CALLER_SUPPLIED_CREDENTIAL_PROVIDER_SOURCE = "caller-supplied CredentialProvider";
 
 /**
  * Build a resolution whose secret cannot be enumerated, serialized, or printed.
@@ -302,7 +304,15 @@ function sealCredential(fields: {
   diskCandidates: readonly string[];
   warning: string | null;
 }): ResolvedCredential {
-  const { apiKey, ...visible } = fields;
+  const { apiKey } = fields;
+  const visible = {
+    tier: fields.tier,
+    source: fields.source,
+    deliberate: fields.deliberate,
+    deprecated: fields.deprecated,
+    diskCandidates: Object.freeze([...fields.diskCandidates]),
+    warning: fields.warning,
+  };
   const sealed = { ...visible } as ResolvedCredential;
   Object.defineProperty(sealed, "apiKey", {
     value: apiKey,
@@ -334,7 +344,17 @@ function sealCredential(fields: {
     writable: false,
     configurable: false,
   });
-  return sealed;
+  Object.defineProperty(sealed, CREDENTIAL_SEAL, {
+    value: true,
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
+  return Object.freeze(sealed);
+}
+
+function isSealedCredential(credential: ResolvedCredential): boolean {
+  return (credential as unknown as Record<symbol, unknown>)[CREDENTIAL_SEAL] === true;
 }
 
 /**
@@ -363,6 +383,44 @@ export function explicitCredential(appName: string, apiKey: string): ResolvedCre
     deprecated: false,
     diskCandidates: [],
     warning: null,
+  });
+}
+
+/**
+ * Reapply the credential protections at a caller-supplied provider boundary.
+ *
+ * A {@link ResolvedCredential} is structurally typed, so a caller can satisfy
+ * the provider contract with a plain object instead of a value returned by one
+ * of the credential constructors. Snapshot its key once, validate it, and
+ * preserve diagnostic metadata only when the value already carries the internal
+ * seal those constructors apply. Raw provider-shaped objects keep the key, but
+ * not untrusted metadata that could be printed by an auth failure.
+ */
+export function validateAndSealResolvedCredential(
+  appName: string,
+  credential: ResolvedCredential,
+): ResolvedCredential {
+  const apiKey = credential.apiKey;
+  assertUsableCredential(appName, CALLER_SUPPLIED_CREDENTIAL_PROVIDER_SOURCE, apiKey);
+  if (!isSealedCredential(credential)) {
+    return sealCredential({
+      apiKey,
+      tier: "argument",
+      source: CALLER_SUPPLIED_CREDENTIAL_PROVIDER_SOURCE,
+      deliberate: true,
+      deprecated: false,
+      diskCandidates: [],
+      warning: null,
+    });
+  }
+  return sealCredential({
+    apiKey,
+    tier: credential.tier,
+    source: credential.source,
+    deliberate: credential.deliberate,
+    deprecated: credential.deprecated,
+    diskCandidates: credential.diskCandidates,
+    warning: credential.warning,
   });
 }
 

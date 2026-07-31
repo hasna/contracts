@@ -13,6 +13,7 @@ import {
   __resetCredentialDeprecationNotices,
   credentialDiskSources,
   resolveCredential,
+  type ResolvedCredential,
 } from "./credentials.js";
 import { createHasnaHttpTransport, resolveClientTransport } from "./transport.js";
 
@@ -481,6 +482,168 @@ describe("an explicit apiKey STRING gets the same protections as a resolved one"
 
     expect(JSON.stringify(thrown)).not.toContain(PLAINTEXT);
     expect((thrown as Error).message).not.toContain(PLAINTEXT);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P2 — a caller-supplied CredentialProvider could return a plain object that
+// bypassed both credential protections. A control character then reached
+// `fetch`, whose header error includes the plaintext value, and a valid object
+// remained enumerable instead of being snapshotted into a sealed credential.
+// ---------------------------------------------------------------------------
+
+describe("a caller-supplied CredentialProvider gets the credential protections", () => {
+  const PLAINTEXT = "hasna_todos_PROVIDER-SUPERSECRET";
+
+  function rawCredential(apiKey: string): ResolvedCredential {
+    return {
+      apiKey,
+      tier: "disk",
+      source: "caller-supplied provider",
+      deliberate: false,
+      deprecated: false,
+      diskCandidates: [],
+      warning: null,
+    };
+  }
+
+  test("a malformed raw credential is rejected before fetch without exposing the key", async () => {
+    let fetchCalls = 0;
+    const client = createHasnaHttpTransport({
+      name: "todos",
+      baseUrl: "https://todos.your-deployment.example/v1",
+      apiKey: () => rawCredential(`AAAA\r${PLAINTEXT}`),
+      fetchImpl: async (_url, init) => {
+        fetchCalls += 1;
+        new Headers(init!.headers as Record<string, string>);
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+
+    let thrown: unknown;
+    try {
+      await client.get("/items");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(CredentialResolutionError);
+    expect((thrown as Error).message).not.toContain(PLAINTEXT);
+    expect(fetchCalls).toBe(0);
+  });
+
+  test("raw provider diagnostic metadata is not trusted on auth failures", async () => {
+    const client = createHasnaHttpTransport({
+      name: "todos",
+      baseUrl: "https://todos.your-deployment.example/v1",
+      retry: false,
+      apiKey: () => ({
+        apiKey: PLAINTEXT,
+        tier: "legacy-env",
+        source: PLAINTEXT,
+        deliberate: false,
+        deprecated: true,
+        diskCandidates: [PLAINTEXT],
+        warning: `warning ${PLAINTEXT}`,
+      }),
+      fetchImpl: async () => new Response("", { status: 401 }),
+    });
+
+    let thrown: unknown;
+    try {
+      await client.get("/items");
+    } catch (error) {
+      thrown = error;
+    }
+
+    const message = (thrown as Error).message;
+    expect(message).toContain("caller-supplied CredentialProvider");
+    expect(message).not.toContain(PLAINTEXT);
+    expect(JSON.stringify(thrown)).not.toContain(PLAINTEXT);
+  });
+
+  test("sealed provider diagnostic metadata cannot be rewritten into an auth-failure leak", async () => {
+    const home = makeHome();
+    writeCloudEnv(home, "todos", `HASNA_TODOS_API_KEY=${PLAINTEXT}\n`);
+    const resolved = resolveCredential("todos", { HOME: home })!;
+
+    try {
+      (resolved as unknown as { source: string }).source = PLAINTEXT;
+    } catch {
+      // Frozen credentials throw in strict runtimes; either way, the value below
+      // must stay the original safe source path.
+    }
+    try {
+      (resolved.diskCandidates as string[]).push(PLAINTEXT);
+    } catch {
+      // The candidate list is part of the diagnostic snapshot too.
+    }
+
+    expect(Object.isFrozen(resolved)).toBe(true);
+    expect(Object.isFrozen(resolved.diskCandidates)).toBe(true);
+    expect(resolved.source).not.toBe(PLAINTEXT);
+    expect(resolved.diskCandidates).not.toContain(PLAINTEXT);
+
+    const client = createHasnaHttpTransport({
+      name: "todos",
+      baseUrl: "https://todos.your-deployment.example/v1",
+      retry: false,
+      apiKey: () => resolved,
+      fetchImpl: async () => new Response("", { status: 401 }),
+    });
+
+    let thrown: unknown;
+    try {
+      await client.get("/items");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect((thrown as Error).message).not.toContain(PLAINTEXT);
+    expect(JSON.stringify(thrown)).not.toContain(PLAINTEXT);
+  });
+
+  test("well-formed provider credentials are sealed per request without breaking rotation", async () => {
+    const keys = [`${PLAINTEXT}-before`, `${PLAINTEXT}-after`];
+    const seen: Array<{ apiKey: string; authorization: string }> = [];
+    let providerCalls = 0;
+    let apiKeyReads = 0;
+    const client = createHasnaHttpTransport({
+      name: "todos",
+      baseUrl: "https://todos.your-deployment.example/v1",
+      apiKey: () => {
+        const apiKey = keys[providerCalls++]!;
+        return {
+          get apiKey() {
+            apiKeyReads += 1;
+            return apiKey;
+          },
+          tier: "disk",
+          source: "caller-supplied provider",
+          deliberate: false,
+          deprecated: false,
+          diskCandidates: [],
+          warning: null,
+        };
+      },
+      fetchImpl: async (_url, init) => {
+        const headers = init!.headers as Record<string, string>;
+        seen.push({ apiKey: headers["x-api-key"]!, authorization: headers.Authorization! });
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+
+    await client.get("/items");
+    await client.get("/items");
+
+    expect(providerCalls).toBe(2);
+    // One read per provider result proves the raw getter was snapshotted into a
+    // sealed data property before both authenticated headers were assembled.
+    expect(apiKeyReads).toBe(2);
+    expect(seen).toEqual([
+      { apiKey: keys[0]!, authorization: `Bearer ${keys[0]}` },
+      { apiKey: keys[1]!, authorization: `Bearer ${keys[1]}` },
+    ]);
   });
 });
 
