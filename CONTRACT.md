@@ -155,7 +155,10 @@ Rules:
   `createHasnaHttpTransport({ apiKey })`, and the transport revalidates and
   reseals every value returned by a caller-supplied `CredentialProvider`. A
   construction or provider boundary that skips those protections is a bypass of
-  this whole section.
+  this whole section. Raw provider-shaped objects do not get to supply
+  diagnostic credential metadata: only already sealed credentials preserve their
+  source details, so a provider cannot move key material into `source`,
+  `warning`, or disk-candidate fields and have an auth error print it.
 - Errors name **which source** supplied the rejected key, and say what to do
   about it. Where two sources disagree, the report names the **paths** only: a
   digest of a secret is still a derived encoding of it, and a truncated one is a

@@ -511,6 +511,36 @@ describe("a caller-supplied CredentialProvider gets the credential protections",
     expect(fetchCalls).toBe(0);
   });
 
+  test("raw provider diagnostic metadata is not trusted on auth failures", async () => {
+    const client = createHasnaHttpTransport({
+      name: "todos",
+      baseUrl: "https://todos.your-deployment.example/v1",
+      retry: false,
+      apiKey: () => ({
+        apiKey: PLAINTEXT,
+        tier: "legacy-env",
+        source: PLAINTEXT,
+        deliberate: false,
+        deprecated: true,
+        diskCandidates: [PLAINTEXT],
+        warning: `warning ${PLAINTEXT}`,
+      }),
+      fetchImpl: async () => new Response("", { status: 401 }),
+    });
+
+    let thrown: unknown;
+    try {
+      await client.get("/items");
+    } catch (error) {
+      thrown = error;
+    }
+
+    const message = (thrown as Error).message;
+    expect(message).toContain("caller-supplied CredentialProvider");
+    expect(message).not.toContain(PLAINTEXT);
+    expect(JSON.stringify(thrown)).not.toContain(PLAINTEXT);
+  });
+
   test("well-formed provider credentials are sealed per request without breaking rotation", async () => {
     const keys = [`${PLAINTEXT}-before`, `${PLAINTEXT}-after`];
     const seen: Array<{ apiKey: string; authorization: string }> = [];

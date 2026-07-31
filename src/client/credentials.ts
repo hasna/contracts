@@ -284,6 +284,8 @@ function assertUsableCredential(appName: string, source: string, value: string):
  * spread. (A redacting `toJSON` is NOT an alternative — see below.)
  */
 const INSPECT_CUSTOM = Symbol.for("nodejs.util.inspect.custom");
+const CREDENTIAL_SEAL = Symbol.for("hasna:contracts:sealedCredential");
+export const CALLER_SUPPLIED_CREDENTIAL_PROVIDER_SOURCE = "caller-supplied CredentialProvider";
 
 /**
  * Build a resolution whose secret cannot be enumerated, serialized, or printed.
@@ -334,7 +336,17 @@ function sealCredential(fields: {
     writable: false,
     configurable: false,
   });
+  Object.defineProperty(sealed, CREDENTIAL_SEAL, {
+    value: true,
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
   return sealed;
+}
+
+function isSealedCredential(credential: ResolvedCredential): boolean {
+  return (credential as unknown as Record<symbol, unknown>)[CREDENTIAL_SEAL] === true;
 }
 
 /**
@@ -371,16 +383,28 @@ export function explicitCredential(appName: string, apiKey: string): ResolvedCre
  *
  * A {@link ResolvedCredential} is structurally typed, so a caller can satisfy
  * the provider contract with a plain object instead of a value returned by one
- * of the two credential constructors. Snapshot its key once, validate it, and
- * copy the existing resolution metadata into the same seal those constructors
- * use.
+ * of the credential constructors. Snapshot its key once, validate it, and
+ * preserve diagnostic metadata only when the value already carries the internal
+ * seal those constructors apply. Raw provider-shaped objects keep the key, but
+ * not untrusted metadata that could be printed by an auth failure.
  */
 export function validateAndSealResolvedCredential(
   appName: string,
   credential: ResolvedCredential,
 ): ResolvedCredential {
   const apiKey = credential.apiKey;
-  assertUsableCredential(appName, "caller-supplied CredentialProvider", apiKey);
+  assertUsableCredential(appName, CALLER_SUPPLIED_CREDENTIAL_PROVIDER_SOURCE, apiKey);
+  if (!isSealedCredential(credential)) {
+    return sealCredential({
+      apiKey,
+      tier: "argument",
+      source: CALLER_SUPPLIED_CREDENTIAL_PROVIDER_SOURCE,
+      deliberate: true,
+      deprecated: false,
+      diskCandidates: [],
+      warning: null,
+    });
+  }
   return sealCredential({
     apiKey,
     tier: credential.tier,

@@ -60,6 +60,7 @@ import type { StorageMode } from "../schemas.js";
 import { isIP } from "node:net";
 import { clientTransportEnvKeys } from "./env-keys.js";
 import {
+  CALLER_SUPPLIED_CREDENTIAL_PROVIDER_SOURCE,
   explicitCredential,
   resolveCredential,
   validateAndSealResolvedCredential,
@@ -633,11 +634,15 @@ function currentCredential(name: string, apiKey: string | CredentialProvider): R
 function authFailureGuidance(credential: ResolvedCredential): string {
   const origin = `The API key for this request came from ${credential.source}`;
   if (credential.deliberate) {
+    const remedy =
+      credential.source === CALLER_SUPPLIED_CREDENTIAL_PROVIDER_SOURCE
+        ? `Fix that provider so it returns the current key, or replace it with resolveCredential() ` +
+          `so diagnostics can name the original source.`
+        : `Rotate that key, or unset the override to use the credential on disk.`;
     return (
       `${origin} — a credential you selected deliberately. It was NOT substituted with any other key: ` +
       `falling back here would authenticate as a different principal than the one you named, which is ` +
-      `exactly the failure an override exists to prevent. Rotate that key, or unset the override to use ` +
-      `the credential on disk.`
+      `exactly the failure an override exists to prevent. ${remedy}`
     );
   }
   if (credential.deprecated) {
