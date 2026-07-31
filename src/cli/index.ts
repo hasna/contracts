@@ -187,7 +187,7 @@ export function createContractsProgram() {
     .action((options: { json?: boolean }) => {
       const schemas = Object.keys(ContractSchemaRegistry);
       if (options.json) {
-        console.log(JSON.stringify(schemas, null, 2));
+        console.log(JSON.stringify({ version: CONTRACTS_PACKAGE_VERSION, schemas }, null, 2));
         return;
       }
       for (const schema of schemas) {

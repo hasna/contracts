@@ -31,7 +31,7 @@ if (redirectSmoke.decision === "fail") {
 
 const root = join(import.meta.dir, "..");
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { version: string };
-const { CONTRACTS_PACKAGE_VERSION } = await import("../dist/schemas.js");
+const { CONTRACTS_PACKAGE_VERSION, ContractSchemaRegistry } = await import("../dist/schemas.js");
 const { scanNoCloudTarget } = await import("../dist/no-cloud.js");
 const { createHasnaHttpTransport, HasnaHttpError } = await import("../dist/client/transport.js");
 const todos = await import("../dist/todos/index.js");
@@ -97,9 +97,15 @@ if (text(version.stdout).trim() !== packageJson.version) {
 
 const schemas = run(["schemas", "--json"]);
 requireExit(schemas, 0, "schemas --json");
-const schemaIds = parseJson(schemas, "schemas --json");
-if (!Array.isArray(schemaIds) || !schemaIds.includes("hasna.proof_bundle.v1")) {
-  throw new Error("schemas --json did not include hasna.proof_bundle.v1");
+const schemasPayload = parseJson(schemas, "schemas --json");
+if (schemasPayload.version !== packageJson.version) {
+  throw new Error(`schemas --json version mismatch: ${String(schemasPayload.version)} !== ${packageJson.version}`);
+}
+if (
+  !Array.isArray(schemasPayload.schemas)
+  || JSON.stringify(schemasPayload.schemas) !== JSON.stringify(Object.keys(ContractSchemaRegistry))
+) {
+  throw new Error("schemas --json did not include the complete schema registry");
 }
 
 const explicitValidate = run(["validate", "--json", "--schema", "hasna.evidence_ref.v1", "examples/evidence-ref.valid.json"]);

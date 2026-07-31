@@ -28,6 +28,14 @@ must add the explicit mode env before upgrading, or they will read their local
 sqlite store (loudly, via the warning). 0.8.5 itself is held from rollout
 because it carries the banned inference.
 
+### `schemas --json` identifies the installed CLI version
+
+- Changed `contracts schemas --json` from a bare schema-id array to an object
+  with `version` and `schemas` fields, so fleet audits can detect stale global
+  installations before relying on their registry contents.
+- The `schemas` field contains every id in `ContractSchemaRegistry`; schema ids
+  and the human-readable `contracts schemas` output are unchanged.
+
 ## [0.8.5] - 2026-07-29
 
 ### CI: gate changes on typechecking and tests
