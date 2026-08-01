@@ -24,16 +24,17 @@ import {
 // The credential chain is part of this module's public surface: callers wire
 // `--api-key` / `--profile` through it, and consumers migrating off a direct
 // `process.env` read need its types.
-import { credentialDiskSources } from "./credentials.js";
+import { appConfigDiskValue, credentialDiskSources } from "./credentials.js";
 
 export {
+  appConfigDiskValue,
   CredentialResolutionError,
   credentialDiskSources,
   explicitCredential,
   resolveCredential,
   __resetCredentialDeprecationNotices,
 } from "./credentials.js";
-export type { CredentialChainOptions, CredentialTier, ResolvedCredential } from "./credentials.js";
+export type { AppConfigDiskHit, CredentialChainOptions, CredentialTier, ResolvedCredential } from "./credentials.js";
 export { clientTransportEnvKeys, credentialOverrideEnvKey, CREDENTIAL_PROFILE_ENV_KEY } from "./env-keys.js";
 export type { ClientTransportEnvKeys } from "./env-keys.js";
 
@@ -332,11 +333,17 @@ export type ClientTransportKind = (typeof CLIENT_TRANSPORTS)[number];
 export interface ClientTransportResolution {
   /** Where the client should read/write from. */
   transport: ClientTransportKind;
-  /** API URL key that selected HTTP, or `"default"` for local SQLite. */
+  /**
+   * What selected HTTP: an API URL env key NAME, the absolute PATH of the fleet
+   * app-config file that supplied the URL, or `"default"` for local SQLite.
+   */
   transportSource: string;
   /** `<origin>/v1` base for the server API when transport is http, else null. */
   baseUrl: string | null;
-  /** Env key the API URL/domain came from, `"default"` (neutral placeholder), or null. */
+  /**
+   * WHERE the API URL/domain came from: an env key NAME, an absolute file PATH,
+   * `"default"` (neutral placeholder), or null.
+   */
   apiUrlSource: string | null;
   /** Whether an API key is present (value never exposed). */
   apiKeyPresent: boolean;
@@ -371,10 +378,18 @@ export interface ResolveClientTransportOptions {
 /**
  * Resolve how a client should reach an app's data given the environment.
  *
- * An explicit API URL requests HTTP. The credential resolves at CALL TIME
- * through {@link resolveCredential}: argument, deliberate override/profile,
- * disk, then the deprecated legacy env variable. Without an API URL, the
- * client stays on local SQLite and never consults credential files.
+ * An explicit API URL requests HTTP. It is read from the environment first and,
+ * when the environment is silent, from the fleet app-config file on disk — the
+ * same file the credential tier already reads. The credential resolves at CALL
+ * TIME through {@link resolveCredential}: argument, deliberate override/profile,
+ * disk, then the deprecated legacy env variable. With no API URL in either tier
+ * the client stays on local SQLite and never consults credential files.
+ *
+ * The disk tier is a FALLBACK and never an override: an API URL exported in the
+ * environment always wins over the file. It exists because a non-interactive
+ * shell inherits no fleet environment, and the honest answer for one is the
+ * config its operator actually wrote down — not a silent local-store read at
+ * `misconfigured: false`.
  */
 export function resolveClientTransport(
   name: string,
@@ -383,12 +398,20 @@ export function resolveClientTransport(
 ): ClientTransportResolution {
   assertNoLegacyClientMode(name, env);
   const keys = clientTransportEnvKeys(name);
-  const urlHit = firstEnv(env, keys.apiUrlKeys, { preserveRaw: true });
+  const envUrlHit = firstEnv(env, keys.apiUrlKeys, { preserveRaw: true });
+  // Only consulted when the environment is silent, so the env keeps precedence
+  // and a client with an explicit URL never pays a stat for a file it ignores.
+  const diskUrlHit = envUrlHit ? null : appConfigDiskValue(name, env, keys.apiUrlKeys);
+  // `key` carries the SOURCE for every downstream field: an env key name, or the
+  // absolute path of the file that decided. `apiKeySource` already reports its
+  // tier this way, so an operator reads both the same way.
+  const urlHit = envUrlHit ?? (diskUrlHit ? { key: diskUrlHit.path, value: diskUrlHit.value } : null);
   const keyHit = firstEnv(env, keys.apiKeyKeys);
   const warnings: string[] = [];
 
-  // No URL means local SQLite. Do not resolve the credential chain here: a
-  // client authenticating to nothing must not read or emit credential state.
+  // No URL in the environment or on disk means local SQLite. Do not resolve the
+  // credential chain here: a client authenticating to nothing must not read or
+  // emit credential state.
   if (!urlHit) {
     return {
       transport: "sqlite",

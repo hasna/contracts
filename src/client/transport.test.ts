@@ -1152,3 +1152,213 @@ describe("credential resolution at the seam", () => {
     expect(JSON.stringify(r)).not.toContain("super-secret-disk-key");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The fleet app-config file as a URL TIER (todos f8642ed2).
+//
+// MEASURED DEFECT, station01, reproduced on main @992902b with no shell at all:
+//
+//   resolveClientTransport("todos", { HOME: <home with a complete config file> })
+//   => { transport: "sqlite", transportSource: "default", baseUrl: null,
+//        apiUrlSource: null, apiKeyPresent: false, misconfigured: FALSE, warning: NULL }
+//
+// while ~/.hasna/cloud/todos.env held HASNA_TODOS_API_URL and HASNA_TODOS_API_KEY.
+// POSITIVE CONTROL from the same run: adding the URL to the env returned
+// transport "http" with apiKeySource = that same file path. So the seam already
+// OPENED the file and read the key out of it, then discarded the API URL sitting
+// one line away and answered from the local SQLite store at misconfigured:false.
+//
+// The consequence is the one this module exists to forbid: not an empty result
+// and not an error, but a CONFIDENT WRONG ANSWER. Four surfaces hit it — a
+// coding agent's Bash tool, loop-spawned shells, agent shells, cron — because
+// all four are non-interactive and ~/.hasna/cloud/*.env was only ever sourced
+// from an operator's interactive shell rc. A fleet coordinator read a channel
+// frozen twelve days earlier, at exit 0, and judged live agents dead.
+//
+// THE FIX IS A TIER, NOT AN INFERENCE. A local->network transition stays
+// EXPLICITLY SIGNALLED: an API URL written into the fleet config file is an
+// operator writing it down, exactly as symmetrical to the credential tier that
+// already reads the same file. What stays banned is treating the mere existence
+// of a file, or a key alone, as intent.
+// ---------------------------------------------------------------------------
+describe("the fleet app-config file supplies the API URL, not just the key", () => {
+  const cfgHomes: string[] = [];
+
+  function cfgHome(): string {
+    const home = mkdtempSync(join(tmpdir(), "hasna-cfg-"));
+    cfgHomes.push(home);
+    return home;
+  }
+
+  /** Write `~/.hasna/cloud/<app>.env` — the first on-disk layer. */
+  function writeCloudEnv(home: string, app: string, body: string): string {
+    const dir = join(home, ".hasna", "cloud");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `${app}.env`);
+    writeFileSync(path, body);
+    return path;
+  }
+
+  /** Write `~/.config/hasna/<app>-cloud.env` — the second on-disk layer. */
+  function writeConfigEnv(home: string, app: string, body: string): string {
+    const dir = join(home, ".config", "hasna");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `${app}-cloud.env`);
+    writeFileSync(path, body);
+    return path;
+  }
+
+  afterEach(() => {
+    __resetCredentialDeprecationNotices();
+    while (cfgHomes.length > 0) rmSync(cfgHomes.pop()!, { recursive: true, force: true });
+  });
+
+  // THE DEFECT ITSELF. An env carrying nothing but HOME is what every
+  // non-interactive shell on this fleet actually has.
+  test("a shell with NOTHING but HOME reaches the server when the config file says so", () => {
+    const home = cfgHome();
+    const path = writeCloudEnv(
+      home,
+      "todos",
+      "HASNA_TODOS_API_URL=https://todos.example.invalid\n" +
+        "HASNA_TODOS_API_KEY=synthetic_disk_key\n",
+    );
+
+    const r = resolveClientTransport("todos", { HOME: home });
+
+    expect(r.transport).toBe("http");
+    expect(r.baseUrl).toBe("https://todos.example.invalid/v1");
+    // The source names the FILE, so an operator can see which tier decided.
+    expect(r.apiUrlSource).toBe(path);
+    expect(r.transportSource).toBe(path);
+    expect(r.apiKeyPresent).toBe(true);
+    expect(r.misconfigured).toBe(false);
+  });
+
+  // NEGATIVE CONTROL for the test above: the identical call with no config file
+  // must still be sqlite. Without this, a resolver that returned "http"
+  // unconditionally would pass the defect test.
+  test("the same call with no config file on disk is still local sqlite", () => {
+    const home = cfgHome();
+    const r = resolveClientTransport("todos", { HOME: home });
+    expect(r.transport).toBe("sqlite");
+    expect(r.transportSource).toBe("default");
+    expect(r.misconfigured).toBe(false);
+  });
+
+  // The field shapes that exist in the live files.
+  test("the field shapes parse: `export ` prefix and quoted values", () => {
+    const home = cfgHome();
+    writeCloudEnv(
+      home,
+      "knowledge",
+      "# fleet config\n" +
+        'export HASNA_KNOWLEDGE_API_URL="https://knowledge.example.invalid"\n' +
+        "export HASNA_KNOWLEDGE_API_KEY='synthetic_disk_key'\n",
+    );
+
+    const r = resolveClientTransport("knowledge", { HOME: home });
+
+    expect(r.transport).toBe("http");
+    expect(r.baseUrl).toBe("https://knowledge.example.invalid/v1");
+  });
+
+  // NO OVER-REACH. The disk tier fills what the env leaves absent, never outranks it.
+  test("a URL in the env beats the URL on disk", () => {
+    const home = cfgHome();
+    writeCloudEnv(
+      home,
+      "todos",
+      "HASNA_TODOS_API_URL=https://disk.example.invalid\nHASNA_TODOS_API_KEY=synthetic_disk_key\n",
+    );
+
+    const r = resolveClientTransport("todos", {
+      HOME: home,
+      HASNA_TODOS_API_URL: "https://env.example.invalid",
+    });
+
+    expect(r.baseUrl).toBe("https://env.example.invalid/v1");
+    expect(r.apiUrlSource).toBe("HASNA_TODOS_API_URL");
+  });
+
+  test("the second disk layer answers when the first has no URL", () => {
+    const home = cfgHome();
+    writeCloudEnv(home, "todos", "HASNA_TODOS_API_KEY=synthetic_disk_key\n");
+    const second = writeConfigEnv(home, "todos", "HASNA_TODOS_API_URL=https://second.example.invalid\n");
+
+    const r = resolveClientTransport("todos", { HOME: home });
+
+    expect(r.transport).toBe("http");
+    expect(r.apiUrlSource).toBe(second);
+  });
+
+  // FAIL LOUDLY. This is the half of the defect that the URL tier does not fix
+  // by itself: a config file the library could not USE must surface, never
+  // quietly answer from the local store.
+  test("a URL on disk with no resolvable credential is misconfigured, not a silent local read", () => {
+    const home = cfgHome();
+    writeCloudEnv(home, "todos", "HASNA_TODOS_API_URL=https://todos.example.invalid\n");
+
+    const r = resolveClientTransport("todos", { HOME: home });
+
+    expect(r.misconfigured).toBe(true);
+    expect(r.warning).toBeTruthy();
+    expect(r.apiKeyPresent).toBe(false);
+    // The warning must name the file it consulted, and never a key value.
+    expect(r.warning!).toContain(join(home, ".hasna", "cloud", "todos.env"));
+  });
+
+  test("an unusable URL on disk is misconfigured rather than silently ignored", () => {
+    const home = cfgHome();
+    writeCloudEnv(
+      home,
+      "todos",
+      "HASNA_TODOS_API_URL=not-an-absolute-url\nHASNA_TODOS_API_KEY=synthetic_disk_key\n",
+    );
+
+    const r = resolveClientTransport("todos", { HOME: home });
+
+    expect(r.transport).toBe("sqlite");
+    expect(r.misconfigured).toBe(true);
+    expect(r.warning).toBeTruthy();
+  });
+
+  // THE HAZARD THIS FIX HAD TO DESIGN AROUND. The live todos.env and
+  // conversations.env still carry the retired HASNA_<APP>_STORAGE_MODE line.
+  // The legacy-mode guard polices the ENVIRONMENT — a deliberate act by a
+  // caller — and must NOT be extended to the file's contents, or every client
+  // on the fleet dies on a stale line nobody reads.
+  test("a retired mode key IN THE FILE does not throw, while the same key in the ENV still does", () => {
+    const home = cfgHome();
+    writeCloudEnv(
+      home,
+      "todos",
+      "HASNA_TODOS_STORAGE_MODE=postgres\n" +
+        "HASNA_TODOS_API_URL=https://todos.example.invalid\n" +
+        "HASNA_TODOS_API_KEY=synthetic_disk_key\n",
+    );
+
+    // On disk: tolerated and ignored.
+    const r = resolveClientTransport("todos", { HOME: home });
+    expect(r.transport).toBe("http");
+
+    // In the env: still a hard error. The guard is not weakened.
+    expect(() =>
+      resolveClientTransport("todos", { HOME: home, HASNA_TODOS_STORAGE_MODE: "postgres" }),
+    ).toThrow(/was removed/);
+  });
+
+  // The credential must not leak into the routing tier through the new reader.
+  test("the config tier never exposes the key value through a source field", () => {
+    const home = cfgHome();
+    writeCloudEnv(
+      home,
+      "todos",
+      "HASNA_TODOS_API_URL=https://todos.example.invalid\nHASNA_TODOS_API_KEY=synthetic_disk_key\n",
+    );
+
+    const r = resolveClientTransport("todos", { HOME: home });
+
+    expect(JSON.stringify(r)).not.toContain("synthetic_disk_key");
+  });
+});
