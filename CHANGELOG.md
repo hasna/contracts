@@ -2,6 +2,75 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.9.0] - 2026-08-01
+
+Ships the two changes that had been sitting unpublished on `main`: npm ended at
+0.8.7 while `main` already declared 0.9.0, so neither #62 nor #66 reached any
+consumer. The four coupled version strings were already moved to 0.9.0 by #62;
+this release adds the changelog entry they were missing and publishes them.
+
+### The client resolves its API URL from the fleet config file, not env alone (#66)
+
+`resolveClientTransport()` reads the API URL from the environment first and,
+when the environment is silent, from the fleet app-config file on disk — the
+same file the credential tier already reads.
+
+The disk tier is a FALLBACK and never an override: an API URL exported in the
+environment always wins over the file. It exists because a non-interactive shell
+— a coding agent's Bash tool, a loop-spawned `/bin/sh`, cron — inherits none of
+the fleet environment. Before this, such a shell answered from its local SQLite
+store at `misconfigured: false` while a complete, usable server config sat on
+disk one line away from the key the client did read. That is a confident wrong
+answer, which is the failure this module exists to prevent.
+
+- Added `appConfigDiskValue()`, which reads a NON-SECRET config value from the
+  fleet app-config file, and the `AppConfigDiskHit` type. Both are exported from
+  `client/transport`.
+- The reader REFUSES credential-shaped keys, matched on shape rather than an
+  app-specific list, so a key this module has never heard of is refused too. The
+  credential word is matched as an underscore-delimited segment ANYWHERE in the
+  key, not anchored to the end: an end-anchored first attempt let
+  `HASNA_<APP>_API_KEY_OVERRIDE` through and handed back a live override
+  credential unsealed. Without this boundary, `appConfigDiskValue` would be a
+  second, UNSEALED way to read a secret whose only other reader returns it
+  sealed and redacted.
+- `transportSource` and `apiUrlSource` may now be an absolute FILE PATH as well
+  as an env key name or `"default"`, so a diagnostic can name what actually
+  selected HTTP.
+- File reading is consolidated in one `readAppConfigFile()` so the `statSync`
+  FIFO guard and the size check have exactly one spelling and cannot drift.
+- Values read here are not policed for legacy-ness: a live fleet file may still
+  carry a retired key such as `HASNA_<APP>_STORAGE_MODE`; this reader simply
+  never asks for it, rather than throwing and taking down every client on the
+  fleet for a stale line nobody reads.
+
+### BREAKING: `verifyApiKey` refuses unknown key ids, and requires a status hook (#62)
+
+A validly-signed token whose `kid` has no `api_keys` row is now refused with
+reason `unknown_key`. Until 2026-07-30 it was silently ACCEPTED (todos
+`0cbc57a2`): a key with no row cannot be revoked, because revocation writes
+`revoked_at` on the row, so an unregistered key was effectively irrevocable.
+
+- `verifyApiKey` / `expressApiKey` now require a `keyStatus` hook
+  (`ApiKeyStore.keyStatus`), which denies unknown, revoked, and expired kids
+  alike. Constructing a verifier with no status hook **throws at construction**
+  rather than failing open at request time.
+- The boolean `isRevoked` hook is DEPRECATED on the API-key surface: it returns
+  `false` both for an active key and for one that was never registered, so it
+  cannot express the distinction this fix depends on. `createIdentityVerifier`
+  keeps its optional `isRevoked` hook — identity tokens are short-lived (≤24h),
+  which is what makes an optional hook tolerable there; API keys live for
+  months, which is why this surface is stricter.
+- `allowUnregisteredKeys: true` is the explicit, greppable opt-out for services
+  mid-migration, so the unsafe cases form a worklist instead of a default.
+- Every key must be registered at issue time: `contracts issue-key` now does
+  this by default, and `ApiKeyStore.insertMinted` is the programmatic path.
+
+MIGRATION: wire `keyStatus: store.keyStatus` into every `expressApiKey` /
+`verifyApiKey` construction, or set `allowUnregisteredKeys: true` deliberately.
+A service that upgrades without doing either will throw at startup — loudly, at
+construction, instead of authenticating unregistered keys.
+
 ## [0.8.7] - 2026-08-01
 
 ### BREAKING: server backends and client transports are separate contracts
