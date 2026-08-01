@@ -628,7 +628,6 @@ describe("core schemas", () => {
       createdAt,
       packageName: "@hasna/todos",
       appId: "open-todos",
-      storageMode: "app_owned_cloud",
       cloudBoundary: "app_owned",
       cloudResources: [
         {
@@ -681,13 +680,24 @@ describe("core schemas", () => {
       expect(paths).toContain("cloudResources.0.ownerPackage");
     }
 
-    const invalidModes = [
-      { ...manifest, id: "cloud_manifest_local_bad", storageMode: "local_only", cloudBoundary: "app_owned" },
-      { ...manifest, id: "cloud_manifest_external_bad", storageMode: "external_service", cloudBoundary: "external_service" },
-      { ...manifest, id: "cloud_manifest_hybrid_bad", storageMode: "hybrid_local_cache", cloudBoundary: "local_cache" }
+    const invalidBoundaries = [
+      { ...manifest, id: "cloud_manifest_none_bad", cloudBoundary: "none" },
+      { ...manifest, id: "cloud_manifest_external_bad", cloudBoundary: "external_service" },
+      { ...manifest, id: "cloud_manifest_cache_bad", cloudBoundary: "local_cache", localCache: undefined }
     ];
-    for (const invalidMode of invalidModes) {
-      expect(validateContract(SCHEMA_IDS.appCloudManifest, invalidMode).success).toBe(false);
+    for (const invalidBoundary of invalidBoundaries) {
+      expect(validateContract(SCHEMA_IDS.appCloudManifest, invalidBoundary).success).toBe(false);
+    }
+
+    for (const storageMode of ["local_only", "app_owned_cloud", "hybrid_local_cache", "external_service"]) {
+      expect(
+        validateContract(SCHEMA_IDS.appCloudManifest, {
+          ...manifest,
+          id: `cloud_manifest_retired_${storageMode}`,
+          storageMode
+        }).success,
+        `storageMode=${storageMode} must be rejected`,
+      ).toBe(false);
     }
   });
 
@@ -1270,7 +1280,6 @@ describe("distribution schemas", () => {
       createdAt,
       packageName: "@hasna/todos",
       appId: "open-todos",
-      storageMode: "local_only",
       cloudBoundary: "none"
     } as const;
     expect(validateContract(SCHEMA_IDS.appCloudManifest, manifest).success).toBe(true);

@@ -6,13 +6,13 @@
 // lets CI fail on stale or hand-edited kits via hash comparison.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** Ordered list of template files that make up the kit. */
 export const KIT_TEMPLATE_FILES = [
-  "mode.ts",
+  "backend.ts",
   "tls.ts",
   "query.ts",
   "pool.ts",
@@ -21,6 +21,9 @@ export const KIT_TEMPLATE_FILES = [
   "index.ts",
   "README.md",
 ] as const;
+
+/** Files emitted by older kit versions and removed during regeneration. */
+export const RETIRED_KIT_FILES = ["mode.ts"] as const;
 
 export type KitTemplateFile = (typeof KIT_TEMPLATE_FILES)[number];
 
@@ -137,6 +140,7 @@ export interface GenerateKitResult {
   version: string;
   targetDir: string;
   written: string[];
+  removed: string[];
   contractUpdated: boolean;
 }
 
@@ -146,6 +150,14 @@ export function generateKit(options: GenerateKitOptions): GenerateKitResult {
   const rendered = renderKit(version);
   const targetDir = join(resolve(options.targetRepo), KIT_TARGET_SUBDIR);
   mkdirSync(targetDir, { recursive: true });
+
+  const removed: string[] = [];
+  for (const file of RETIRED_KIT_FILES) {
+    const path = join(targetDir, file);
+    if (!existsSync(path)) continue;
+    unlinkSync(path);
+    removed.push(file);
+  }
 
   const written: string[] = [];
   for (const file of KIT_TEMPLATE_FILES) {
@@ -166,7 +178,7 @@ export function generateKit(options: GenerateKitOptions): GenerateKitResult {
     contractUpdated = writeKitVersionToContract(resolve(options.targetRepo), version);
   }
 
-  return { version, targetDir, written, contractUpdated };
+  return { version, targetDir, written, removed, contractUpdated };
 }
 
 /** Write `kitVersion` into `<targetRepo>/hasna.contract.json` if present. */

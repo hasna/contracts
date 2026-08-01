@@ -9,7 +9,7 @@
     "todos-sync"
   ],
   "storage": {
-    "mode": "sqlite",
+    "backend": "sqlite",
     "sqlitePath": "~/.hasna/todos/todos.db"
   }
 }

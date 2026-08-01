@@ -270,7 +270,6 @@ describe("contracts CLI", () => {
           createdAt: "2026-06-28T20:10:00.000Z",
           packageName: "@hasna/example",
           appId: "example",
-          storageMode: "app_owned_cloud",
           cloudBoundary: "app_owned",
           cloudResources: [
             {
@@ -843,7 +842,6 @@ describe("contracts CLI", () => {
           createdAt: "2026-06-28T20:10:00.000Z",
           packageName: "@hasna/other",
           appId: "other",
-          storageMode: "app_owned_cloud",
           cloudBoundary: "app_owned",
           cloudResources: [
             {

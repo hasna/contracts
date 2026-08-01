@@ -81,10 +81,10 @@
     }
   ],
   "storage": {
-    "mode": "sqlite",
+    "backend": "sqlite",
     "engines": [
       "sqlite",
-      "postgres"
+      "postgresql"
     ],
     "envPrefix": "HASNA_TODOS_",
     "aliasEnvPrefix": "TODOS_",

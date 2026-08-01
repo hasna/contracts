@@ -12,7 +12,7 @@
 // the app. None of that exists yet, so this command ships no client for it: an
 // HTTP writer aimed at an undeclared route cannot report honestly whether the
 // record was stored. For the same reason the client-transport env
-// (`HASNA_<APP>_STORAGE_MODE`, `HASNA_<APP>_API_URL`, `HASNA_<APP>_API_KEY`) is not
+// (`HASNA_<APP>_API_URL`, `HASNA_<APP>_API_KEY`) is not
 // consulted here — it selects the transport for app data, not for this record, and
 // must never block or divert the database write.
 

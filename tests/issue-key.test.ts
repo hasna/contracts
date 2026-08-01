@@ -203,7 +203,6 @@ describe("issue-key persistence destination", () => {
             report,
             env: {
               HASNA_TODOS_API_SIGNING_KEY: SIGNING,
-              HASNA_TODOS_STORAGE_MODE: "cloud",
               HASNA_TODOS_API_URL: "https://todos.example.test",
               HASNA_TODOS_API_KEY: "operator-api-key",
               HASNA_TODOS_DATABASE_URL: "postgres://admin.example/todos",
@@ -256,28 +255,27 @@ describe("issue-key persistence destination", () => {
 
 describe("issue-key ignores client-transport configuration", () => {
   // The client transport decides where a CLI reads that app's DATA. It says
-  // nothing about where this hashed record belongs, so an unusable cloud client
+  // nothing about where this hashed record belongs, so an unusable HTTP client
   // must not stop the Postgres write that worked before `--store-backend` existed.
-  const cloudEnvironments: Array<{ name: string; env: Record<string, string> }> = [
+  const clientEnvironments: Array<{ name: string; env: Record<string, string> }> = [
     {
-      name: "cloud mode with no API key",
-      env: { HASNA_TODOS_STORAGE_MODE: "cloud" },
+      name: "an API URL with no API key",
+      env: { HASNA_TODOS_API_URL: "https://todos.example.test" },
     },
     {
-      name: "cloud mode with an API key but no API URL or fleet domain",
-      env: { HASNA_TODOS_STORAGE_MODE: "cloud", HASNA_TODOS_API_KEY: "operator-api-key" },
+      name: "an API key with no API URL",
+      env: { HASNA_TODOS_API_KEY: "operator-api-key" },
     },
     {
-      name: "cloud mode with an unusable API URL",
+      name: "an unusable API URL",
       env: {
-        HASNA_TODOS_STORAGE_MODE: "cloud",
         HASNA_TODOS_API_URL: "not-a-url",
         HASNA_TODOS_API_KEY: "operator-api-key",
       },
     },
   ];
 
-  for (const { name, env } of cloudEnvironments) {
+  for (const { name, env } of clientEnvironments) {
     test(`${name} still persists the record to the database`, async () => {
       const { reports, report } = collectReports();
       const db = recordingConnectStore();

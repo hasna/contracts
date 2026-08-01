@@ -2,9 +2,9 @@
 #
 # Every `service` / `saas` class repo ships a docker-compose.yml at its root as
 # THE self-host artifact. This template shows the two-container shape a repo
-# copies and renames <name> for: an app-owned Postgres plus the app in `cloud`
-# storage mode (Amendment A1 PURE REMOTE — reads AND writes go straight to this
-# Postgres; there is no sync engine and no cache mode).
+# copies and renames <name> for: an app-owned PostgreSQL server plus the app.
+# Reads and writes go straight to PostgreSQL; there is no sync engine or cache
+# backend.
 #
 # The app's short name is `<name>` (e.g. todos, mailery). Replace it and the
 # HASNA_<NAME>_* env keys with the real upper-snake token (e.g. HASNA_TODOS_*).
@@ -34,16 +34,14 @@ services:
       db:
         condition: service_healthy
     environment:
-      # Storage runtime enum is local|cloud ONLY. Self-host = cloud pointed at
-      # the app-owned Postgres above.
-      HASNA_APP_STORAGE_MODE: cloud
-      # Provided at runtime; not baked into the image. Points at the db service.
+      # DATABASE_URL is the only server backend selector. It is provided at
+      # runtime, never baked into the image, and points at the db service.
       HASNA_APP_DATABASE_URL: ${HASNA_APP_DATABASE_URL:?set HASNA_APP_DATABASE_URL to the app-owned Postgres URL}
     command: ["app-serve"]
     ports:
       - "${APP_PORT:-8080}:8080"
     healthcheck:
-      # GET /health -> { status, version, mode }
+      # GET /health -> { status, version, backend }
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
       interval: 15s
       timeout: 5s

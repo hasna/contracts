@@ -21,7 +21,7 @@ Excluded packages:
 - CLI-only or library packages that explicitly declare unsupported service
   surfaces in `hasna.contract.json`.
 
-Data-backend vocabulary is `sqlite` and `postgres` (the server's internal
+Data-backend vocabulary is `sqlite` and `postgresql` (the server's internal
 storage). The removed placement vocabulary — in any spelling — fails manifest
 validation. `remote` is a location word, not a backend.
 
@@ -32,7 +32,7 @@ Every onboarded repo must have `hasna.contract.json` validated by
 
 - Package identity: package name, version source, repo path, and canonical app
   short name.
-- Data backend: `storage.mode` of `sqlite` or `postgres`, with declared
+- Data backend: `storage.backend` of `sqlite` or `postgresql`, with declared
   `storage.engines`.
 - Published bins: primary CLI, MCP, serve, worker, runner, daemon, migrate, and
   doctor bins when supported.
@@ -46,7 +46,7 @@ Every onboarded repo must have `hasna.contract.json` validated by
 - Surface matrix: CLI command, API route, MCP tool, SDK method, dashboard route,
   worker action, required auth mode, required scope, and support status for
   each golden-path operation.
-- Storage mode: source of truth, migrations, readiness check, backup/restore
+- Storage ownership: source of truth, migrations, readiness check, backup/restore
   evidence, and data lifecycle hooks.
 - Auth modes: local operator, session token, API key, service token,
   machine/job token, and provider webhook.

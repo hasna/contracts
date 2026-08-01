@@ -10,7 +10,6 @@
     "id": "open-todos",
     "uri": "git+https://github.com/hasna/todos.git"
   },
-  "storageMode": "app_owned_cloud",
   "cloudBoundary": "app_owned",
   "cloudResources": [
     {

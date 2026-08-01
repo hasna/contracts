@@ -1,61 +1,14 @@
 // Client-side transport resolver for the Hasna Service Contract v1.
 //
-// THE CLIENT SEAM IS `sqlite | http` (owner ruling 2026-07-29): an OSS client
-// reads EITHER its on-box SQLite file OR the app server's HTTP API. It NEVER
-// opens PostgreSQL directly — `postgres` is the SERVER's backend, so a client
-// whose data lives in postgres reaches it over HTTP. A DSN on the client does
-// NOT switch the dataset a CLI reads.
+// An OSS client has exactly two connections: its on-box SQLite file or the
+// server's HTTP API. It never opens PostgreSQL directly. An explicit API URL
+// plus a resolved credential selects HTTP; otherwise the client stays local.
+// Server backend configuration never participates in this decision.
 //
-// Given an app name and the environment, this module decides whether reads AND
-// writes should be routed to the app's HTTP API (`<API_URL>/v1`, default
-// `https://<app>.<HASNA_FLEET_API_DOMAIN>/v1`) with the API key, or fall
-// through to the local store.
-//
-// THE CLIENT-FLIP CONTRACT (env vars). For app `<NAME>` = envToken(name):
-//
-//   Backend (any one, first match wins; removed placement words throw):
-//     HASNA_<NAME>_STORAGE_MODE = sqlite | postgres
-//     HASNA_<NAME>_MODE         = sqlite | postgres                   (alias)
-//     <NAME>_STORAGE_MODE                                             (alias)
-//     <NAME>_MODE                                                     (alias)
-//   API base URL (optional; `/v1` is appended automatically):
-//     HASNA_<NAME>_API_URL = https://<app>.your-deployment.example
-//     <NAME>_API_URL                                                  (alias)
-//   API key (bearer / x-api-key) — resolved through the CREDENTIAL CHAIN, never
-//   from the environment alone. Env vars are POINTERS; the secret is re-read
-//   from disk on every call, so a rotation heals without cycling the shell. In
-//   precedence order (see `./credentials.ts`):
-//     an explicit `--api-key` / `--profile` argument
-//     HASNA_<NAME>_API_KEY_OVERRIDE, HASNA_PROFILE   (deliberate pointers)
-//     the credential file on disk    (see `credentialDiskSources()`)
-//     HASNA_<NAME>_API_KEY -> value from the app-owned vault (legacy, deprecated)
-//     <NAME>_API_KEY                                         (legacy alias)
-//
-// DECISION: transport is `http` IFF an explicit mode env resolves the backend
-// to `postgres` AND a credential resolves. Endpoints and credentials are
-// CONNECTION MATERIAL, never a transition signal: a URL in the environment, an
-// API key in the environment, a credential file appearing on disk — none of
-// them, alone or in combination, moves a client off its local sqlite data.
-// A local->network transition is explicitly signalled, never inferred (owner
-// ruling 2026-07-29).
-// When a credential resolves but no explicit URL is set, the base URL falls back to
-// `https://<app>.<domain>` where `<domain>` comes from
-// `HASNA_FLEET_API_DOMAIN` (REQUIRED for a real deployment) or else a neutral,
-// non-resolving placeholder — this published package never bakes in a real
-// internal hostname. Missing, malformed, or app-prefix-incompatible
-// fleet-domain configuration resolves to that app-specific placeholder with
-// `misconfigured: true`; callers fail before constructing an authenticated
-// client. If the backend is `postgres` but NO credential resolves from any tier,
-// we do NOT silently serve wrong local data — we return `sqlite` with a loud
-// warning and `misconfigured: true` so the caller can hard-fail instead of
-// drifting. A DELIBERATE tier that cannot be honoured (a revoked override, a
-// missing profile) THROWS instead: it never falls through to another identity.
-//
-// SAFETY: this module never returns, logs, or embeds the API key value. Callers
-// receive only presence flags and env-key names.
+// SAFETY: this module never returns, logs, or embeds an API-key value. Callers
+// receive only presence flags and source names.
 
-import { normalizeStorageMode, type Env } from "../mode.js";
-import type { StorageMode } from "../schemas.js";
+import { envToken, type Env } from "../env-token.js";
 import { isIP } from "node:net";
 import { clientTransportEnvKeys } from "./env-keys.js";
 import {
@@ -226,6 +179,30 @@ function firstEnv(
   return null;
 }
 
+function firstDefinedEnvKey(env: Env, keys: readonly string[]): string | null {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(env, key) && env[key] !== undefined) return key;
+  }
+  return null;
+}
+
+function assertNoLegacyClientMode(name: string, env: Env): void {
+  const token = envToken(name);
+  const legacyKey = firstDefinedEnvKey(env, [
+    `HASNA_${token}_STORAGE_MODE`,
+    `HASNA_${token}_MODE`,
+    `${token}_STORAGE_MODE`,
+    `${token}_MODE`,
+  ]);
+  if (!legacyKey) return;
+  const apiUrlKey = clientTransportEnvKeys(name).apiUrlKeys[0];
+  throw new Error(
+    `${legacyKey} was removed. Delete the mode variable; ` +
+      `set ${apiUrlKey} with an API credential to select HTTP, ` +
+      `or leave it unset for local SQLite.`,
+  );
+}
+
 function rawAuthority(value: string): string {
   const match = /^[a-z][a-z0-9+.-]*:\/\//i.exec(value);
   if (!match) throw new Error("API URL must be absolute.");
@@ -349,15 +326,14 @@ export function toV1BaseUrl(apiUrl: string): string {
   return url.toString().replace(/\/+$/, "");
 }
 
-export type ClientTransportKind = "sqlite" | "http";
+export const CLIENT_TRANSPORTS = ["sqlite", "http"] as const;
+export type ClientTransportKind = (typeof CLIENT_TRANSPORTS)[number];
 
 export interface ClientTransportResolution {
   /** Where the client should read/write from. */
   transport: ClientTransportKind;
-  /** Resolved data backend (`sqlite` | `postgres`) the app's data lives in. */
-  mode: StorageMode;
-  /** Env key the backend was read from, or `"default"`. */
-  modeSource: string;
+  /** API URL key that selected HTTP, or `"default"` for local SQLite. */
+  transportSource: string;
   /** `<origin>/v1` base for the server API when transport is http, else null. */
   baseUrl: string | null;
   /** Env key the API URL/domain came from, `"default"` (neutral placeholder), or null. */
@@ -368,22 +344,19 @@ export interface ClientTransportResolution {
    * WHERE the API key came from: an env key NAME or an absolute file path.
    * Never the value.
    *
-   * On the `sqlite` backend this reports only whether the legacy env key is
-   * set, since a client reading its own file resolves no credential at all. On
-   * the `postgres` backend it names the tier of the provider chain that
-   * actually supplied the key.
+   * On local SQLite this reports only whether the legacy env key is set, since
+   * a client reading its own file resolves no credential at all. On HTTP it
+   * names the tier of the provider chain that supplied the key.
    */
   apiKeySource: string | null;
   /**
    * Which tier of the credential chain supplied the key, or null on the
-   * `sqlite` backend / when no credential resolved. See {@link CredentialTier}.
+   * local SQLite / when no credential resolved. See {@link CredentialTier}.
    */
   apiKeyTier: CredentialTier | null;
   /**
-   * True when the operator asked for server data but the config is incomplete.
-   * Missing keys fall back to the sqlite file; missing or malformed
-   * default-domain config resolves to a neutral placeholder. Callers SHOULD
-   * treat either result as an error.
+   * True when an API URL requests HTTP but the connection is incomplete.
+   * Callers SHOULD treat this as an error rather than reading stale local data.
    */
   misconfigured: boolean;
   /** Human-readable warning, or null. Never contains secret values. */
@@ -398,96 +371,55 @@ export interface ResolveClientTransportOptions {
 /**
  * Resolve how a client should reach an app's data given the environment.
  *
- * Precedence for the backend: the first present of `HASNA_<NAME>_STORAGE_MODE`,
- * `HASNA_<NAME>_MODE`, `<NAME>_STORAGE_MODE`, `<NAME>_MODE`, else `sqlite`.
- * There is NO other path to `postgres`.
- *
- * THE CREDENTIAL CHAIN NEVER PARTICIPATES IN THE BACKEND DECISION. Endpoints
- * and credentials are connection material: a URL in the environment, a key in
- * the environment, or a credential file appearing on disk — alone or in any
- * combination — never moves a client from its local sqlite file to the
- * network. A local->network transition is explicitly signalled via the mode
- * env, never inferred (owner ruling 2026-07-29). When a URL is configured but
- * no explicit mode selects server data, the client stays on sqlite and says so
- * in `warning`, so the ambiguity is visible instead of a silent local read.
- * Once `postgres` is explicitly selected, the credential resolves at CALL TIME
- * through {@link resolveCredential}: argument, then a deliberate
- * override/profile pointer, then disk, then the deprecated legacy env var.
+ * An explicit API URL requests HTTP. The credential resolves at CALL TIME
+ * through {@link resolveCredential}: argument, deliberate override/profile,
+ * disk, then the deprecated legacy env variable. Without an API URL, the
+ * client stays on local SQLite and never consults credential files.
  */
 export function resolveClientTransport(
   name: string,
   env: Env = process.env,
   options: ResolveClientTransportOptions = {},
 ): ClientTransportResolution {
+  assertNoLegacyClientMode(name, env);
   const keys = clientTransportEnvKeys(name);
-  const modeHit = firstEnv(env, keys.modeKeys);
   const urlHit = firstEnv(env, keys.apiUrlKeys, { preserveRaw: true });
   const keyHit = firstEnv(env, keys.apiKeyKeys);
-
-  let mode: StorageMode = "sqlite";
-  let modeSource = "default";
   const warnings: string[] = [];
 
-  if (modeHit) {
-    mode = normalizeStorageMode(modeHit.value).mode;
-    modeSource = modeHit.key;
-  } else if (urlHit) {
-    // A URL with no explicit mode env is AMBIGUOUS CONFIG, not a transition
-    // signal. The former inference here — an endpoint plus a resolvable
-    // credential (env var OR a credential file appearing on disk) flipping the
-    // backend to `postgres` — was removed under the owner ruling of
-    // 2026-07-29: a local->network transition is explicitly signalled, never
-    // inferred. The client stays on its sqlite file; the warning makes that
-    // visible so a machine still carrying only url+key from the old fleet flip
-    // is diagnosable instead of silently local. NOTHING is resolved from the
-    // credential chain here — running it would be pure side effect for a
-    // client that authenticates to nothing.
-    warnings.push(
-      `${urlHit.key} is set but no explicit storage mode selects server data for '${name}'; ` +
-        `staying on the local sqlite store. Set ${keys.modeKeys[0]}=postgres to use the server, ` +
-        `or unset ${urlHit.key} to silence this warning.`,
-    );
-  }
-
-  // sqlite backend: never route to the network, regardless of URL/key presence
-  // in the environment or of any credential file on disk.
-  if (mode === "sqlite") {
+  // No URL means local SQLite. Do not resolve the credential chain here: a
+  // client authenticating to nothing must not read or emit credential state.
+  if (!urlHit) {
     return {
       transport: "sqlite",
-      mode,
-      modeSource,
+      transportSource: "default",
       baseUrl: null,
       apiUrlSource: null,
       apiKeyPresent: Boolean(keyHit),
       apiKeySource: keyHit ? keyHit.key : null,
       apiKeyTier: null,
       misconfigured: false,
-      warning: warnings.length > 0 ? warnings.join(" ") : null,
+      warning: null,
     };
   }
 
-  // postgres backend (explicitly selected): resolve the credential through the
-  // chain, at call time. A CredentialResolutionError from a deliberate tier
-  // propagates on purpose — an override or profile that cannot be honoured
-  // must fail loudly rather than authenticate as a different principal.
+  // An API URL explicitly selects HTTP. Resolve the credential at call time.
+  // A deliberate tier that cannot be honoured still throws rather than
+  // authenticating as a different principal.
   const credential: ResolvedCredential | null = resolveCredential(name, env, options.credentials);
 
-  // Server data (postgres) but no credential from any tier: a client never opens
-  // PostgreSQL directly, and without a key it cannot reach the server either —
-  // fall back to the sqlite file, but flag it loudly.
   if (!credential) {
     const diskHint = credentialDiskSourcesForMessage(name, env);
     warnings.push(
-      `${modeSource}=postgres but no API key could be resolved for '${name}'. A client reaches server data ` +
-        `over HTTP only; refusing to route. Using the local sqlite store. ` +
+      `${urlHit.key} selects the HTTP server for '${name}', but no API key could be resolved; ` +
+        `refusing to route and leaving the local sqlite store selected. ` +
         `Looked for a credential file at ${diskHint}, then for ${keys.apiKeyKeys[0]} in the environment.`,
     );
     return {
       transport: "sqlite",
-      mode,
-      modeSource,
+      transportSource: urlHit.key,
       baseUrl: null,
-      apiUrlSource: null,
+      apiUrlSource: urlHit.key,
       apiKeyPresent: false,
       apiKeySource: null,
       apiKeyTier: null,
@@ -497,29 +429,18 @@ export function resolveClientTransport(
   }
   if (credential.warning) warnings.push(credential.warning);
 
-  let defaultBaseUrl: DefaultCloudBaseUrlResolution | null = null;
-  let apiUrlSource: string =
-    urlHit?.key ??
-    (env[FLEET_API_DOMAIN_ENV_KEY] === undefined
-      ? "default"
-      : FLEET_API_DOMAIN_ENV_KEY);
+  const apiUrlSource = urlHit.key;
   let baseUrl: string;
   try {
-    if (!urlHit) {
-      defaultBaseUrl = resolveDefaultCloudBaseUrl(name, env);
-      apiUrlSource = defaultBaseUrl.source;
-    }
-    const rawUrl = urlHit?.value ?? defaultBaseUrl!.baseUrl;
-    baseUrl = toV1BaseUrl(rawUrl);
+    baseUrl = toV1BaseUrl(urlHit.value);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     warnings.push(`Invalid API URL from ${apiUrlSource}: ${message}. Using local store.`);
     return {
       transport: "sqlite",
-      mode,
-      modeSource,
+      transportSource: urlHit.key,
       baseUrl: null,
-      apiUrlSource: null,
+      apiUrlSource: urlHit.key,
       apiKeyPresent: true,
       apiKeySource: credential.source,
       apiKeyTier: credential.tier,
@@ -528,18 +449,15 @@ export function resolveClientTransport(
     };
   }
 
-  if (defaultBaseUrl?.warning) warnings.push(defaultBaseUrl.warning);
-
   return {
     transport: "http",
-    mode,
-    modeSource,
+    transportSource: urlHit.key,
     baseUrl,
     apiUrlSource,
     apiKeyPresent: true,
     apiKeySource: credential.source,
     apiKeyTier: credential.tier,
-    misconfigured: defaultBaseUrl?.misconfigured ?? false,
+    misconfigured: false,
     warning: warnings.length > 0 ? warnings.join(" ") : null,
   };
 }

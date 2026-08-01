@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 export const CONTRACTS_PACKAGE_NAME = "@hasna/contracts";
-export const CONTRACTS_PACKAGE_VERSION = "0.8.6";
+export const CONTRACTS_PACKAGE_VERSION = "0.8.7";
 
 export const SCHEMA_IDS = {
   actorRef: "hasna.actor_ref.v1",
@@ -1693,7 +1693,6 @@ export const AppCloudManifestSchema = contractBaseSchema(SCHEMA_IDS.appCloudMani
     /** App identity reference; prefer AppIdSchema-compatible slugs for new manifests. */
     appId: z.string().min(1),
     repository: ResourcePointerSchema.optional(),
-    storageMode: z.enum(["local_only", "app_owned_cloud", "hybrid_local_cache", "external_service"]),
     cloudBoundary: z.enum(["none", "app_owned", "external_service", "local_cache"]),
     cloudResources: z.array(AppCloudResourceSchema).default([]),
     localCache: z
@@ -1736,56 +1735,28 @@ export const AppCloudManifestSchema = contractBaseSchema(SCHEMA_IDS.appCloudMani
         });
       }
     }
-    if (value.storageMode === "local_only" && value.cloudBoundary !== "none") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "local_only storage requires cloudBoundary none",
-        path: ["cloudBoundary"]
-      });
-    }
-    if (value.storageMode === "app_owned_cloud" && value.cloudBoundary !== "app_owned") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "app_owned_cloud storage requires cloudBoundary app_owned",
-        path: ["cloudBoundary"]
-      });
-    }
-    if (value.storageMode === "hybrid_local_cache") {
-      if (value.cloudBoundary !== "local_cache") {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "hybrid_local_cache storage requires cloudBoundary local_cache",
-          path: ["cloudBoundary"]
-        });
-      }
+    if (value.cloudBoundary === "local_cache") {
       if (!value.localCache) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "hybrid_local_cache storage requires localCache settings",
+          message: "A local_cache boundary requires localCache settings",
           path: ["localCache"]
         });
       }
     }
-    if (value.storageMode === "external_service") {
-      if (value.cloudBoundary !== "external_service") {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "external_service storage requires cloudBoundary external_service",
-          path: ["cloudBoundary"]
-        });
-      }
+    if (value.cloudBoundary === "external_service") {
       if (value.cloudResources.length > 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "external_service storage must not declare app-owned cloudResources",
+          message: "An external_service boundary must not declare app-owned cloudResources",
           path: ["cloudResources"]
         });
       }
     }
-    if ((value.storageMode === "app_owned_cloud" || value.storageMode === "hybrid_local_cache") && value.cloudResources.length === 0) {
+    if ((value.cloudBoundary === "app_owned" || value.cloudBoundary === "local_cache") && value.cloudResources.length === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Cloud-backed storage modes require explicit app-owned cloudResources",
+        message: "App-owned boundaries require explicit app-owned cloudResources",
         path: ["cloudResources"]
       });
     }
@@ -5080,15 +5051,15 @@ export const ServiceSurfaceSchema = z
 export type ServiceSurface = z.infer<typeof ServiceSurfaceSchema>;
 
 /**
- * Active data backend. `sqlite | postgres` ONLY — the single switch that
+ * Active server data backend. `sqlite | postgresql` ONLY — the single switch that
  * replaced the removed runtime-placement axis (owner directive 2026-07-29).
  */
-export const STORAGE_MODES = ["sqlite", "postgres"] as const;
-export const StorageModeSchema = z.enum(STORAGE_MODES);
-export type StorageMode = z.infer<typeof StorageModeSchema>;
+export const SERVER_DATA_BACKENDS = ["sqlite", "postgresql"] as const;
+export const ServerDataBackendSchema = z.enum(SERVER_DATA_BACKENDS);
+export type ServerDataBackend = z.infer<typeof ServerDataBackendSchema>;
 
-export const STORAGE_ENGINES = ["sqlite", "postgres"] as const;
-export const STORAGE_ENGINE_VALUES = ["sqlite", "json", "postgres"] as const;
+export const STORAGE_ENGINES = ["sqlite", "postgresql"] as const;
+export const STORAGE_ENGINE_VALUES = ["sqlite", "json", "postgresql"] as const;
 export const LOCAL_STORAGE_ENGINES = ["sqlite", "json"] as const;
 export const StorageEngineSchema = z.enum(STORAGE_ENGINE_VALUES);
 export type StorageEngine = z.infer<typeof StorageEngineSchema>;
@@ -5100,7 +5071,7 @@ export type StorageEngine = z.infer<typeof StorageEngineSchema>;
  * never waivable; PostgreSQL is the forward-looking capability a repo may defer
  * behind an explicit, auditable waiver.
  */
-export const WAIVABLE_STORAGE_ENGINES = ["postgres"] as const;
+export const WAIVABLE_STORAGE_ENGINES = ["postgresql"] as const;
 export type WaivableStorageEngine = (typeof WAIVABLE_STORAGE_ENGINES)[number];
 
 export const SurfaceConformanceWaiverSchema = z
@@ -5180,7 +5151,7 @@ export interface StorageWaiverEligibilityInput {
   name: string;
   bins: readonly string[];
   hosting: readonly HostingMode[];
-  storageMode?: StorageMode | undefined;
+  storageBackend?: ServerDataBackend | undefined;
 }
 
 /**
@@ -5189,7 +5160,7 @@ export interface StorageWaiverEligibilityInput {
  * A waiver is an admission that a repo has no PostgreSQL support, so it is
  * refused for every manifest that already claims PostgreSQL is in play: a
  * long-running service or SaaS, a `cli-with-store` that ships `<name>-serve`,
- * a repo whose active backend IS PostgreSQL (`storage.mode: "postgres"`), and
+ * a repo whose active backend IS PostgreSQL (`storage.backend: "postgresql"`), and
  * a repo offering the `hasna-saas` product story.
  *
  * Shared by the manifest schema and the conformance gate so the two layers
@@ -5202,8 +5173,8 @@ export function storageWaiverIneligibilityReason(input: StorageWaiverEligibility
   if (input.bins.includes(`${input.name}-serve`)) {
     return `storage waivers are not permitted for a service-capable cli-with-store repo shipping ${input.name}-serve`;
   }
-  if (input.storageMode === "postgres") {
-    return "storage waivers are not permitted while storage.mode is postgres, which reads and writes PostgreSQL directly";
+  if (input.storageBackend === "postgresql") {
+    return "storage waivers are not permitted while storage.backend is postgresql, which reads and writes PostgreSQL directly";
   }
   if (input.hosting.includes("hasna-saas")) {
     return "storage waivers are not permitted for a repo declaring the hasna-saas product story";
@@ -5291,8 +5262,8 @@ export function defaultSqlitePathFor(name: string): string {
 
 export const StorageContractSchema = z
   .object({
-    mode: StorageModeSchema,
-    /** Supported storage engines. This capability matrix is independent of runtime mode. */
+    backend: ServerDataBackendSchema,
+    /** Supported storage engines. This capability matrix is independent of the active backend. */
     engines: z.array(StorageEngineSchema).min(1).optional(),
     /** Primary env prefix, e.g. `HASNA_TODOS_`. Defaults to `HASNA_<NAME>_`. */
     envPrefix: z.string().regex(/^HASNA_[A-Z][A-Z0-9]*_$/).optional(),
@@ -5323,10 +5294,10 @@ export const StorageContractSchema = z
         path: ["engines"]
       });
     }
-    if (value.engines?.includes("postgres") && !value.envPrefix) {
+    if (value.engines?.includes("postgresql") && !value.envPrefix) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "storage.engines containing postgres requires envPrefix for the HASNA_<NAME>_DATABASE_URL contract",
+        message: "storage.engines containing postgresql requires envPrefix for the HASNA_<NAME>_DATABASE_URL contract",
         path: ["envPrefix"]
       });
     }
@@ -5573,7 +5544,7 @@ export const ServiceContractManifestSchema = z
       if (!value.storage) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "cli-with-store repos must declare storage", path: ["storage"] });
       } else {
-        if (value.storage.mode === "sqlite" && !value.storage.sqlitePath) {
+        if (value.storage.backend === "sqlite" && !value.storage.sqlitePath) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: "sqlite cli-with-store storage requires sqlitePath (~/.hasna/<name>/<name>.db)",
@@ -5593,7 +5564,7 @@ export const ServiceContractManifestSchema = z
             name: value.name,
             bins: value.bins,
             hosting: value.hosting,
-            storageMode: value.storage.mode
+            storageBackend: value.storage.backend
           });
           const waivedEngines = new Set<StorageEngine>(
             ineligible ? [] : declaredWaivers.map((waiver) => waiver.engine)
@@ -5608,7 +5579,7 @@ export const ServiceContractManifestSchema = z
             const refusal = ineligible && declaredWaivers.length > 0 ? `; declared waiver ignored: ${ineligible}` : "";
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
-              message: `cli-with-store storage.engines must declare both sqlite and postgres unless the engine carries a metadata.conformance.waivedStorageEngines waiver; missing: ${missingEngines.join(", ")}${refusal}`,
+              message: `cli-with-store storage.engines must declare both sqlite and postgresql unless the engine carries a metadata.conformance.waivedStorageEngines waiver; missing: ${missingEngines.join(", ")}${refusal}`,
               path: ["storage", "engines"]
             });
           }
@@ -5623,10 +5594,10 @@ export const ServiceContractManifestSchema = z
       if (!value.storage) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "service repos must declare storage", path: ["storage"] });
       } else if (value.storage.engines) {
-        if (!value.storage.engines.includes("postgres")) {
+        if (!value.storage.engines.includes("postgresql")) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
-            message: "service storage.engines must declare postgres alongside sqlite or json; both sqlite and postgres remain supported",
+            message: "service storage.engines must declare postgresql alongside sqlite or json; both sqlite and postgresql remain supported",
             path: ["storage", "engines"]
           });
         }
@@ -5654,8 +5625,8 @@ export const ServiceContractManifestSchema = z
       if (!value.storage) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "saas repos must declare storage", path: ["storage"] });
       } else {
-        if (value.storage.mode !== "postgres") {
-          ctx.addIssue({ code: z.ZodIssueCode.custom, message: "saas repos must use the postgres storage backend", path: ["storage", "mode"] });
+        if (value.storage.backend !== "postgresql") {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: "saas repos must use the postgresql storage backend", path: ["storage", "backend"] });
         }
         if (!value.storage.envPrefix) {
           ctx.addIssue({
@@ -5718,12 +5689,12 @@ export const ServiceContractManifestSchema = z
   });
 export type ServiceContractManifest = z.infer<typeof ServiceContractManifestSchema>;
 
-/** Shape of `GET /health` for a Hasna service (`{ status, version, mode }`). */
+/** Shape of `GET /health` for a Hasna service (`{ status, version, backend }`). */
 export const HealthResponseSchema = z
   .object({
     status: z.enum(["ok", "degraded", "unavailable"]),
     version: z.string().min(1),
-    mode: StorageModeSchema
+    backend: ServerDataBackendSchema
   })
   .strict();
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;

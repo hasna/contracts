@@ -2,6 +2,23 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.8.7] - 2026-08-01
+
+### BREAKING: server backends and client transports are separate contracts
+
+- Replaced the public storage-mode API with `resolveServerDataBackend()`: a
+  non-empty `HASNA_<APP>_DATABASE_URL` selects `postgresql`; otherwise the
+  server uses `sqlite`. Retired `STORAGE_MODE` and `MODE` variables fail closed
+  with migration guidance instead of being normalized.
+- Replaced manifest `storage.mode` with `storage.backend` and standardized the
+  engine value as `postgresql`.
+- Client routing is now only `sqlite | http`: an API URL plus a resolved API
+  credential selects HTTP, while no URL selects local SQLite. Server backend
+  configuration never participates in client routing.
+- Vendored storage kits now generate `backend.ts`, remove a previously
+  generated `mode.ts`, and expose `createServerPoolFromEnv()` without a mode
+  gate.
+
 ## [0.8.6] - 2026-07-30
 
 ### BREAKING: client transport never infers the backend — explicit signal only (owner ruling 2026-07-29)

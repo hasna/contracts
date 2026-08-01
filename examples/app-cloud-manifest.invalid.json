@@ -4,7 +4,6 @@
   "createdAt": "2026-06-28T20:10:00.000Z",
   "packageName": "@hasna/cloud",
   "appId": "open-cloud",
-  "storageMode": "app_owned_cloud",
   "cloudBoundary": "app_owned",
   "cloudResources": [
     {

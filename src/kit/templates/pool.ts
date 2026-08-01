@@ -2,12 +2,12 @@
 //
 // The single sanctioned way for a SERVER to open its PostgreSQL connection.
 // TLS is resolved through `tls.ts` (one correct approach), and env resolution
-// runs through `mode.ts` (the contract). A Pool is only ever built for the
-// `postgres` backend; clients never open PostgreSQL directly (sqlite-or-http).
+// runs through `backend.ts` (the contract). A Pool is only ever built for the
+// `postgresql` backend; clients never open PostgreSQL directly (sqlite-or-http).
 
 import pg from "pg";
 import type { Pool, PoolConfig } from "pg";
-import { resolveStorageMode, resolveDatabaseUrl } from "./mode.js";
+import { resolveServerDataBackend, resolveDatabaseUrl } from "./backend.js";
 import { resolveTlsConfig, type TlsResolveOptions } from "./tls.js";
 import { createQueryClient, type PoolQueryClient } from "./query.js";
 
@@ -57,25 +57,19 @@ export interface ServerPoolFromEnv {
  * Resolve backend + database URL from the environment and build the server's
  * PostgreSQL pool.
  *
- * Throws when the resolved backend is not `postgres` (the sqlite backend has
- * no Postgres pool) or when the database URL is missing. Never logs the URL.
+ * Throws when no database URL selects the `postgresql` backend. Never logs the
+ * URL.
  */
 export function createServerPoolFromEnv(
   appName: string,
   options: CreateServerPoolFromEnvOptions = {},
 ): ServerPoolFromEnv {
   const env = options.env ?? process.env;
-  const resolution = resolveStorageMode(appName, env);
-  if (resolution.mode !== "postgres") {
-    throw new Error(
-      `createServerPoolFromEnv requires ${appName} storage mode 'postgres', got '${resolution.mode}'. ` +
-        `Set HASNA_${appName.toUpperCase().replace(/-/g, "_")}_STORAGE_MODE=postgres.`,
-    );
-  }
+  const resolution = resolveServerDataBackend(appName, env);
   const connectionString = resolveDatabaseUrl(appName, env);
   if (!connectionString) {
     throw new Error(
-      `postgres storage for ${appName} needs a database URL. Set ` +
+      `postgresql storage for ${appName} needs a database URL. Set ` +
         `HASNA_${appName.toUpperCase().replace(/-/g, "_")}_DATABASE_URL.`,
     );
   }

@@ -37,7 +37,7 @@
 
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { Env } from "../mode.js";
+import type { Env } from "../env-token.js";
 import {
   CREDENTIAL_PROFILE_ENV_KEY,
   clientTransportEnvKeys,

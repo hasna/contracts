@@ -4,7 +4,7 @@
 // `remote` / `hybrid` / `self-hosted` aliases) is gone from the contract
 // surface. What remains is a single data-backend switch:
 //
-//   server storage : `sqlite | postgres`  (STORAGE_MODES / storage.mode)
+//   server backend : `sqlite | postgresql` (storage.backend)
 //   client seam    : `sqlite | http`      (resolveClientTransport)
 //
 // The load-bearing guarantee — the reason this file exists — is that a
@@ -19,11 +19,10 @@ import {
   SCHEMA_IDS,
   SERVICE_CONTRACT_VERSION,
   SERVICE_CONTRACT_JSON_SCHEMA,
-  STORAGE_MODES,
+  SERVER_DATA_BACKENDS,
   STORAGE_ENGINES,
   validateServiceContractManifest,
-  normalizeStorageMode,
-  resolveStorageMode,
+  resolveServerDataBackend,
   resolveClientTransport,
 } from "../src";
 import * as contractsExports from "../src";
@@ -47,7 +46,7 @@ const validManifest = {
   kitVersion: "0.8.4",
   bins: ["todos", "todos-mcp"],
   storage: {
-    mode: "sqlite",
+    backend: "sqlite",
     sqlitePath: "~/.hasna/todos/todos.db",
   },
 } as const;
@@ -193,45 +192,39 @@ describe("JSON Schema copies reject the field structurally", () => {
   }
 });
 
-describe("storage mode is the sqlite|postgres backend switch", () => {
-  test("STORAGE_MODES matches the engine vocabulary", () => {
-    expect(STORAGE_MODES).toEqual(["sqlite", "postgres"]);
-    expect(STORAGE_ENGINES).toEqual(["sqlite", "postgres"]);
+describe("server data backend is sqlite|postgresql", () => {
+  test("server backend matches the engine vocabulary", () => {
+    expect(SERVER_DATA_BACKENDS).toEqual(["sqlite", "postgresql"]);
+    expect(STORAGE_ENGINES).toEqual(["sqlite", "postgresql"]);
   });
 
-  test("normalizeStorageMode accepts the two backends (postgresql long form included)", () => {
-    expect(normalizeStorageMode("sqlite").mode).toBe("sqlite");
-    expect(normalizeStorageMode("postgres").mode).toBe("postgres");
-    expect(normalizeStorageMode("PostgreSQL").mode).toBe("postgres");
+  test("DATABASE_URL is the only server backend selector", () => {
+    expect(resolveServerDataBackend("demo", {}).backend).toBe("sqlite");
+    expect(resolveServerDataBackend("demo", {
+      HASNA_DEMO_DATABASE_URL: "postgres://user@host/db",
+    }).backend).toBe("postgresql");
   });
 
-  test("every removed mode word throws instead of normalizing", () => {
-    for (const word of REMOVED_MODE_WORDS) {
-      expect(() => normalizeStorageMode(word), `${word} must throw`).toThrow(/removed|sqlite|postgres/i);
+  test("retired server mode variables fail closed with migration guidance", () => {
+    for (const word of ["", "   ", "sqlite", "postgres", ...REMOVED_MODE_WORDS]) {
+      expect(
+        () => resolveServerDataBackend("demo", { HASNA_DEMO_STORAGE_MODE: word }),
+        `${word} must throw`,
+      ).toThrow(/HASNA_DEMO_DATABASE_URL|removed/i);
     }
   });
 
-  test("resolveStorageMode defaults to sqlite, flips to postgres on DATABASE_URL", () => {
-    expect(resolveStorageMode("demo", {}).mode).toBe("sqlite");
-    const flipped = resolveStorageMode("demo", {
-      HASNA_DEMO_DATABASE_URL: "postgres://user@host/db",
-    });
-    expect(flipped.mode).toBe("postgres");
-    const explicit = resolveStorageMode("demo", { HASNA_DEMO_STORAGE_MODE: "sqlite" });
-    expect(explicit.mode).toBe("sqlite");
-  });
-
-  test("manifest storage.mode accepts sqlite|postgres only", () => {
+  test("manifest storage.backend rejects placement words and retired storage.mode", () => {
     expect(
       validateServiceContractManifest({
         ...validManifest,
-        storage: { mode: "local", sqlitePath: "~/.hasna/todos/todos.db" },
+        storage: { backend: "local", sqlitePath: "~/.hasna/todos/todos.db" },
       }).success,
     ).toBe(false);
     expect(
       validateServiceContractManifest({
         ...validManifest,
-        storage: { mode: "cloud" },
+        storage: { mode: "postgresql" },
       }).success,
     ).toBe(false);
   });
@@ -239,7 +232,7 @@ describe("storage mode is the sqlite|postgres backend switch", () => {
 
 describe("client seam is sqlite|http, never placement words", () => {
   test("removed mode words in the client env throw", () => {
-    for (const word of ["local", "cloud", "self_hosted", "self-hosted", "remote", "hybrid"]) {
+    for (const word of ["", "   ", "local", "cloud", "self_hosted", "self-hosted", "remote", "hybrid"]) {
       expect(
         () => resolveClientTransport("demo", { HASNA_DEMO_STORAGE_MODE: word }),
         `${word} must throw`,
@@ -247,34 +240,30 @@ describe("client seam is sqlite|http, never placement words", () => {
     }
   });
 
-  test("URL + key without a mode env never infers a transport — explicit signal only (owner ruling 2026-07-29)", () => {
+  test("URL + key select HTTP without a separate mode", () => {
     const resolved = resolveClientTransport("demo", {
-      HASNA_DEMO_API_URL: "https://demo.example.com",
-      HASNA_DEMO_API_KEY: "test-key-not-a-secret",
-    });
-    expect(resolved.transport).toBe("sqlite");
-    expect(resolved.baseUrl).toBeNull();
-    expect(resolved.modeSource).toBe("default");
-    expect(resolved.warning).toContain("HASNA_DEMO_STORAGE_MODE");
-  });
-
-  test("postgres backend on a client routes over http (never a direct DB open)", () => {
-    const resolved = resolveClientTransport("demo", {
-      HASNA_DEMO_STORAGE_MODE: "postgres",
       HASNA_DEMO_API_URL: "https://demo.example.com",
       HASNA_DEMO_API_KEY: "test-key-not-a-secret",
     });
     expect(resolved.transport).toBe("http");
+    expect(resolved.baseUrl).toBe("https://demo.example.com/v1");
+    expect(resolved.transportSource).toBe("HASNA_DEMO_API_URL");
   });
 
-  test("sqlite pins the client to the local file even when URL + key are set", () => {
+  test("a server DATABASE_URL never makes the client open PostgreSQL", () => {
     const resolved = resolveClientTransport("demo", {
-      HASNA_DEMO_STORAGE_MODE: "sqlite",
-      HASNA_DEMO_API_URL: "https://demo.example.com",
-      HASNA_DEMO_API_KEY: "test-key-not-a-secret",
+      HASNA_DEMO_DATABASE_URL: "postgres://user@host/db",
     });
     expect(resolved.transport).toBe("sqlite");
     expect(resolved.baseUrl).toBeNull();
+  });
+
+  test("retired client mode variables fail closed even for old valid values", () => {
+    for (const value of ["sqlite", "postgres"]) {
+      expect(() => resolveClientTransport("demo", {
+        HASNA_DEMO_STORAGE_MODE: value,
+      })).toThrow(/HASNA_DEMO_API_URL|removed/i);
+    }
   });
 });
 
@@ -290,7 +279,7 @@ const FORBIDDEN_PATTERNS: readonly [string, RegExp][] = [
   ["deployment mode prose", /deployment[ -]modes?/i],
   ["self_hosted", /self_hosted/i],
   ["self-hosted", /self-hosted/i],
-  ["hybrid", /\bhybrid\b/i],
+  ["hybrid", /\bhybrid(?:\b|_)/i],
 ];
 
 // A line carrying a 64-hex digest cell is a hash-anchored evidence row — a
@@ -325,6 +314,7 @@ describe("no mode vocabulary survives in shipped source or live docs", () => {
       "self-hosted",
     ]);
     expect(scanForForbidden("a hybrid runtime")).toEqual(["hybrid"]);
+    expect(scanForForbidden("hybrid_local_cache")).toEqual(["hybrid"]);
     expect(scanForForbidden("nothing to see")).toEqual([]);
   });
 
@@ -354,7 +344,7 @@ describe("no mode vocabulary survives in shipped source or live docs", () => {
     });
     // The scan must actually cover the surfaces it claims to cover.
     expect(files).toContain("src/schemas.ts");
-    expect(files).toContain("src/kit/templates/mode.ts");
+    expect(files).toContain("src/kit/templates/backend.ts");
     expect(files).toContain("hasna.contract.json");
     expect(files.length).toBeGreaterThan(40);
 
