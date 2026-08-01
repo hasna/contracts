@@ -13,9 +13,11 @@ import { join } from "node:path";
 import {
   CredentialResolutionError,
   __resetCredentialDeprecationNotices,
+  appConfigDiskValue,
   credentialDiskSources,
   resolveCredential,
 } from "./credentials.js";
+import { credentialOverrideEnvKey } from "./env-keys.js";
 
 const STALE_ENV_KEY = "hasna_accounts_STALE-revoked-key";
 const FRESH_DISK_KEY = "hasna_accounts_FRESH-on-disk-key";
@@ -375,5 +377,153 @@ describe("no key material ever escapes into diagnostics", () => {
 
     expect(resolved.source).not.toContain(FRESH_DISK_KEY);
     expect(resolved.warning ?? "").not.toContain(FRESH_DISK_KEY);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The NON-SECRET config tier (todos f8642ed2).
+//
+// `~/.hasna/cloud/<app>.env` is the fleet's app config file. The credential is
+// one field in it; the API URL is another. This module already opened and
+// parsed that file to take the key — these tests cover reading the non-secret
+// fields out of it WITHOUT opening a second door onto the secret.
+//
+// Design inherited from Tullius, whose original RED tests for this helper were
+// left uncommitted when it stopped. The helper's shape and its security
+// boundary are its work.
+// ---------------------------------------------------------------------------
+
+describe("appConfigDiskValue — non-secret config from the same file", () => {
+  test("reads a declared value and names the file it came from", () => {
+    const home = makeHome();
+    const path = writeCloudEnv(home, "todos", "HASNA_TODOS_API_URL=https://todos.example.invalid\n");
+
+    const hit = appConfigDiskValue("todos", { HOME: home }, ["HASNA_TODOS_API_URL"]);
+
+    expect(hit).not.toBeNull();
+    expect(hit!.value).toBe("https://todos.example.invalid");
+    expect(hit!.key).toBe("HASNA_TODOS_API_URL");
+    expect(hit!.path).toBe(path);
+  });
+
+  test("honours the caller's key precedence, not the file's line order", () => {
+    const home = makeHome();
+    writeCloudEnv(
+      home,
+      "todos",
+      "TODOS_API_URL=https://unprefixed.example.invalid\nHASNA_TODOS_API_URL=https://prefixed.example.invalid\n",
+    );
+
+    const hit = appConfigDiskValue("todos", { HOME: home }, ["HASNA_TODOS_API_URL", "TODOS_API_URL"]);
+
+    expect(hit!.key).toBe("HASNA_TODOS_API_URL");
+    expect(hit!.value).toBe("https://prefixed.example.invalid");
+  });
+
+  test("the first disk layer wins over the second", () => {
+    const home = makeHome();
+    const first = writeCloudEnv(home, "todos", "HASNA_TODOS_API_URL=https://first.example.invalid\n");
+    writeConfigEnv(home, "todos", "HASNA_TODOS_API_URL=https://second.example.invalid\n");
+
+    const hit = appConfigDiskValue("todos", { HOME: home }, ["HASNA_TODOS_API_URL"]);
+
+    expect(hit!.value).toBe("https://first.example.invalid");
+    expect(hit!.path).toBe(first);
+  });
+
+  test("falls through to the second layer when the first lacks the key", () => {
+    const home = makeHome();
+    writeCloudEnv(home, "todos", "SOMETHING_ELSE=1\n");
+    const second = writeConfigEnv(home, "todos", "HASNA_TODOS_API_URL=https://second.example.invalid\n");
+
+    const hit = appConfigDiskValue("todos", { HOME: home }, ["HASNA_TODOS_API_URL"]);
+
+    expect(hit!.path).toBe(second);
+  });
+
+  test("a missing file, an absent key, and no HOME are all just null", () => {
+    const home = makeHome();
+    expect(appConfigDiskValue("todos", { HOME: home }, ["HASNA_TODOS_API_URL"])).toBeNull();
+    writeCloudEnv(home, "todos", "SOMETHING_ELSE=1\n");
+    expect(appConfigDiskValue("todos", { HOME: home }, ["HASNA_TODOS_API_URL"])).toBeNull();
+    expect(appConfigDiskValue("todos", {}, ["HASNA_TODOS_API_URL"])).toBeNull();
+  });
+
+  test("an unsafe app slug never reaches the filesystem", () => {
+    const home = makeHome();
+    expect(appConfigDiskValue("../../elsewhere", { HOME: home }, ["ANYTHING"])).toBeNull();
+  });
+
+  // THE SECURITY BOUNDARY. This function must never become a second, unsealed
+  // way to read the credential out of the same file. The sealed chain in
+  // `resolveCredential` exists precisely so the secret is non-enumerable and
+  // redacted on inspection; a plain `{ key, value }` hit would defeat that.
+  test("REFUSES to return anything that looks like a credential key", () => {
+    const home = makeHome();
+    writeCloudEnv(
+      home,
+      "accounts",
+      `HASNA_ACCOUNTS_API_KEY=${FRESH_DISK_KEY}\n` +
+        `${credentialOverrideEnvKey("accounts")}=${FRESH_DISK_KEY}\n` +
+        `HASNA_ACCOUNTS_TOKEN=${FRESH_DISK_KEY}\n` +
+        `HASNA_ACCOUNTS_CLIENT_SECRET=${FRESH_DISK_KEY}\n` +
+        `HASNA_ACCOUNTS_PASSWORD=${FRESH_DISK_KEY}\n`,
+    );
+
+    for (const key of [
+      "HASNA_ACCOUNTS_API_KEY",
+      credentialOverrideEnvKey("accounts"),
+      "HASNA_ACCOUNTS_TOKEN",
+      "HASNA_ACCOUNTS_CLIENT_SECRET",
+      "HASNA_ACCOUNTS_PASSWORD",
+    ]) {
+      const hit = appConfigDiskValue("accounts", { HOME: home }, [key]);
+      expect(hit).toBeNull();
+    }
+
+    // POSITIVE CONTROL for the refusal: the same file, same call shape, a
+    // non-secret key — proves the refusal above is the filter doing its job and
+    // not the reader simply failing to read this file at all.
+    writeCloudEnv(
+      home,
+      "accounts",
+      `HASNA_ACCOUNTS_API_KEY=${FRESH_DISK_KEY}\nHASNA_ACCOUNTS_API_URL=https://accounts.example.invalid\n`,
+    );
+    const allowed = appConfigDiskValue("accounts", { HOME: home }, ["HASNA_ACCOUNTS_API_URL"]);
+    expect(allowed).not.toBeNull();
+    expect(allowed!.value).toBe("https://accounts.example.invalid");
+  });
+
+  test("a credential-shaped key mixed into the request list is dropped, not honoured", () => {
+    const home = makeHome();
+    writeCloudEnv(
+      home,
+      "accounts",
+      `HASNA_ACCOUNTS_API_KEY=${FRESH_DISK_KEY}\nHASNA_ACCOUNTS_API_URL=https://accounts.example.invalid\n`,
+    );
+
+    const hit = appConfigDiskValue("accounts", { HOME: home }, [
+      "HASNA_ACCOUNTS_API_KEY",
+      "HASNA_ACCOUNTS_API_URL",
+    ]);
+
+    expect(hit!.key).toBe("HASNA_ACCOUNTS_API_URL");
+    expect(hit!.value).not.toBe(FRESH_DISK_KEY);
+  });
+
+  // A live fleet file still carries the retired mode key. Reading config off
+  // disk must not resurrect it, and must not blow up over it either.
+  test("a retired key in the file is neither returned nor fatal", () => {
+    const home = makeHome();
+    writeCloudEnv(
+      home,
+      "todos",
+      "HASNA_TODOS_STORAGE_MODE=postgres\nHASNA_TODOS_API_URL=https://todos.example.invalid\n",
+    );
+
+    expect(appConfigDiskValue("todos", { HOME: home }, ["HASNA_TODOS_STORAGE_MODE"])!.value).toBe("postgres");
+    expect(appConfigDiskValue("todos", { HOME: home }, ["HASNA_TODOS_API_URL"])!.value).toBe(
+      "https://todos.example.invalid",
+    );
   });
 });

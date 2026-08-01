@@ -227,16 +227,20 @@ function parseEnvFile(text: string): Map<string, string> {
 }
 
 /**
- * Read one credential file. A missing, unreadable, oversized, or non-regular
- * path is simply "nothing here".
+ * Read and parse one fleet app-config file. A missing, unreadable, oversized,
+ * or non-regular path is simply "nothing here".
  *
  * `statSync` before opening is deliberate: a FIFO planted in the credential
  * directory blocks `open()` FOREVER, and this read now happens on every
  * request, ahead of the transport's own AbortController — so no timeout could
  * rescue it. Stat does not block on a FIFO or a character device, so the type
  * check happens before anything that could hang.
+ *
+ * Both the credential tier and the non-secret config tier go through here, so
+ * there is exactly ONE spelling of those guards. A second reader added beside
+ * this one is a second place for the FIFO and size checks to drift out of sync.
  */
-function readCredentialFile(path: string, apiKeyKeys: readonly string[]): string | null {
+function readAppConfigFile(path: string): Map<string, string> | null {
   let text: string;
   try {
     const stats = statSync(path);
@@ -245,10 +249,88 @@ function readCredentialFile(path: string, apiKeyKeys: readonly string[]): string
   } catch {
     return null;
   }
-  const values = parseEnvFile(text);
+  return parseEnvFile(text);
+}
+
+function readCredentialFile(path: string, apiKeyKeys: readonly string[]): string | null {
+  const values = readAppConfigFile(path);
+  if (!values) return null;
   for (const key of apiKeyKeys) {
     const value = values.get(key)?.trim();
     if (value) return value;
+  }
+  return null;
+}
+
+/** A non-secret config value read off disk, with the file that supplied it. */
+export interface AppConfigDiskHit {
+  /** The key that matched, in the caller's precedence order. */
+  key: string;
+  /** The value as written in the file. Never a credential — see below. */
+  value: string;
+  /** Absolute path of the file that supplied it, so a diagnostic can name it. */
+  path: string;
+}
+
+/**
+ * Keys this function will never hand back, however the caller asks for them.
+ *
+ * The fleet app-config file holds a credential AND non-secret routing config in
+ * the same place. That is exactly why this boundary has to be explicit: without
+ * it, `appConfigDiskValue(name, env, ["HASNA_TODOS_API_KEY"])` would be a
+ * second, UNSEALED way to read the secret out of a file whose only other reader
+ * returns it sealed, non-enumerable and redacted on inspection. A plain
+ * `{ key, value }` hit would defeat that seal completely.
+ *
+ * Matched on shape rather than on an app-specific list, so a key this module
+ * has never heard of — a future `*_CLIENT_SECRET` — is refused too.
+ *
+ * The credential word is matched as an underscore-delimited SEGMENT ANYWHERE in
+ * the key, not anchored to the end. An end-anchored version of this pattern was
+ * written first and shipped a hole: `HASNA_<APP>_API_KEY_OVERRIDE` ends in
+ * `OVERRIDE`, so it was not refused and this function handed back the live
+ * override credential in a plain `{ key, value }`. Its own boundary test caught
+ * it. Any qualifier suffix — `_OVERRIDE`, `_FILE`, `_ID` — reintroduces that
+ * hole the moment the match is anchored.
+ */
+const CREDENTIAL_SHAPED_KEY =
+  /(?:^|_)(?:API_KEY|KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)(?:_|$)/;
+
+/**
+ * Read a NON-SECRET config value from the fleet app-config file on disk.
+ *
+ * This is the tier that closes the gap the credential chain left open: the same
+ * file already supplies the API key, and every other field in it was discarded.
+ * A non-interactive shell — a coding agent's Bash tool, a loop-spawned `/bin/sh`,
+ * cron — inherits none of the fleet environment, so before this existed the
+ * client answered from its local SQLite store at `misconfigured: false` while a
+ * complete, usable server config sat on disk one line away from the key it did
+ * read. That is a confident wrong answer, which is the single failure mode this
+ * module exists to prevent.
+ *
+ * Precedence is file-major, then the caller's key order within a file: the first
+ * disk layer that can answer wins, and inside it the caller's first key wins
+ * over the file's line order.
+ *
+ * Values found here are NOT policed for legacy-ness. A live fleet file may still
+ * carry a retired key such as `HASNA_<APP>_STORAGE_MODE`; this reader simply
+ * never asks for it. Throwing on a file's contents would take down every client
+ * on the fleet for a stale line nobody reads.
+ */
+export function appConfigDiskValue(
+  name: string,
+  env: Env,
+  keys: readonly string[],
+): AppConfigDiskHit | null {
+  const wanted = keys.filter((key) => !CREDENTIAL_SHAPED_KEY.test(key));
+  if (wanted.length === 0) return null;
+  for (const path of credentialDiskSources(name, env)) {
+    const values = readAppConfigFile(path);
+    if (!values) continue;
+    for (const key of wanted) {
+      const value = values.get(key)?.trim();
+      if (value) return { key, value, path };
+    }
   }
   return null;
 }
