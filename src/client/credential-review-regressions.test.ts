@@ -48,40 +48,33 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// P0 (REVERSED by the owner ruling of 2026-07-29) — the original review made
-// "endpoint in env + credential on disk" resolve to http, on the theory that
-// the recommended steady state must not be a silent sqlite read. The owner
-// ruled the opposite way: a local->network transition is EXPLICITLY signalled,
-// never inferred from a credential file appearing on disk. The steady state
-// therefore includes an explicit mode env; without it the client stays on
-// sqlite and the ambiguity is surfaced as a warning, not as a route change.
+// Current contract: client routing is a connection choice. An endpoint plus a
+// credential selects HTTP; without an endpoint the client remains on SQLite.
 // ---------------------------------------------------------------------------
 
-describe("endpoint + disk credential never infer server data (owner ruling 2026-07-29)", () => {
-  test("URL in env + credential on disk stays sqlite, with a warning naming the missing explicit mode", () => {
+describe("endpoint + disk credential select HTTP", () => {
+  test("URL in env + credential on disk selects HTTP without exposing the value", () => {
     const home = makeHome();
-    writeCloudEnv(home, "todos", "HASNA_TODOS_API_KEY=good-disk-key\n");
+    const diskPath = writeCloudEnv(home, "todos", "HASNA_TODOS_API_KEY=good-disk-key\n");
 
     const r = resolveClientTransport("todos", {
       HOME: home,
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
     });
 
-    expect(r.transport).toBe("sqlite");
-    expect(r.mode).toBe("sqlite");
-    expect(r.modeSource).toBe("default");
+    expect(r.transport).toBe("http");
+    expect(r.transportSource).toBe("HASNA_TODOS_API_URL");
+    expect(r.apiKeySource).toBe(diskPath);
     expect(r.misconfigured).toBe(false);
-    expect(r.warning).toContain("HASNA_TODOS_STORAGE_MODE");
     expect(JSON.stringify(r)).not.toContain("good-disk-key");
   });
 
-  test("the explicit signal completes the same setup: mode env + URL + disk credential => http", () => {
+  test("URL plus disk credential does not require a separate routing mode", () => {
     const home = makeHome();
     const diskPath = writeCloudEnv(home, "todos", "HASNA_TODOS_API_KEY=good-disk-key\n");
 
     const r = resolveClientTransport("todos", {
       HOME: home,
-      HASNA_TODOS_STORAGE_MODE: "postgres",
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
     });
 
@@ -90,7 +83,7 @@ describe("endpoint + disk credential never infer server data (owner ruling 2026-
     expect(r.apiKeySource).toBe(diskPath);
   });
 
-  test("BOUNDARY: a URL alone, with no credential anywhere, stays sqlite and not misconfigured", () => {
+  test("BOUNDARY: a URL alone, with no credential anywhere, fails closed as misconfigured", () => {
     const home = makeHome();
 
     const r = resolveClientTransport("todos", {
@@ -99,7 +92,7 @@ describe("endpoint + disk credential never infer server data (owner ruling 2026-
     });
 
     expect(r.transport).toBe("sqlite");
-    expect(r.misconfigured).toBe(false);
+    expect(r.misconfigured).toBe(true);
   });
 
   test("BOUNDARY: a credential on disk with NO URL configured still never routes to the network", () => {
@@ -227,12 +220,11 @@ describe("the sqlite backend has no credential side effects at all", () => {
     expect(messages).toEqual([]);
   });
 
-  test("an explicit sqlite backend ignores a deliberate override without throwing", () => {
+  test("a local client ignores a deliberate credential override without throwing", () => {
     const home = makeHome();
 
     const r = resolveClientTransport("todos", {
       HOME: home,
-      HASNA_TODOS_STORAGE_MODE: "sqlite",
       HASNA_TODOS_API_KEY_OVERRIDE: "   ",
     });
 

@@ -30,19 +30,19 @@ carries is its server's **data backend**.
 
 ---
 
-## 2. Data backend (storage mode)
+## 2. Server data backend
 
-The storage enum is **`sqlite | postgres` ONLY**, and it describes the
+The backend enum is **`sqlite | postgresql` ONLY**, and it describes the
 **SERVER's internal storage**:
 
 - **`sqlite`** — SQLite at `~/.hasna/<name>/<name>.db` is authoritative.
-- **`postgres`** — reads **AND** writes go to a PostgreSQL server
+- **`postgresql`** — reads **AND** writes go to a PostgreSQL server
   (`DATABASE_URL`). Who operates that server — the user or Hasna — does not
   change the backend, the code path, or this contract.
 
 Invariants, spelled out — these override everything:
 
-1. `postgres` means both reads and writes hit PostgreSQL directly.
+1. `postgresql` means both reads and writes hit PostgreSQL directly.
 2. There is **NO** sync engine.
 3. There is **NO** cache-as-backend (no blended local-cache runtime).
 4. There is **NO** merge logic and **NO** conflict resolution.
@@ -59,11 +59,9 @@ directly**: a client whose data lives in the server's PostgreSQL reaches it
 over the HTTP `/v1` API (see `resolveClientTransport`). There is no
 client-side Postgres store.
 
-The removed placement vocabulary (`local`, `cloud`, `remote`, the
-operator-hosted placement word in both its underscore and hyphen spellings,
-and the blended-cache word) is **rejected with a migration hint**, never
-silently mapped. The long spelling `postgresql` normalizes to `postgres`. The
-reference normalizer lives in `src/mode.ts`.
+Retired `STORAGE_MODE` and `MODE` variables are **rejected with a migration
+hint**, never normalized or silently mapped. Backend resolution lives in
+`src/server-backend.ts` and depends only on database configuration.
 
 ---
 
@@ -74,23 +72,15 @@ environment.
 
 | Key | Purpose |
 | --- | --- |
-| `HASNA_<NAME>_STORAGE_MODE` | Canonical backend selector. Value `sqlite` or `postgres` (`postgresql` accepted as the long spelling). |
-| `HASNA_<NAME>_DATABASE_URL` | PostgreSQL URL. **Required when the backend is `postgres`.** |
-| `<NAME>_STORAGE_MODE` | Optional short alias for the backend selector. |
+| `HASNA_<NAME>_DATABASE_URL` | Canonical PostgreSQL URL. Its presence selects the `postgresql` server backend. |
 | `<NAME>_DATABASE_URL` | Optional short alias for the database URL. |
 
 `<NAME>` is the upper-snake form of the app name (e.g. `todos` → `TODOS`,
 `open-mailery` app name `mailery` → `MAILERY`).
 
-Resolution precedence (see `resolveStorageMode`):
-
-1. `HASNA_<NAME>_STORAGE_MODE`
-2. `<NAME>_STORAGE_MODE` (alias; emits a "use canonical key" warning)
-3. default → `postgres` when a `DATABASE_URL` is present, else `sqlite`
-
-An app **MUST NOT** read secret *values* to decide the backend; it only
-detects `DATABASE_URL` presence. Selecting `postgres` without a database URL
-is a misconfiguration and MUST warn.
+`resolveServerDataBackend` uses the canonical database URL first, then the
+short alias. A non-empty URL selects `postgresql`; otherwise the backend is
+`sqlite`. The resolver reports only backend and source names, never the URL.
 
 ### 3a. Credential resolution — env holds a pointer, disk holds the secret
 
@@ -123,23 +113,14 @@ Rules:
   client is built — a cache is the same snapshot defect at a smaller timescale.
   This is what makes a rotation heal in any shell, however old.
 - **A credential alone never routes anything to the network.** An explicit
-  `HASNA_<NAME>_STORAGE_MODE` always wins, and it is still read only from the
-  environment. Where no mode is set, the legacy flip signal (`API_URL` +
-  `API_KEY` both present) still applies, but its credential half is satisfied by
-  **any** tier of the chain, not only by the legacy env var. The **API URL is
-  still required and still env-only**, so a credential file on disk cannot flip
-  a client that has no endpoint configured.
-
-  This matters because the steady state this section tells operators to migrate
-  to — endpoint in the environment, credential on disk — would otherwise resolve
-  to `sqlite` with `misconfigured: false` and no warning, silently serving the
-  local dataset while a valid credential sat on disk. That is the false green
-  this section forbids, so the inference has to see the whole chain.
+  `HASNA_<NAME>_API_URL` (or short alias) and a credential from any tier select
+  HTTP. Without an API URL, the client stays on SQLite. A URL without a usable
+  credential is a fail-closed misconfiguration, never a silent local read.
 - **`HOME` comes from the same env object** the caller passes. An env with no
   `HOME` performs no disk read, which is what keeps the behaviour hermetic and
   test suites independent of the machine running them.
 - **Never fall back to local data on an auth failure.** Offline reads are a
-  legitimate feature, but they MUST be a deliberate mode chosen *before* the
+  legitimate feature, but they MUST be a deliberate connection chosen *before* the
   request. A `401`-to-local fallback prints healthy output while authentication
   is broken — a false green, strictly worse than the loud failure.
 - **A credential source that cannot produce a usable key fails loudly.** A key
@@ -186,11 +167,11 @@ Any repo that ships a `<name>-serve` bin **MUST** expose:
 
 | Endpoint | Response shape | Schema |
 | --- | --- | --- |
-| `GET /health` | `{ "status": "ok"\|"degraded"\|"unavailable", "version": string, "mode": "sqlite"\|"postgres" }` | `HealthResponseSchema` |
+| `GET /health` | `{ "status": "ok"\|"degraded"\|"unavailable", "version": string, "backend": "sqlite"\|"postgresql" }` | `HealthResponseSchema` |
 | `GET /ready` | `{ "ready": boolean, "reason"?: string }` | `ReadyResponseSchema` |
 | `GET /version` | `{ "version": string }` | `VersionResponseSchema` |
 
-`/health` reports liveness and the active storage mode. `/ready` reports whether
+`/health` reports liveness and the active server backend. `/ready` reports whether
 the app can serve traffic (e.g. database reachable). `/version` reports the
 package version.
 
@@ -223,7 +204,7 @@ per-repo waiver recorded in `hasna.contract.json` review. `library` repos
 
 - **Local SQLite path:** `~/.hasna/<name>/<name>.db`.
 - `storage.sqlitePath` **MUST** end in `.db`.
-- Store-owning OSS cores declare `storage.engines: ["sqlite", "postgres"]`.
+- Store-owning OSS cores declare `storage.engines: ["sqlite", "postgresql"]`.
 - A PostgreSQL capability declaration **MUST** include `storage.envPrefix`, so
   the serve/migrate boundary can derive `HASNA_<NAME>_DATABASE_URL`.
 - `storage.pgTestGate` records the disposable live-Postgres test env var and
@@ -242,7 +223,7 @@ fabricating PostgreSQL support:
 ```json
 {
   "storage": {
-    "mode": "sqlite",
+    "backend": "sqlite",
     "engines": ["sqlite"],
     "envPrefix": "HASNA_FACTORY_",
     "sqlitePath": "~/.hasna/factory/factory.db"
@@ -251,7 +232,7 @@ fabricating PostgreSQL support:
     "conformance": {
       "waivedStorageEngines": [
         {
-          "engine": "postgres",
+          "engine": "postgresql",
           "reason": "SQLite-only local CLI; PostgreSQL adoption is tracked through the vendored storage kit.",
           "reviewedBy": "platform-storage",
           "expiresAt": "2027-01-01T00:00:00.000Z"
@@ -272,13 +253,13 @@ fabricating PostgreSQL support:
   timestamp (`Z`, e.g. `2027-01-01T00:00:00.000Z`); conformance **fails** the
   storage gate once it has passed, so a time-boxed exception cannot silently
   become permanent.
-- Only `postgres` is waivable. SQLite is the local source of truth and is never
+- Only `postgresql` is waivable. SQLite is the local source of truth and is never
   waivable.
 - A waiver is an admission that a repo has no PostgreSQL support, so it is
   refused for every manifest that already claims PostgreSQL is in play. Only a
   `cli-with-store` repo that
   1. does **not** ship `<name>-serve` (a serve bin makes it service-capable),
-  2. declares `storage.mode` `sqlite` (`postgres` reads and writes PostgreSQL
+  2. declares `storage.backend` `sqlite` (`postgresql` reads and writes PostgreSQL
      directly), and
   3. does **not** declare the `hasna-saas` product story
   may waive an engine. `service` and `saas` repos never may.
@@ -309,7 +290,7 @@ Every `service`, `saas`, and `cli-with-store` repo that ships a `<name>-serve`
 bin **MUST** ship at least one root self-host artifact: `docker-compose.yml`,
 `docker-compose.yaml`, `compose.yml`, `compose.yaml`, or `Dockerfile`. A Compose
 file is the preferred complete reference because it can bring up an app-owned
-Postgres and the app in `cloud` mode pointed at it. See this repo's
+PostgreSQL server and the app pointed at it through `DATABASE_URL`. See this repo's
 `docker-compose.yml` for the reference template.
 
 ---
@@ -325,14 +306,14 @@ Ships types/validators/helpers. No store, no service.
 - MAY ship `<name>` / `<name>-cli` bins for local checks.
 
 ### `cli-with-store`
-A CLI that owns local (and optionally cloud) data.
+A CLI that owns local data and may connect to an HTTP service.
 - **MUST** declare `storage`.
-- **MUST** declare both `sqlite` and `postgres` in `storage.engines`, unless it
-  is waiver-eligible (CLI-only, `local` storage mode, no `cloud` placement, no
-  `hasna-saas` story) and `postgres` carries an explicit
+- **MUST** declare both `sqlite` and `postgresql` in `storage.engines`, unless it
+  is waiver-eligible (CLI-only, `sqlite` server backend, no
+  `hasna-saas` story) and `postgresql` carries an explicit
   `metadata.conformance.waivedStorageEngines` waiver (see §6). `sqlite` is
   never waivable.
-- If `storage.mode` is `local`, **MUST** set `storage.sqlitePath`
+- If `storage.backend` is `sqlite`, **MUST** set `storage.sqlitePath`
   (`~/.hasna/<name>/<name>.db`).
 - **MUST** declare `storage.envPrefix` and `storage.pgTestGate` unless
   PostgreSQL is explicitly waived; a waived engine has no DATABASE_URL boundary
@@ -349,7 +330,7 @@ A CLI that owns local (and optionally cloud) data.
 ### `service`
 A long-running HTTP/MCP service.
 - **MUST** declare `storage`.
-- **MUST** declare both `sqlite` and `postgres` in `storage.engines`.
+- **MUST** declare both `sqlite` and `postgresql` in `storage.engines`.
 - **MUST** declare `storage.pgTestGate`.
 - **MUST** ship a `<name>-serve` bin and expose `GET /health`, `GET /ready`,
   and `GET /version`.
@@ -359,7 +340,7 @@ A long-running HTTP/MCP service.
 ### `saas`
 A Hasna-operated managed service.
 - **MUST** declare the `hasna-saas` hosting story.
-- **MUST** declare `storage` with `storage.mode` = `cloud`.
+- **MUST** declare `storage` with `storage.backend` = `postgresql`.
 - **MUST** declare `storage.envPrefix`; concrete database secret bindings stay
   in private deployment configuration, not the public manifest.
 - **MUST** ship a `<name>-serve` bin and expose `GET /health`, `GET /ready`,
@@ -374,9 +355,8 @@ via `AppCloudManifest`; it is never a shared runtime import.
 
 ## 9. `hasna.contract.json`
 
-Each repo root carries a `hasna.contract.json`. Product hosting, runtime
-placement, storage routing, storage capabilities, and product surfaces are
-separate axes:
+Each repo root carries a `hasna.contract.json`. Product hosting, server data
+backend, storage capabilities, and product surfaces are separate axes:
 
 ```json
 {
@@ -389,8 +369,8 @@ separate axes:
   "bins": ["todos", "todos-mcp", "todos-serve"],
   "hosting": ["user-hosted", "hasna-saas"],
   "storage": {
-    "mode": "sqlite",
-    "engines": ["sqlite", "postgres"],
+    "backend": "sqlite",
+    "engines": ["sqlite", "postgresql"],
     "envPrefix": "HASNA_TODOS_",
     "aliasEnvPrefix": "TODOS_",
     "sqlitePath": "~/.hasna/todos/todos.db",
@@ -443,7 +423,7 @@ separate axes:
 - `kitVersion` — the `@hasna/contracts` version the repo tracks.
 - `hosting` — product stories: `user-hosted` and, only when available,
   `hasna-saas`.
-- `storage.mode` — active data backend (`sqlite | postgres`), the server's
+- `storage.backend` — active data backend (`sqlite | postgresql`), the server's
   internal storage.
 - `storage.engines` — supported persistence engines.
 - `serviceSurfaces` — supported product-surface declarations. Service-capable
@@ -534,8 +514,8 @@ Checks:
    compliant behaviour is how a mandatory check gets switched off.
 10. `hosting_story` — public OSS cores include the user-hosted product story;
    `saas` repos include the `hasna-saas` story.
-11. `mode_enum_compliance` — any `HASNA_<NAME>_STORAGE_MODE` env normalizes to `local|cloud`.
-12. `health_shape` — when a serve bin exists, a sampled `/health` payload matches `{ status, version, mode }`.
+11. `server_backend_configuration` — DATABASE_URL presence selects `postgresql`; retired mode variables fail closed.
+12. `health_shape` — when a serve bin exists, a sampled `/health` payload matches `{ status, version, backend }`.
 13. `no_cloud_guard` — no forbidden shared cloud runtime edges (reuses `scanNoCloudTarget`).
 14. `published_artifact_gate` — a repo that publishes declares
    `metadata.release.artifactScan.script` and its `prepack` script transitively
@@ -820,10 +800,10 @@ proof remain the responsibility of each owning package.
 
 The deployment-placement field is **rejected, not ignored**: a manifest that
 still carries it — top-level or on a service surface, in any spelling — fails
-validation with an error naming the field, and `storage.mode` accepts only
-`sqlite | postgres`. Migration is deletion plus rename: delete the placement
-arrays, rename `storage.mode` values (the old file-backed value becomes
-`sqlite`, the old server-backed value becomes `postgres`). Missing `hosting`
+validation with an error naming the field, and `storage.backend` accepts only
+`sqlite | postgresql`. Migration is deletion plus rename: delete the placement
+arrays, rename `storage.mode` to `storage.backend`, and map the old file-backed
+value to `sqlite` and the old server-backed value to `postgresql`. Missing `hosting`
 and `serviceSurfaces` still receive compatible defaults. The current schema
 intentionally rejects a declared non-`.db` `storage.sqlitePath`, a SaaS store
 without `storage.envPrefix`, and a declared supported API that omits the

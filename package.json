@@ -1,6 +1,6 @@
 {
   "name": "@hasna/contracts",
-  "version": "0.8.6",
+  "version": "0.8.7",
   "description": "Shared schemas and validators for Hasna open-source agent infrastructure contracts.",
   "type": "module",
   "license": "Apache-2.0",
@@ -37,9 +37,9 @@
       "types": "./dist/no-cloud.d.ts",
       "import": "./dist/no-cloud.js"
     },
-    "./mode": {
-      "types": "./dist/mode.d.ts",
-      "import": "./dist/mode.js"
+    "./server-backend": {
+      "types": "./dist/server-backend.d.ts",
+      "import": "./dist/server-backend.js"
     },
     "./service-contract": {
       "types": "./dist/service-contract.d.ts",
@@ -99,7 +99,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun run todos:check && rm -rf dist && bun build src/index.ts src/schemas.ts src/validators.ts src/no-cloud.ts src/mode.ts src/service-contract.ts src/secure-local-store.ts src/conformance.ts src/artifact-scan.ts src/kit/generate.ts src/auth/index.ts src/sdk/generate.ts src/client/transport.ts src/client/storage.ts --root src --outdir dist --target bun && bun build src/todos/index.ts --root src --outdir dist --target bun --packages external && bun build src/cli/index.ts --outdir dist/cli --target bun && cp src/cli/contracts-cli.ts dist/cli/contracts-cli.js && cp src/hasna.contract.schema.json dist/hasna.contract.schema.json && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
+    "build": "bun run todos:check && rm -rf dist && bun build src/index.ts src/schemas.ts src/validators.ts src/no-cloud.ts src/server-backend.ts src/service-contract.ts src/secure-local-store.ts src/conformance.ts src/artifact-scan.ts src/kit/generate.ts src/auth/index.ts src/sdk/generate.ts src/client/transport.ts src/client/storage.ts --root src --outdir dist --target bun && bun build src/todos/index.ts --root src --outdir dist --target bun --packages external && bun build src/cli/index.ts --outdir dist/cli --target bun && cp src/cli/contracts-cli.ts dist/cli/contracts-cli.js && cp src/hasna.contract.schema.json dist/hasna.contract.schema.json && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
     "typecheck": "tsc --noEmit",
     "test": "bun test --timeout 120000",
     "lint": "tsc --noEmit",

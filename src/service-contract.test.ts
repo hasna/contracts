@@ -23,8 +23,8 @@ describe("service storage engines", () => {
     const parsed = ServiceContractManifestSchema.safeParse({
       ...baseServiceManifest,
       storage: {
-        mode: "postgres",
-        engines: ["json", "postgres"],
+        backend: "postgresql",
+        engines: ["json", "postgresql"],
         envPrefix: "HASNA_IDENTITIES_"
       }
     });
@@ -36,8 +36,8 @@ describe("service storage engines", () => {
     const parsed = ServiceContractManifestSchema.safeParse({
       ...baseServiceManifest,
       storage: {
-        mode: "postgres",
-        engines: ["filesystem", "postgres"],
+        backend: "postgresql",
+        engines: ["filesystem", "postgresql"],
         envPrefix: "HASNA_IDENTITIES_"
       }
     });
@@ -45,13 +45,13 @@ describe("service storage engines", () => {
     expect(parsed.success).toBe(false);
   });
 
-  for (const mode of ["sqlite", "postgres"] as const) {
-    test(`continues to accept existing ${mode} service manifests`, () => {
+  for (const backend of ["sqlite", "postgresql"] as const) {
+    test(`accepts ${backend} service manifests`, () => {
       const parsed = ServiceContractManifestSchema.safeParse({
         ...baseServiceManifest,
         storage: {
-          mode,
-          engines: ["sqlite", "postgres"],
+          backend,
+          engines: ["sqlite", "postgresql"],
           envPrefix: "HASNA_IDENTITIES_",
           sqlitePath: "~/.hasna/identities/identities.db"
         }

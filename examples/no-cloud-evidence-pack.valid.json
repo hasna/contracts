@@ -19,7 +19,6 @@
     "packageName": "@hasna/todos",
     "packageVersion": "0.11.62",
     "appId": "open-todos",
-    "storageMode": "app_owned_cloud",
     "cloudBoundary": "app_owned",
     "cloudResources": [
       {

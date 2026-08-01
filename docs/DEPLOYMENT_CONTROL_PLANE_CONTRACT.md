@@ -309,7 +309,7 @@ environment. It MUST include:
 
 - product projection ID and revision;
 - environment identity and classification;
-- the environment's data backend (`sqlite` or `postgres`);
+- the environment's data backend (`sqlite` or `postgresql`);
 - provider connection reference and provider capability snapshot digest;
 - typed account, region, cluster, network, storage, and routing locators;
 - policy, authorization, data-classification, backup, and rollback profiles;
@@ -703,7 +703,7 @@ contractVersion: v2
   modes, reconciliation, and readiness gates;
 - declare package, installed-artifact, schema-drift, parity, auth-negative,
   no-secret, and evidence-bundle smokes;
-- keep the package's `sqlite | postgres` data-backend switch as the only
+- keep the package's `sqlite | postgresql` server-backend switch as the only
   storage axis; the removed placement vocabulary MUST NOT reappear in v2.
 
 The implementation MUST keep v1 exports and validation available. It MUST ship

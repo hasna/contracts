@@ -12,8 +12,8 @@ runtime evidence.
 | Data backend | Source of truth | Required proof |
 | --- | --- | --- |
 | `sqlite` | Local SQLite or local files on the operator machine. | Isolated data-dir smoke, migration/schema version check, backup/export path, local delete behavior. |
-| `postgres` (operator-run) | App-owned Postgres/S3 run by the operator — a user's own infra or Hasna's internal AWS. | Postgres migrations, readiness, TLS, backup/restore, RLS/boundary checks when shared, and operator runbook. |
-| `postgres` (Hasna SaaS) | Managed multi-tenant SaaS service. | All operator-run proofs plus tenant isolation, RLS, PITR/restore evidence, retention/export/delete, support/audit access, and live provider reconciliation where applicable. |
+| `postgresql` (operator-run) | App-owned Postgres/S3 run by the operator — a user's own infra or Hasna's internal AWS. | Postgres migrations, readiness, TLS, backup/restore, RLS/boundary checks when shared, and operator runbook. |
+| `postgresql` (Hasna SaaS) | Managed multi-tenant SaaS service. | All operator-run proofs plus tenant isolation, RLS, PITR/restore evidence, retention/export/delete, support/audit access, and live provider reconciliation where applicable. |
 
 `remote` is not a backend. It only means the runtime is on another machine.
 Do not use `remote` to make readiness claims.
@@ -22,7 +22,7 @@ Do not use `remote` to make readiness claims.
 
 Every repo must declare:
 
-- Supported backends: `sqlite`, `postgres`, or explicit unsupported reason
+- Supported backends: `sqlite`, `postgresql`, or explicit unsupported reason
   per backend.
 - Authoritative store per backend.
 - Derived stores and caches.
@@ -154,7 +154,7 @@ evidence.
 
 ## Readiness Checklist
 
-- Backend declaration uses `sqlite` and `postgres` correctly.
+- Backend declaration uses `sqlite` and `postgresql` correctly.
 - Source of truth is declared for each backend.
 - Derived stores and caches are declared.
 - Fresh-database migration test passes.

@@ -10,8 +10,6 @@
 import { envToken } from "../env-token.js";
 
 export interface ClientTransportEnvKeys {
-  /** Mode keys, in precedence order. */
-  modeKeys: string[];
   /** API base-URL keys, in precedence order. */
   apiUrlKeys: string[];
   /** API-key keys, in precedence order. */
@@ -22,12 +20,6 @@ export interface ClientTransportEnvKeys {
 export function clientTransportEnvKeys(name: string): ClientTransportEnvKeys {
   const envSegment = envToken(name);
   return {
-    modeKeys: [
-      `HASNA_${envSegment}_STORAGE_MODE`,
-      `HASNA_${envSegment}_MODE`,
-      `${envSegment}_STORAGE_MODE`,
-      `${envSegment}_MODE`,
-    ],
     apiUrlKeys: [`HASNA_${envSegment}_API_URL`, `${envSegment}_API_URL`],
     apiKeyKeys: [`HASNA_${envSegment}_API_KEY`, `${envSegment}_API_KEY`],
   };

@@ -7,8 +7,8 @@
 //   4. Store-owning repos declare a supported local engine + PostgreSQL capability
 //      and a live-PG gate, or carry an explicit, unexpired storage-engine waiver.
 //   5. Public manifests do not expose private infrastructure references.
-//   6. Env parsing follows the HASNA_<NAME>_STORAGE_MODE spec and any mode env
-//      value normalizes to the sqlite|postgres backend enum (mode enum compliance).
+//   6. Server backend resolution follows DATABASE_URL presence and rejects
+//      legacy storage-mode variables.
 //   7. If a `<name>-serve` bin exists, the health payload (when sampled) has the
 //      { status, version, mode } shape.
 //   8. No forbidden shared cloud runtimes (reuses the no-cloud guard).
@@ -29,7 +29,11 @@ import {
   type StorageEngine
 } from "./schemas";
 import { loadServiceContractManifest, type LoadServiceContractResult } from "./service-contract";
-import { normalizeStorageMode, storageEnvKeys, type Env } from "./mode";
+import {
+  resolveServerDataBackend,
+  serverDataBackendEnvKeys,
+  type Env,
+} from "./server-backend";
 import { API_KEY_TOKEN_PATTERN } from "./auth/keys";
 import { scanNoCloudTarget } from "./no-cloud";
 import { scanCredentialSeam } from "./credential-seam";
@@ -381,7 +385,7 @@ function analyzeStorageWaivers(manifest: ServiceContractManifest, nowMs: number)
     name: manifest.name,
     bins: manifest.bins,
     hosting: manifest.hosting,
-    storageMode: manifest.storage?.mode
+    storageBackend: manifest.storage?.backend
   });
   if (ineligible) {
     failures.push(`${ineligible}: ${declaredWaivers.map((waiver) => waiver.engine).join(", ")}`);
@@ -880,14 +884,14 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
       if (!LOCAL_STORAGE_ENGINES.some((engine) => declaredEngines.has(engine))) {
         failures.push(`missing local storage engine: ${LOCAL_STORAGE_ENGINES.join(" or ")}`);
       }
-      if (!declaredEngines.has("postgres")) failures.push("missing storage engine: postgres");
+      if (!declaredEngines.has("postgresql")) failures.push("missing storage engine: postgresql");
     }
     // `storage.envPrefix` and `storage.pgTestGate` both exist to serve the
     // PostgreSQL contract: the DATABASE_URL derivation and the live-PG proof.
     // Neither is required while a waiver speaks for PostgreSQL, because there
     // is no PostgreSQL boundary to derive or prove; a rejected waiver already
     // reports its own single, actionable remedy.
-    if (!storageWaivers.answeredEngines.has("postgres")) {
+    if (!storageWaivers.answeredEngines.has("postgresql")) {
       if (!manifest.storage?.envPrefix) failures.push("storage.envPrefix is required for the PostgreSQL DATABASE_URL contract");
       if (!manifest.storage?.pgTestGate) failures.push("storage.pgTestGate is required to prove live PostgreSQL support");
     }
@@ -901,8 +905,8 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
           : storageWaivers.summaries.length > 0
             ? `${declaredDetail}; ${storageWaivers.summaries.join("; ")}`
             : declaredEngines.has("json")
-              ? "json and postgres capabilities plus live-PG gate declared"
-              : "sqlite and postgres capabilities plus live-PG gate declared"
+              ? "json and postgresql capabilities plus live-PG gate declared"
+              : "sqlite and postgresql capabilities plus live-PG gate declared"
     });
   }
 
@@ -935,20 +939,22 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
         : "public OSS cores must declare the user-hosted product story"
   });
 
-  // Check 6: env parsing + storage mode enum compliance.
+  // Check 6: server backend configuration.
   const env = options.env ?? process.env;
-  const { modeKeys } = storageEnvKeys(manifest.name);
-  const modeEnvHit = modeKeys.map((key) => ({ key, value: env[key]?.trim() })).find((hit) => hit.value);
-  if (!modeEnvHit || !modeEnvHit.value) {
-    checks.push({ id: "mode_enum_compliance", status: "pass", detail: `no mode env set; defaults to sqlite (keys: ${modeKeys.join(", ")})` });
-  } else {
-    try {
-      const { mode } = normalizeStorageMode(modeEnvHit.value);
-      checks.push({ id: "mode_enum_compliance", status: "pass", detail: `${modeEnvHit.key} normalizes to '${mode}'` });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      checks.push({ id: "mode_enum_compliance", status: "fail", detail: `${modeEnvHit.key}: ${message}` });
-    }
+  try {
+    const resolution = resolveServerDataBackend(manifest.name, env);
+    const keys = serverDataBackendEnvKeys(manifest.name).databaseUrlKeys;
+    checks.push({
+      id: "server_backend_configuration",
+      status: "pass",
+      detail:
+        resolution.backend === "postgresql"
+          ? `${resolution.databaseUrlSource} selects postgresql`
+          : `no database URL set; defaults to sqlite (keys: ${keys.join(", ")})`,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    checks.push({ id: "server_backend_configuration", status: "fail", detail: message });
   }
 
   // Check 7: health shape when a serve bin exists.
@@ -959,7 +965,7 @@ export function runRepoConformance(repoRoot: string, options: RepoConformanceOpt
   } else {
     const result = HealthResponseSchema.safeParse(options.healthSample);
     if (result.success) {
-      checks.push({ id: "health_shape", status: "pass", detail: "GET /health payload matches { status, version, mode }" });
+      checks.push({ id: "health_shape", status: "pass", detail: "GET /health payload matches { status, version, backend }" });
     } else {
       checks.push({
         id: "health_shape",

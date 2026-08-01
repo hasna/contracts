@@ -36,7 +36,7 @@ Use `hasna.service_contract.v1` with:
 
 - `hosting`: `user-hosted` and, only when a managed control plane exists,
   `hasna-saas`.
-- `storage.mode`: the server's data backend, `sqlite` or `postgres`. The
+- `storage.backend`: the server's data backend, `sqlite` or `postgresql`. The
   removed placement vocabulary fails validation in any spelling. Do not use
   `remote` as a backend.
 - `serviceSurfaces[]`: typed API, SDK, MCP, and CLI records.
@@ -44,7 +44,7 @@ Use `hasna.service_contract.v1` with:
 - `serviceSurfaces[].status`: `supported`, `deferred`, or `unsupported`.
 - `serviceSurfaces[].deferReason`: required for `deferred` and `unsupported`.
 - `serviceSurfaces[kind=sdk].exportSubpath`: a real `package.json` export key.
-- `storage.engines`: both `sqlite` and `postgres` for store-owning OSS cores.
+- `storage.engines`: both `sqlite` and `postgresql` for store-owning OSS cores.
 - `storage.pgTestGate`: the disposable live-Postgres test env var and command;
   conformance records this command but never executes it.
 - `serviceSurfaces[].readinessGates[]`: auth, storage, secret-ref, migration,

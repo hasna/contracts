@@ -38,22 +38,12 @@ describe("resolveClientTransport — the client-flip contract", () => {
   test("no env => sqlite", () => {
     const r = resolveClientTransport("todos", {});
     expect(r.transport).toBe("sqlite");
-    expect(r.mode).toBe("sqlite");
+    expect(r.transportSource).toBe("default");
     expect(r.misconfigured).toBe(false);
   });
 
-  test("explicit sqlite backend never routes to the network even with url+key", () => {
+  test("url + key => http with /v1 base", () => {
     const r = resolveClientTransport("todos", {
-      HASNA_TODOS_STORAGE_MODE: "sqlite",
-      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
-      HASNA_TODOS_API_KEY: "hasna_todos_x",
-    });
-    expect(r.transport).toBe("sqlite");
-  });
-
-  test("postgres + url + key => http with /v1 base", () => {
-    const r = resolveClientTransport("todos", {
-      HASNA_TODOS_STORAGE_MODE: "postgres",
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
       HASNA_TODOS_API_KEY: "hasna_todos_abc",
     });
@@ -64,59 +54,40 @@ describe("resolveClientTransport — the client-flip contract", () => {
     expect(JSON.stringify(r)).not.toContain("hasna_todos_abc");
   });
 
-  test("url+key with NO mode env stays sqlite — presence never infers server data (owner ruling 2026-07-29)", () => {
+  test("url without key fails closed to sqlite and marks the connection incomplete", () => {
     const r = resolveClientTransport("todos", {
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
-      HASNA_TODOS_API_KEY: "hasna_todos_flip",
     });
     expect(r.transport).toBe("sqlite");
-    expect(r.mode).toBe("sqlite");
+    expect(r.transportSource).toBe("HASNA_TODOS_API_URL");
     expect(r.baseUrl).toBeNull();
-    expect(r.modeSource).toBe("default");
-    expect(r.misconfigured).toBe(false);
-    expect(r.apiKeyPresent).toBe(true);
-    expect(r.warning).toContain("HASNA_TODOS_STORAGE_MODE");
-    expect(JSON.stringify(r)).not.toContain("hasna_todos_flip");
-  });
-
-  test("url without key and no mode env stays sqlite (not misconfigured), with the same visibility warning", () => {
-    const r = resolveClientTransport("todos", {
-      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
-    });
-    expect(r.transport).toBe("sqlite");
-    expect(r.mode).toBe("sqlite");
-    expect(r.misconfigured).toBe(false);
-    expect(r.warning).toContain("HASNA_TODOS_STORAGE_MODE");
-  });
-
-  test("removed placement words in the mode env throw instead of aliasing", () => {
-    for (const word of ["local", "cloud", "self_hosted", "self-hosted", "remote", "hybrid"]) {
-      expect(
-        () =>
-          resolveClientTransport("knowledge", {
-            HASNA_KNOWLEDGE_MODE: word,
-            HASNA_KNOWLEDGE_API_KEY: "hasna_knowledge_k",
-          }),
-        `${word} must throw`,
-      ).toThrow(/runtime-placement axis was removed/);
-    }
-  });
-
-  test("postgres via the bare MODE alias key defaults the host", () => {
-    const r = resolveClientTransport("knowledge", {
-      HASNA_KNOWLEDGE_MODE: "postgres",
-      HASNA_KNOWLEDGE_API_KEY: "hasna_knowledge_k",
-    });
-    expect(r.transport).toBe("http");
-    expect(r.baseUrl).toBe("https://knowledge.your-deployment.example/v1");
-    expect(r.apiUrlSource).toBe("default");
     expect(r.misconfigured).toBe(true);
-    expect(r.warning).toContain("HASNA_FLEET_API_DOMAIN");
+    expect(r.warning).toContain("HASNA_TODOS_API_KEY");
+  });
+
+  test("legacy mode variables throw with API URL migration guidance", () => {
+    for (const key of [
+      "HASNA_KNOWLEDGE_STORAGE_MODE",
+      "HASNA_KNOWLEDGE_MODE",
+      "KNOWLEDGE_STORAGE_MODE",
+      "KNOWLEDGE_MODE",
+    ]) {
+      for (const value of ["cloud", "", "   "]) {
+        expect(
+          () =>
+            resolveClientTransport("knowledge", {
+              [key]: value,
+              HASNA_KNOWLEDGE_API_URL: "https://knowledge.example.com",
+              HASNA_KNOWLEDGE_API_KEY: "hasna_knowledge_k",
+            }),
+          `${key}=${JSON.stringify(value)} must throw`,
+        ).toThrow(/removed.*HASNA_KNOWLEDGE_API_URL/i);
+      }
+    }
   });
 
   test("explicit per-app API URL wins over a malformed fleet domain", () => {
     const r = resolveClientTransport("todos", {
-      HASNA_TODOS_STORAGE_MODE: "postgres",
       HASNA_TODOS_API_URL: "  https://api.customer.example/contracts/  ",
       HASNA_TODOS_API_KEY: "hasna_todos_custom",
       HASNA_FLEET_API_DOMAIN: "https://malformed.example/path",
@@ -127,105 +98,14 @@ describe("resolveClientTransport — the client-flip contract", () => {
     expect(r.misconfigured).toBe(false);
   });
 
-  test("valid fleet domain is trimmed, normalized, and used only as fallback", () => {
-    const r = resolveClientTransport("todos", {
-      HASNA_TODOS_STORAGE_MODE: "postgres",
-      HASNA_TODOS_API_KEY: "hasna_todos_fleet",
-      HASNA_FLEET_API_DOMAIN: "  Fleet.Customer.Example  ",
-    });
-    expect(r.transport).toBe("http");
-    expect(r.baseUrl).toBe("https://todos.fleet.customer.example/v1");
-    expect(r.apiUrlSource).toBe("HASNA_FLEET_API_DOMAIN");
+  test("fleet-domain helpers stay config-driven but never select a transport", () => {
     expect(fleetApiDomain({ HASNA_FLEET_API_DOMAIN: "  Fleet.Customer.Example  " })).toBe(
       "fleet.customer.example"
     );
-  });
-
-  test("whitespace-only fleet domain uses the neutral non-resolving placeholder", () => {
     const env = { HASNA_FLEET_API_DOMAIN: " \t\n " };
     expect(fleetApiDomain(env)).toBe("your-deployment.example");
     expect(defaultCloudBaseUrl("todos", env)).toBe("https://todos.your-deployment.example");
-
-    const r = resolveClientTransport("todos", {
-      ...env,
-      HASNA_TODOS_STORAGE_MODE: "postgres",
-      HASNA_TODOS_API_KEY: "hasna_todos_placeholder",
-    });
-    expect(r.transport).toBe("http");
-    expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
-    expect(r.apiUrlSource).toBe("HASNA_FLEET_API_DOMAIN");
-    expect(r.misconfigured).toBe(true);
-    expect(r.warning).toContain("HASNA_FLEET_API_DOMAIN");
-  });
-
-  test("malformed fleet domains deterministically use the neutral fallback and stay explicitly misconfigured", () => {
-    for (const malformedDomain of [
-      "https://fleet.customer.example/path",
-      "fleet.customer.example/path",
-      "fleet..customer.example",
-      "-fleet.customer.example",
-      "fleet.customer.example-",
-      "fléet.customer.example",
-      "xn--r8jz45g.customer.example",
-      "\nfleet.customer.example",
-    ]) {
-      const env = { HASNA_FLEET_API_DOMAIN: malformedDomain };
-      expect(fleetApiDomain(env)).toBe("your-deployment.example");
-      expect(defaultCloudBaseUrl("todos", env)).toBe("https://todos.your-deployment.example");
-
-      const r = resolveClientTransport("todos", {
-        HASNA_TODOS_STORAGE_MODE: "postgres",
-        HASNA_TODOS_API_KEY: "hasna_todos_invalid_domain",
-        HASNA_FLEET_API_DOMAIN: malformedDomain,
-      });
-      expect(r.transport).toBe("http");
-      expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
-      expect(r.apiUrlSource).toBe("HASNA_FLEET_API_DOMAIN");
-      expect(r.misconfigured).toBe(true);
-      expect(r.warning).toContain("HASNA_FLEET_API_DOMAIN");
-    }
-  });
-
-  test("hostile fleet-domain authority text cannot reach an authenticated fetch", () => {
-    const env = {
-      HASNA_TODOS_STORAGE_MODE: "postgres",
-      HASNA_TODOS_API_KEY: "x",
-      HASNA_FLEET_API_DOMAIN: "fleet.customer.example\n@evil.example",
-    };
-    const r = resolveClientTransport("todos", env);
-    expect(r.transport).toBe("http");
-    expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
-    expect(r.apiUrlSource).toBe("HASNA_FLEET_API_DOMAIN");
-    expect(r.misconfigured).toBe(true);
-
-    let fetched = false;
-    expect(() =>
-      createClientTransport("todos", env, {
-        fetchImpl: async () => {
-          fetched = true;
-          return Response.json({ ok: true });
-        },
-      }),
-    ).toThrow(/HASNA_FLEET_API_DOMAIN/);
-    expect(fetched).toBe(false);
-  });
-
-  test("unset fleet domain uses the app-specific neutral fallback and is explicitly misconfigured", () => {
-    const r = resolveClientTransport("todos", {
-      HASNA_TODOS_STORAGE_MODE: "postgres",
-      HASNA_TODOS_API_KEY: "x",
-    });
-    expect(r.transport).toBe("http");
-    expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
-    expect(r.apiUrlSource).toBe("default");
-    expect(r.misconfigured).toBe(true);
-    expect(r.warning).toContain("HASNA_FLEET_API_DOMAIN");
-    expect(() =>
-      createClientTransport("todos", {
-        HASNA_TODOS_STORAGE_MODE: "postgres",
-        HASNA_TODOS_API_KEY: "x",
-      }),
-    ).toThrow(/HASNA_FLEET_API_DOMAIN/);
+    expect(resolveClientTransport("todos", { ...env, HASNA_TODOS_API_KEY: "x" }).transport).toBe("sqlite");
   });
 
   test("explicit API URLs reject raw controls and userinfo before authority parsing", () => {
@@ -243,7 +123,6 @@ describe("resolveClientTransport — the client-flip contract", () => {
     for (const apiUrl of unsafe) {
       expect(() => toV1BaseUrl(apiUrl)).toThrow();
       const env = {
-        HASNA_TODOS_STORAGE_MODE: "postgres",
         HASNA_TODOS_API_URL: apiUrl,
         HASNA_TODOS_API_KEY: "x",
       };
@@ -419,14 +298,6 @@ describe("resolveClientTransport — the client-flip contract", () => {
       expect(() => defaultCloudBaseUrl(invalid)).toThrow();
     }
 
-    const invalidResolution = resolveClientTransport("todos/path", {
-      "HASNA_TODOS/PATH_STORAGE_MODE": "postgres",
-      "HASNA_TODOS/PATH_API_KEY": "x",
-    });
-    expect(invalidResolution.transport).toBe("sqlite");
-    expect(invalidResolution.baseUrl).toBeNull();
-    expect(invalidResolution.misconfigured).toBe(true);
-    expect(invalidResolution.warning).toContain("one lowercase DNS label");
   });
 
   test("default host validates the composed app-prefix and fleet-domain length", () => {
@@ -443,57 +314,34 @@ describe("resolveClientTransport — the client-flip contract", () => {
       "https://todos.your-deployment.example",
     );
 
-    const r = resolveClientTransport("todos", {
-      ...env,
-      HASNA_TODOS_STORAGE_MODE: "postgres",
-      HASNA_TODOS_API_KEY: "x",
-    });
-    expect(r.transport).toBe("http");
-    expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
-    expect(r.apiUrlSource).toBe("HASNA_FLEET_API_DOMAIN");
-    expect(r.misconfigured).toBe(true);
-    expect(r.warning).toMatch(/composed cloud hostname/i);
-
-    let fetched = false;
-    expect(() =>
-      createClientTransport("todos", {
-        ...env,
-        HASNA_TODOS_STORAGE_MODE: "postgres",
-        HASNA_TODOS_API_KEY: "x",
-      }, {
-        fetchImpl: async () => {
-          fetched = true;
-          return Response.json({ ok: true });
-        },
-      }),
-    ).toThrow(/composed cloud hostname/i);
-    expect(fetched).toBe(false);
   });
 
-  test("STORAGE_MODE=cloud (bare alias) is honored", () => {
+  test("bare API aliases select HTTP", () => {
     const r = resolveClientTransport("todos", {
-      TODOS_STORAGE_MODE: "postgres",
       TODOS_API_URL: "https://todos.your-deployment.example",
       TODOS_API_KEY: "hasna_todos_z",
     });
     expect(r.transport).toBe("http");
-    expect(r.modeSource).toBe("TODOS_STORAGE_MODE");
+    expect(r.transportSource).toBe("TODOS_API_URL");
   });
 
-  test("cloud requested but NO key => local + misconfigured (never silent wrong data)", () => {
-    const r = resolveClientTransport("todos", { HASNA_TODOS_STORAGE_MODE: "postgres" });
+  test("API URL configured but NO key => local + misconfigured (never silent wrong data)", () => {
+    const r = resolveClientTransport("todos", {
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
+    });
     expect(r.transport).toBe("sqlite");
     expect(r.misconfigured).toBe(true);
     expect(r.warning).toContain("HASNA_TODOS_API_KEY");
   });
 
-  test("createClientTransport throws on misconfigured cloud", () => {
-    expect(() => createClientTransport("todos", { HASNA_TODOS_STORAGE_MODE: "postgres" })).toThrow();
+  test("createClientTransport throws on a URL without credentials", () => {
+    expect(() => createClientTransport("todos", {
+      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
+    })).toThrow();
   });
 
   test("env-key spec + defaults", () => {
     const keys = clientTransportEnvKeys("agent-registry");
-    expect(keys.modeKeys[0]).toBe("HASNA_AGENT_REGISTRY_STORAGE_MODE");
     expect(keys.apiUrlKeys[0]).toBe("HASNA_AGENT_REGISTRY_API_URL");
     expect(keys.apiKeyKeys[0]).toBe("HASNA_AGENT_REGISTRY_API_KEY");
     expect(defaultCloudBaseUrl("agent-registry")).toBe("https://agent-registry.your-deployment.example");
@@ -895,7 +743,6 @@ wildcardGate.describe("end-to-end data-source flip (real HTTP loopback)", () => 
   }
 
   const cloudEnv = {
-    HASNA_DEMO_STORAGE_MODE: "postgres",
     HASNA_DEMO_API_URL: "", // filled in test (dynamic port)
     HASNA_DEMO_API_KEY: EXPECTED_KEY,
   };
@@ -984,7 +831,6 @@ describe("credential resolution at the seam", () => {
 
     const r = resolveClientTransport("todos", {
       HOME: home,
-      HASNA_TODOS_STORAGE_MODE: "postgres",
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
       HASNA_TODOS_API_KEY: "stale-revoked-env-key",
     });
@@ -1003,7 +849,6 @@ describe("credential resolution at the seam", () => {
       "todos",
       {
         HOME: home,
-        HASNA_TODOS_STORAGE_MODE: "postgres",
         HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
         HASNA_TODOS_API_KEY: "stale-revoked-env-key",
       },
@@ -1029,7 +874,6 @@ describe("credential resolution at the seam", () => {
       "todos",
       {
         HOME: home,
-        HASNA_TODOS_STORAGE_MODE: "postgres",
         HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
       },
       {
@@ -1179,49 +1023,42 @@ describe("credential resolution at the seam", () => {
     const r = resolveClientTransport("todos", { HOME: home });
 
     expect(r.transport).toBe("sqlite");
-    expect(r.mode).toBe("sqlite");
     expect(r.misconfigured).toBe(false);
   });
 
-  test("BOUNDARY: an explicit sqlite backend still ignores a disk credential", () => {
+  test("BOUNDARY: a disk credential without an API URL cannot select HTTP", () => {
     const home = credHome();
     writeKeyFile(home, "todos", "disk-key");
 
-    const r = resolveClientTransport("todos", {
-      HOME: home,
-      HASNA_TODOS_STORAGE_MODE: "sqlite",
-      HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
-    });
+    const r = resolveClientTransport("todos", { HOME: home });
 
     expect(r.transport).toBe("sqlite");
   });
 
   // -------------------------------------------------------------------------
-  // OWNER RULING 2026-07-29: a local->network transition is EXPLICITLY
-  // signalled, never inferred — not from a URL plus an API key in the
-  // environment, and not from a URL plus a credential file appearing on disk.
-  // These tests fail if either half of that inference ever returns.
+  // CURRENT CONTRACT: transport is selected by connection configuration.
+  // An API URL plus a credential selects HTTP. With no URL the client is local
+  // SQLite, and server data-backend settings never participate.
   // -------------------------------------------------------------------------
 
-  test("RULING: url in env + credential file on DISK, no mode env => stays sqlite (disk half never infers)", () => {
+  test("URL in env + credential file on disk selects HTTP", () => {
     const home = credHome();
-    writeKeyFile(home, "todos", "disk-key-must-not-flip");
+    const diskPath = writeKeyFile(home, "todos", "disk-key");
 
     const r = resolveClientTransport("todos", {
       HOME: home,
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
     });
 
-    expect(r.transport).toBe("sqlite");
-    expect(r.mode).toBe("sqlite");
-    expect(r.modeSource).toBe("default");
-    expect(r.baseUrl).toBeNull();
+    expect(r.transport).toBe("http");
+    expect(r.transportSource).toBe("HASNA_TODOS_API_URL");
+    expect(r.apiKeyTier).toBe("disk");
+    expect(r.apiKeySource).toBe(diskPath);
     expect(r.misconfigured).toBe(false);
-    expect(r.warning).toContain("HASNA_TODOS_STORAGE_MODE");
-    expect(JSON.stringify(r)).not.toContain("disk-key-must-not-flip");
+    expect(JSON.stringify(r)).not.toContain("disk-key");
   });
 
-  test("RULING: url + key both in ENV, no mode env => stays sqlite (env half never infers)", () => {
+  test("URL and key in env select HTTP", () => {
     const home = credHome();
 
     const r = resolveClientTransport("todos", {
@@ -1230,22 +1067,20 @@ describe("credential resolution at the seam", () => {
       HASNA_TODOS_API_KEY: "env-key-must-not-flip",
     });
 
-    expect(r.transport).toBe("sqlite");
-    expect(r.mode).toBe("sqlite");
-    expect(r.modeSource).toBe("default");
-    expect(r.baseUrl).toBeNull();
+    expect(r.transport).toBe("http");
+    expect(r.transportSource).toBe("HASNA_TODOS_API_URL");
+    expect(r.baseUrl).toBe("https://todos.your-deployment.example/v1");
     expect(r.misconfigured).toBe(false);
     expect(r.apiKeyPresent).toBe(true);
     expect(JSON.stringify(r)).not.toContain("env-key-must-not-flip");
   });
 
-  test("RULING positive control: the explicit signal still routes — postgres mode + url + disk credential => http", () => {
+  test("API URL plus disk credential is the positive HTTP route", () => {
     const home = credHome();
-    const diskPath = writeKeyFile(home, "todos", "explicit-mode-disk-key");
+    const diskPath = writeKeyFile(home, "todos", "disk-key");
 
     const r = resolveClientTransport("todos", {
       HOME: home,
-      HASNA_TODOS_STORAGE_MODE: "postgres",
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
     });
 
@@ -1254,13 +1089,12 @@ describe("credential resolution at the seam", () => {
     expect(r.apiKeySource).toBe(diskPath);
   });
 
-  test("postgres backend with NO env key now resolves from disk instead of degrading to sqlite", () => {
+  test("API URL with NO env key resolves from disk", () => {
     const home = credHome();
     const diskPath = writeKeyFile(home, "todos", "disk-key");
 
     const r = resolveClientTransport("todos", {
       HOME: home,
-      HASNA_TODOS_STORAGE_MODE: "postgres",
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
     });
 
@@ -1269,12 +1103,11 @@ describe("credential resolution at the seam", () => {
     expect(r.misconfigured).toBe(false);
   });
 
-  test("postgres backend with neither disk nor env key still fails closed to sqlite + misconfigured", () => {
+  test("API URL with neither disk nor env key fails closed to sqlite + misconfigured", () => {
     const home = credHome();
 
     const r = resolveClientTransport("todos", {
       HOME: home,
-      HASNA_TODOS_STORAGE_MODE: "postgres",
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
     });
 
@@ -1291,7 +1124,6 @@ describe("credential resolution at the seam", () => {
       "todos",
       {
         HOME: home,
-        HASNA_TODOS_STORAGE_MODE: "postgres",
         HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
         HASNA_TODOS_API_KEY: "env-key",
       },
@@ -1314,7 +1146,6 @@ describe("credential resolution at the seam", () => {
 
     const r = resolveClientTransport("todos", {
       HOME: home,
-      HASNA_TODOS_STORAGE_MODE: "postgres",
       HASNA_TODOS_API_URL: "https://todos.your-deployment.example",
     });
 

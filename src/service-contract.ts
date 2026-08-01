@@ -16,7 +16,10 @@ import {
   type ServiceContractManifest
 } from "./schemas";
 
-import { storageEnvKeys, type StorageEnvKeys } from "./mode";
+import {
+  serverDataBackendEnvKeys,
+  type ServerDataBackendEnvKeys,
+} from "./server-backend";
 
 export const SERVICE_CONTRACT_MANIFEST_FILENAME = "hasna.contract.json";
 
@@ -37,7 +40,7 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
   $id: "https://github.com/hasna/contracts/schema/hasna.service_contract.v1.json",
   title: "Hasna Service Contract v1",
   description:
-    "Repo self-description (hasna.contract.json) for the Hasna Service Contract v1. Hosting story, product surfaces, and storage capabilities are separate declarations; the storage backend (sqlite | postgres) is the only runtime switch.",
+    "Repo self-description (hasna.contract.json) for the Hasna Service Contract v1. Hosting story, product surfaces, and storage capabilities are separate declarations; the server data backend (sqlite | postgresql) is the only technical switch.",
   type: "object",
   additionalProperties: false,
   required: ["schema", "name", "class", "contractVersion", "kitVersion"],
@@ -53,9 +56,9 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
         required: ["storage"],
         properties: {
           storage: {
-            required: ["mode", "envPrefix"],
+            required: ["backend", "envPrefix"],
             properties: {
-              mode: { const: "postgres" }
+              backend: { const: "postgresql" }
             }
           }
         }
@@ -196,15 +199,15 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
     storage: {
       type: "object",
       additionalProperties: false,
-      required: ["mode"],
+      required: ["backend"],
       properties: {
-        mode: {
-          enum: ["sqlite", "postgres"],
-          description: "Active data backend. sqlite|postgres ONLY — the single runtime switch."
+        backend: {
+          enum: ["sqlite", "postgresql"],
+          description: "Active server data backend. sqlite|postgresql only."
         },
         engines: {
           type: "array",
-          items: { enum: ["sqlite", "json", "postgres"] },
+          items: { enum: ["sqlite", "json", "postgresql"] },
           minItems: 1,
           uniqueItems: true,
           description: "Supported storage engines; capability metadata independent of the active backend."
@@ -299,7 +302,7 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
                 }
               },
               description:
-                "Explicit storage-engine exceptions, at most one per engine. Only a CLI-only cli-with-store repo (no <name>-serve bin, storage.mode sqlite, no hasna-saas story) may waive postgres; sqlite is never waivable, expiresAt is a UTC RFC 3339 timestamp, and conformance stops honouring a waiver once it has passed."
+                "Explicit storage-engine exceptions, at most one per engine. Only a CLI-only cli-with-store repo (no <name>-serve bin, storage.backend sqlite, no hasna-saas story) may waive postgresql; sqlite is never waivable, expiresAt is a UTC RFC 3339 timestamp, and conformance stops honouring a waiver once it has passed."
             }
           }
         }
@@ -346,7 +349,7 @@ export function loadServiceContractManifest(repoRoot: string): LoadServiceContra
 /** Full canonical env-key + ref spec derived from an app name. */
 export interface ServiceContractSpec {
   name: string;
-  env: StorageEnvKeys;
+  env: ServerDataBackendEnvKeys;
   /** Legacy/private-tier helper; never persist this value in a public manifest. */
   databaseUrlSecretRef: string;
   sqlitePath: string;
@@ -356,7 +359,7 @@ export interface ServiceContractSpec {
 export function serviceContractSpec(name: string): ServiceContractSpec {
   return {
     name,
-    env: storageEnvKeys(name),
+    env: serverDataBackendEnvKeys(name),
     databaseUrlSecretRef: databaseUrlSecretRefFor(name),
     sqlitePath: defaultSqlitePathFor(name),
     allowedBins: allowedBinsForName(name)

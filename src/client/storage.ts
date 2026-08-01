@@ -13,8 +13,8 @@
 //   delete -> DELETE /v1/<resource>/<id>       -> void       (204/404 => ok)
 //
 // An app's storage resolver selects this client when the client-flip contract
-// resolves to `http` (backend EXPLICITLY set to postgres via a mode env, and a
-// credential resolves), and falls through to the local sqlite store otherwise.
+// resolves to `http` (an API URL and credential are configured), and falls
+// through to the local sqlite store otherwise.
 // See `resolveClientTransport` / `createClientTransport` in ./transport.ts.
 //
 // Guarantees carried up from the transport: JSON in/out, per-request timeout,
@@ -25,7 +25,7 @@
 // SAFETY: never logs, returns, or embeds the API key. The key lives only inside
 // the transport it wraps.
 
-import type { Env } from "../mode.js";
+import type { Env } from "../env-token.js";
 import {
   createClientTransport,
   HasnaHttpError,
@@ -213,8 +213,8 @@ export type ResolveStorageClientResult =
 
 /**
  * The one call an app's storage resolver makes. Reads the client-flip env for
- * `name`; when it resolves to `http` (backend explicitly set to postgres and a
- * credential resolves), returns a ready {@link HasnaStorageClient}. Otherwise returns
+ * `name`; when an API URL and credential resolve to `http`, returns a ready
+ * {@link HasnaStorageClient}. Otherwise returns
  * `{ transport: 'sqlite', client: null }` so the app uses its local store.
  * Throws if server data was requested but is misconfigured (so callers never
  * silently read the wrong dataset).

@@ -282,15 +282,15 @@ operations and emit redacted proof.
 
 `vendor-kit` stamps a canonical, self-contained Postgres storage kit into a
 target repo at `src/generated/storage-kit/`. The kit is **vendored** (copied
-source, zero runtime dependency on `@hasna/contracts`) and is **PURE REMOTE**
-per Amendment A1: it contains no sync engine, no cache-as-mode, and no merge
-logic. It ships:
+source, zero runtime dependency on `@hasna/contracts`) and provides direct
+server persistence: it contains no sync engine, cache backend, or merge logic.
+It ships:
 
 | File            | Purpose                                                              |
 | --------------- | ------------------------------------------------------------------- |
-| `mode.ts`       | Storage-mode + env resolution (`local` \| `cloud`), per the contract |
+| `backend.ts`    | Server backend + `DATABASE_URL` resolution (`sqlite` \| `postgresql`) |
 | `tls.ts`        | The one correct TLS approach (libpq `sslmode` semantics + RDS CA)    |
-| `pool.ts`       | `pg.Pool` factory (`createPgPool`, `createCloudPoolFromEnv`)         |
+| `pool.ts`       | `pg.Pool` factory (`createPgPool`, `createServerPoolFromEnv`)        |
 | `query.ts`      | Typed query wrapper: `query` / `many` / `get` / `one` / `execute`    |
 | `migrations.ts` | `schema_migrations` ledger with sha256 checksums + drift guards      |
 | `health.ts`     | `checkHealth` (SELECT 1) and `checkReady` (migrated?) probes         |
@@ -350,11 +350,11 @@ is identical via `honoApiKey`):
 
 ```ts
 import { expressApiKey, ApiKeyStore } from "@hasna/contracts/auth";
-import { createCloudPoolFromEnv } from "./generated/storage-kit"; // vendored kit
+import { createServerPoolFromEnv } from "./generated/storage-kit"; // vendored kit
 
 const APP = "todos";
 const signingCredential = process.env.HASNA_TODOS_API_SIGNING_KEY!; // shared: HASNA_API_SIGNING_KEY
-const { client } = createCloudPoolFromEnv(APP);                 // RDS pool (Amendment A1)
+const { client } = createServerPoolFromEnv(APP);                // PostgreSQL pool
 const keys = new ApiKeyStore(client);
 await keys.ensureSchema();                                      // idempotent: api_keys table
 
@@ -463,28 +463,17 @@ Seam](docs/AUTH_RBAC_VERIFIER_CONTRACT.md#identity-seam-offline-eddsa-fleet-toke
 | `HASNA_<APP>_API_SIGNING_KEY`  | HMAC signing secret (falls back to `HASNA_API_SIGNING_KEY`) |
 | `HASNA_<APP>_DATABASE_URL`     | RDS URL for the `api_keys` store (revocation lookups)      |
 
-**Client env vars (HTTP transport to an operator-run server):**
+**Client env vars (HTTP transport to a server):**
 
-- `HASNA_<APP>_STORAGE_MODE=postgres` — the REQUIRED explicit signal that the
-  client's data lives behind the HTTP API. Neither an endpoint nor a credential
-  (in the environment or on disk) selects network transport on its own or in
-  combination; a URL configured without this signal stays on the local sqlite
-  store and surfaces a warning.
-- `HASNA_<APP>_API_URL` + `HASNA_<APP>_API_KEY` — the explicit per-app URL
+- `HASNA_<APP>_API_URL` + `HASNA_<APP>_API_KEY` — the per-app URL and a
+  credential select HTTP. Without an API URL the client uses local SQLite; a
+  URL without a credential fails closed rather than reading the wrong dataset.
+  The URL
   always wins and is normalized to `/v1`. Explicit URLs require canonical ASCII
   authorities without credentials, controls, IDN/punycode, query strings, or
   fragments, parser-normalized host forms, or invalid DNS labels. HTTPS paths
   and ports are preserved; HTTP is accepted only for an exact loopback authority
   used by local development.
-- If the per-app URL is blank or absent, a valid `HASNA_FLEET_API_DOMAIN`
-  supplies the domain suffix for `https://<app>.<domain>/v1`.
-- The composed `<app>.<domain>` host must remain within DNS label and total-name
-  limits. If the fleet domain is missing, blank, malformed, or too long once the
-  app prefix is added, resolution uses the app-specific neutral, non-resolving
-  `https://<app>.your-deployment.example/v1` placeholder and marks the
-  configuration `misconfigured`. The high-level client throws before
-  constructing an authenticated transport, so an API key is never sent to the
-  placeholder or to a parser-confused authority.
 - Authenticated client requests never follow HTTP redirects. Every 3xx response,
   including a same-origin redirect, is returned as a fail-closed
   `HasnaHttpError`; API keys, bearer credentials, custom headers, and request
@@ -492,9 +481,7 @@ Seam](docs/AUTH_RBAC_VERIFIER_CONTRACT.md#identity-seam-offline-eddsa-fleet-toke
 
 The short aliases `<APP>_API_URL` and `<APP>_API_KEY` remain supported after the
 canonical `HASNA_` names. Client configuration uses an HTTP API URL, never a
-database DSN. The same explicit `HASNA_<APP>_STORAGE_MODE=postgres` signal is
-required whether the URL is explicit or comes from the fleet-domain default —
-presence of connection material never infers the backend.
+database DSN or server-backend setting.
 
 Scope grammar is `<app>:<action>` with wildcards (`*`, `<app>:*`, `*:<action>`).
 
@@ -514,8 +501,8 @@ contracts issue-key --app todos --scopes 'todos:read' --no-store --json
 Signing secret is read from `HASNA_<APP>_API_SIGNING_KEY` (then `HASNA_API_SIGNING_KEY`);
 the record store uses `HASNA_<APP>_DATABASE_URL` (or `--database-url-env`).
 
-The hashed record always lands in Postgres. Client-transport configuration
-(`HASNA_<APP>_STORAGE_MODE`, `HASNA_<APP>_API_URL`, `HASNA_<APP>_API_KEY`) selects
+The hashed record always lands in PostgreSQL. Client-transport configuration
+(`HASNA_<APP>_API_URL`, `HASNA_<APP>_API_KEY`) selects
 the transport for that app's *data* and neither diverts nor blocks this write:
 there is no `api-keys` operation in the operation manifest or in any app's served
 OpenAPI document, so `issue-key` ships no HTTP writer that would have to guess

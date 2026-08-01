@@ -217,8 +217,8 @@ wildcardGate.describe("resolveStorageClient — the resolver an app wires", () =
     expect(r.client).toBeNull();
   });
 
-  test("postgres + url + key => http, full CRUD lands in the server store", async () => {
-    const env = { HASNA_DEMO_STORAGE_MODE: "postgres", HASNA_DEMO_API_URL: baseUrl, HASNA_DEMO_API_KEY: KEY };
+  test("url + key => http, full CRUD lands in the server store", async () => {
+    const env = { HASNA_DEMO_API_URL: baseUrl, HASNA_DEMO_API_KEY: KEY };
     const r = resolveStorageClient("demo", env);
     expect(r.transport).toBe("http");
     const store = r.client!;
@@ -236,7 +236,7 @@ wildcardGate.describe("resolveStorageClient — the resolver an app wires", () =
     expect(cloud.size).toBe(0);
   });
 
-  test("postgres requested but no key => throws (never silent local drift)", () => {
-    expect(() => resolveStorageClient("demo", { HASNA_DEMO_STORAGE_MODE: "postgres" })).toThrow();
+  test("API URL configured but no key => throws (never silent local drift)", () => {
+    expect(() => resolveStorageClient("demo", { HASNA_DEMO_API_URL: baseUrl })).toThrow();
   });
 });

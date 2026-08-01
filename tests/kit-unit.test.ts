@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
-  normalizeStorageMode,
-  resolveStorageMode,
+  SERVER_DATA_BACKENDS,
+  resolveServerDataBackend,
   resolveDatabaseUrl,
-  storageEnvKeys,
-} from "../src/kit/templates/mode";
+  serverDataBackendEnvKeys,
+} from "../src/kit/templates/backend";
 import { resolveTlsConfig, sslModeFromConnectionString } from "../src/kit/templates/tls";
 import { wrapExecutor, type PgExecutor } from "../src/kit/templates/query";
 import {
@@ -16,38 +16,35 @@ import {
 import { checkHealth, checkReady } from "../src/kit/templates/health";
 import type { TypedQueryClient } from "../src/kit/templates/query";
 
-// --- mode.ts -------------------------------------------------------------
+// --- backend.ts ----------------------------------------------------------
 
-describe("kit mode resolution", () => {
-  test("normalizes the two backends and rejects removed placement words", () => {
-    expect(normalizeStorageMode("sqlite")).toEqual({ mode: "sqlite" });
-    expect(normalizeStorageMode("POSTGRES")).toEqual({ mode: "postgres" });
-    expect(normalizeStorageMode("postgresql")).toEqual({ mode: "postgres" });
-    for (const word of ["local", "cloud", "remote", "hybrid", "self-hosted"]) {
-      expect(() => normalizeStorageMode(word), `${word} must throw`).toThrow(
-        /runtime-placement axis was removed/,
-      );
-    }
-    expect(() => normalizeStorageMode("bogus")).toThrow(/Unknown storage mode/);
+describe("kit server backend resolution", () => {
+  test("exposes exactly sqlite|postgresql", () => {
+    expect(SERVER_DATA_BACKENDS).toEqual(["sqlite", "postgresql"]);
   });
 
-  test("env-key precedence and postgres warning", () => {
-    const keys = storageEnvKeys("todos");
-    expect(keys.modeKeys[0]).toBe("HASNA_TODOS_STORAGE_MODE");
+  test("database URL presence selects postgresql", () => {
+    const keys = serverDataBackendEnvKeys("todos");
     expect(keys.databaseUrlKeys[0]).toBe("HASNA_TODOS_DATABASE_URL");
 
-    const def = resolveStorageMode("todos", {});
-    expect(def.mode).toBe("sqlite");
+    const def = resolveServerDataBackend("todos", {});
+    expect(def.backend).toBe("sqlite");
     expect(def.source).toBe("default");
 
-    const pgNoUrl = resolveStorageMode("todos", { HASNA_TODOS_STORAGE_MODE: "postgres" });
-    expect(pgNoUrl.mode).toBe("postgres");
-    expect(pgNoUrl.warning).toContain("postgres storage needs");
-
-    const aliasEnv = resolveStorageMode("todos", { TODOS_STORAGE_MODE: "postgres", TODOS_DATABASE_URL: "postgres://x" });
-    expect(aliasEnv.mode).toBe("postgres");
+    const aliasEnv = resolveServerDataBackend("todos", {
+      TODOS_DATABASE_URL: "postgres://fixture.invalid/todos",
+    });
+    expect(aliasEnv.backend).toBe("postgresql");
     expect(aliasEnv.databaseUrlPresent).toBe(true);
-    expect(aliasEnv.warning).toContain("canonical key");
+    expect(aliasEnv.databaseUrlSource).toBe("TODOS_DATABASE_URL");
+  });
+
+  test("legacy mode variables fail with migration guidance", () => {
+    for (const value of ["cloud", "", "   "]) {
+      expect(() =>
+        resolveServerDataBackend("todos", { HASNA_TODOS_STORAGE_MODE: value }),
+      ).toThrow(/removed.*HASNA_TODOS_DATABASE_URL/i);
+    }
   });
 
   test("resolveDatabaseUrl honors alias but never logs value", () => {
