@@ -11,7 +11,27 @@ import {
   type ApiKeyClaims,
   type ApiKeyVerifyFailureReason,
 } from "./keys.js";
+import type { ApiKeyStatus } from "./store.js";
 import { isValidTenantId, ownTenantId, tenantIdsEqual } from "./tenant.js";
+
+/**
+ * Every reason a request can be refused, including the two the token verifier
+ * cannot see: no credential was sent at all, and the credential is authentic
+ * but names a key this service has no record of.
+ */
+export type AuthDenyReason =
+  | ApiKeyVerifyFailureReason
+  | "missing_token"
+  | "unknown_key"
+  /** The status lookup itself failed; the key was never judged. Deny, 503. */
+  | "status_unavailable";
+
+/**
+ * Resolve a key's lifecycle status. This is the strict, RECOMMENDED hook —
+ * `ApiKeyStore.keyStatus` implements it — and it is strict precisely because it
+ * can say `"unknown"`. Anything other than `"active"` denies.
+ */
+export type KeyStatusResolver = (kid: string) => ApiKeyStatus | Promise<ApiKeyStatus>;
 
 /** Header sources the middleware can read tokens from. */
 export type HeaderSource =
@@ -58,7 +78,7 @@ export interface AuthAuditEvent {
    * trail can answer "which organization did this" without re-parsing tokens.
    */
   tid: string | null;
-  reason: ApiKeyVerifyFailureReason | "missing_token" | null;
+  reason: AuthDenyReason | null;
   scopesRequired: string[];
   method: string | null;
   path: string | null;
@@ -70,7 +90,7 @@ export type AuthAuditHook = (event: AuthAuditEvent) => void | Promise<void>;
 
 export type AuthDecision =
   | { ok: true; status: 200; principal: ApiKeyPrincipal }
-  | { ok: false; status: 401 | 403; reason: ApiKeyVerifyFailureReason | "missing_token"; message: string };
+  | { ok: false; status: 401 | 403 | 503; reason: AuthDenyReason; message: string };
 
 export interface ApiKeyAuthContext {
   method?: string | null;
@@ -97,10 +117,37 @@ export interface VerifyApiKeyOptions {
   /** HMAC signing secret (server-held). Required — no insecure default. */
   signingSecret: string | Buffer;
   /**
-   * Revocation check: return true to DENY. Typically `store.isRevoked` (explicit
-   * revocations) or `store.statusChecker()` (strict: unknown or revoked deny).
+   * Lifecycle lookup for the presented key — the RECOMMENDED hook. Wire
+   * `store.keyStatus`. Anything other than `"active"` denies, including
+   * `"unknown"`, so a token this service has no record of cannot authenticate.
+   *
+   * Prefer this over {@link isRevoked} in every service. A boolean predicate
+   * cannot distinguish "known and fine" from "never heard of it", and that
+   * ambiguity is the whole defect: it resolved to ALLOW.
+   */
+  keyStatus?: KeyStatusResolver;
+  /**
+   * Revocation check: return true to DENY.
+   *
+   * @deprecated Lossy. Returns `false` both for an active key and for a key
+   * with no record at all, so it cannot refuse an unregistered kid. Supplying
+   * it now requires {@link allowUnregisteredKeys}, which makes the residual
+   * risk explicit and greppable. Use {@link keyStatus} instead.
    */
   isRevoked?: (kid: string) => boolean | Promise<boolean>;
+  /**
+   * Accept keys this service has no record of. **Unsafe, and deliberately
+   * awkward to type.**
+   *
+   * Defaults to `false`: a verifier must be able to refuse an unregistered kid,
+   * or say in its own source that it cannot. Set this only while a service is
+   * still migrating to registered keys — a key with no row cannot be revoked,
+   * because revocation writes `revoked_at` to a row that does not exist.
+   *
+   * Combines with {@link keyStatus}: unknown kids are tolerated, revoked and
+   * expired ones are still refused.
+   */
+  allowUnregisteredKeys?: boolean;
   /** Per-request audit hook. Fires on every allow and deny. */
   audit?: AuthAuditHook;
   /** Scopes required for every request this middleware guards. */
@@ -144,7 +191,10 @@ export function extractToken(source: HeaderSource, headerName = "x-api-key", sch
 }
 
 export interface ApiKeyVerifier {
-  /** Authenticate a request from its headers. Never throws on auth failure. */
+  /**
+   * Authenticate a request from its headers. Never throws — every failure,
+   * including an unavailable status lookup, comes back as a deny decision.
+   */
   authenticate(headers: HeaderSource, context?: ApiKeyAuthContext): Promise<AuthDecision>;
   readonly app: string;
 }
@@ -160,6 +210,53 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
   }
   if (options.expectedTid !== undefined && !isValidTenantId(options.expectedTid)) {
     throw new Error(`verifyApiKey received an invalid 'expectedTid': '${options.expectedTid}'.`);
+  }
+
+  // --- fail closed on the KEY-STATUS wiring, at construction, not per request ---
+  //
+  // This block exists because the previous default was ALLOW. A service that
+  // passed `isRevoked: store.isRevoked` accepted any validly-signed token whose
+  // kid had no `api_keys` row, and a service that passed no hook at all could
+  // not revoke a single one of its keys. Neither said so anywhere; both read as
+  // "auth is wired". So the check is a construction-time throw rather than a
+  // runtime deny: it fails at boot, in CI, in front of whoever wired it, rather
+  // than silently admitting traffic in production. A missing answer is not an
+  // answer of "yes".
+  //
+  // Read as OWN properties, for the same reason `ownTenantId` and the
+  // `expectedTid` read in `authenticate` exist. These three options decide
+  // fail-open versus fail-closed, so resolving them through the prototype chain
+  // would let ONE `Object.prototype.allowUnregisteredKeys = true` write do two
+  // things at once: flip every correctly-wired strict verifier back to
+  // accepting unknown kids, AND silence the construction-time throw that exists
+  // to catch exactly that. Both defenses would fall to a single write. A
+  // polluted `keyStatus`/`isRevoked` is worse still — it injects an
+  // attacker-chosen verdict. This file already applies the defense to
+  // `expectedTid`; an authentication on/off switch has a stronger claim to it.
+  const ownKeyStatus = Object.hasOwn(options, "keyStatus") ? options.keyStatus : undefined;
+  const ownIsRevoked = Object.hasOwn(options, "isRevoked") ? options.isRevoked : undefined;
+  const allowUnregistered =
+    Object.hasOwn(options, "allowUnregisteredKeys") && options.allowUnregisteredKeys === true;
+  if (ownKeyStatus && ownIsRevoked) {
+    throw new Error(
+      "verifyApiKey received both 'keyStatus' and 'isRevoked'. Supply exactly one — " +
+        "letting one silently win would hide which check is actually guarding the service. " +
+        "Use 'keyStatus' (store.keyStatus); drop 'isRevoked'.",
+    );
+  }
+  if (!ownKeyStatus && !allowUnregistered) {
+    throw new Error(
+      ownIsRevoked
+        ? "verifyApiKey was given only 'isRevoked', which cannot refuse a key this service has " +
+          "no record of: it returns false both for an active key and for one that was never " +
+          "registered, so an unregistered key is irrevocable. Wire 'keyStatus: store.keyStatus' " +
+          "(or 'isRevoked: store.statusChecker()'), or set 'allowUnregisteredKeys: true' to " +
+          "accept that risk explicitly."
+        : "verifyApiKey requires a key-status hook. Without one this service performs NO " +
+          "revocation check and cannot turn any of its keys off. Wire " +
+          "'keyStatus: store.keyStatus', or set 'allowUnregisteredKeys: true' to declare that " +
+          "this service intentionally cannot revoke keys.",
+    );
   }
   const headerName = options.headerName ?? "x-api-key";
   const scheme = options.scheme ?? "Bearer";
@@ -260,8 +357,73 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
       return { ok: false, status, reason: verified.reason, message: verified.message };
     }
 
-    if (options.isRevoked) {
-      const revoked = await options.isRevoked(verified.kid);
+    // The signature is authentic; now ask whether this specific key is still one
+    // we honour. `keyStatus` reports WHICH way it failed, so an operator reading
+    // the audit trail can tell a revoked key (we turned it off) from an unknown
+    // one (someone is presenting a key we never issued — the interesting case).
+    if (ownKeyStatus) {
+      // The status lookup is a per-request DB read in every realistic store, so
+      // it can fail independently of the credential. A thrown lookup must not
+      // escape: an unhandled rejection here hangs the request under Express 4
+      // (no response at all) instead of answering. It must equally not become
+      // an allow — an unavailable revocation check is exactly when an attacker
+      // wants one. So: deny, distinctly, with 503 rather than 401, because the
+      // credential was never judged and telling the client to re-authenticate
+      // would be a lie.
+      let status: ApiKeyStatus;
+      try {
+        status = await ownKeyStatus(verified.kid);
+      } catch {
+        await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, reason: "status_unavailable", scopesRequired: requiredScopes, method, path, status: 503, at });
+        return {
+          ok: false,
+          status: 503,
+          reason: "status_unavailable",
+          message: "Could not verify API key status. Try again shortly.",
+        };
+      }
+      if (status !== "active") {
+        // "unknown" is tolerated ONLY under the explicit opt-out; revoked and
+        // expired are refused regardless, since those are recorded decisions.
+        // Any value outside the union is treated as unknown: a store that
+        // answers something we do not understand has not said "active", and an
+        // unrecognized string must not be minted into the audit trail as if it
+        // were a reason the contract defines.
+        const known = status === "revoked" || status === "expired" || status === "unknown";
+        if (!(status === "unknown" && allowUnregistered)) {
+          const reason: AuthDenyReason =
+            status === "revoked" || status === "expired" ? status : "unknown_key";
+          const message =
+            reason === "unknown_key"
+              ? known
+                ? "API key is not registered with this service."
+                : "API key status could not be recognized."
+              : status === "expired"
+                ? "API key has expired."
+                : "API key has been revoked.";
+          await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, reason, scopesRequired: requiredScopes, method, path, status: 401, at });
+          return { ok: false, status: 401, reason, message };
+        }
+      }
+    } else if (ownIsRevoked) {
+      // Same treatment as `keyStatus` above. This path is deprecated, but a
+      // deprecated path still runs in production, and `isRevoked` is the same
+      // per-request DB read — so the same Postgres blip hung the same request.
+      // Wrapping it is what makes `authenticate`'s "never throws" contract
+      // true; leaving it unwrapped and softening the docstring instead would
+      // just move the defect from the code into the prose.
+      let revoked: boolean;
+      try {
+        revoked = await ownIsRevoked(verified.kid);
+      } catch {
+        await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, reason: "status_unavailable", scopesRequired: requiredScopes, method, path, status: 503, at });
+        return {
+          ok: false,
+          status: 503,
+          reason: "status_unavailable",
+          message: "Could not verify API key status. Try again shortly.",
+        };
+      }
       if (revoked) {
         await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, reason: "revoked", scopesRequired: requiredScopes, method, path, status: 401, at });
         return { ok: false, status: 401, reason: "revoked", message: "API key has been revoked." };

@@ -288,7 +288,7 @@ describe("verifyApiKey middleware (agnostic)", () => {
 
   test("allows a valid key and denies missing/invalid", async () => {
     const events: AuthAuditEvent[] = [];
-    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, audit: (e) => void events.push(e) });
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true, audit: (e) => void events.push(e) });
     const minted = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
 
     const ok = await verifier.authenticate({ "x-api-key": minted.token }, { method: "GET", path: "/tasks" });
@@ -304,7 +304,7 @@ describe("verifyApiKey middleware (agnostic)", () => {
   });
 
   test("scope enforcement returns 403", async () => {
-    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, requiredScopes: ["todos:write"] });
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true, requiredScopes: ["todos:write"] });
     const minted = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
     const decision = await verifier.authenticate({ "x-api-key": minted.token });
     expect(decision.ok).toBe(false);
@@ -318,7 +318,7 @@ describe("verifyApiKey middleware (agnostic)", () => {
     const store = new ApiKeyStore(new FakeStoreClient());
     const minted = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
     await store.insertMinted(minted);
-    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, isRevoked: store.isRevoked });
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, keyStatus: store.keyStatus });
 
     expect((await verifier.authenticate({ "x-api-key": minted.token })).ok).toBe(true);
     await store.revoke(minted.kid);
@@ -330,7 +330,7 @@ describe("verifyApiKey middleware (agnostic)", () => {
   test("expired token denied via middleware clock override", async () => {
     const nowMs = 1_700_000_000_000;
     const minted = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING, ttlSeconds: 60, nowMs });
-    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, nowMs: () => nowMs + 120_000 });
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true, nowMs: () => nowMs + 120_000 });
     const decision = await verifier.authenticate({ "x-api-key": minted.token });
     expect(decision.ok).toBe(false);
     if (!decision.ok) expect(decision.reason).toBe("expired");
@@ -341,7 +341,7 @@ describe("verifyApiKey middleware (agnostic)", () => {
   });
 
   test("express adapter sets req.apiKey and rejects", async () => {
-    const mw = expressApiKey({ app: "todos", signingSecret: SIGNING });
+    const mw = expressApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true });
     const minted = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
 
     const req: any = { headers: { "x-api-key": minted.token }, method: "GET", url: "/x" };
@@ -361,7 +361,7 @@ describe("verifyApiKey middleware (agnostic)", () => {
   });
 
   test("hono adapter sets context and rejects", async () => {
-    const mw = honoApiKey({ app: "todos", signingSecret: SIGNING });
+    const mw = honoApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true });
     const minted = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
 
     let stored: any;

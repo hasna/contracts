@@ -361,8 +361,8 @@ await keys.ensureSchema();                                      // idempotent: a
 app.use(
   expressApiKey({
     app: APP,
-  signingSecret: signingCredential,
-    isRevoked: keys.isRevoked,          // per-request revocation check against RDS
+    signingSecret: signingCredential,
+    keyStatus: keys.keyStatus,          // per-request status check against RDS: unknown, revoked, and expired kids all DENY
     requiredScopes: ["todos:read"],     // optional per-mount scope gate
     requireTenant: true,                // deny untenanted keys (org-scoped services)
     audit: (e) => log.info("api_auth", e), // per-request AUDIT hook (allow + deny)
@@ -371,7 +371,18 @@ app.use(
 // On success: req.apiKey = { kid, app, scopes, agent, tid, claims }
 ```
 
-Framework-agnostic core (for custom routers): `verifyApiKey({ app, signingSecret })`
+`keyStatus` is the required wiring: a validly-signed token whose kid has no
+`api_keys` row is refused with reason `unknown_key`, because a key with no row
+cannot be revoked (revocation writes `revoked_at` on the row). Constructing a
+verifier with no status hook — or with only the lossy boolean `isRevoked`, which
+cannot tell "active" from "never registered" — **throws at construction**. A
+service that genuinely cannot register its keys yet must say so in its own
+source with `allowUnregisteredKeys: true` (greppable, and the unsafe cases are
+then a worklist, not a default). Every key must be registered at issue time:
+`contracts issue-key` does this by default; `ApiKeyStore.insertMinted` is the
+programmatic path.
+
+Framework-agnostic core (for custom routers): `verifyApiKey({ app, signingSecret, keyStatus })`
 returns `{ authenticate(headers, ctx) }`. Tokens are read from the `x-api-key`
 header or `Authorization: Bearer <key>`.
 

@@ -368,3 +368,111 @@ describe("issue-key never loses the minted secret", () => {
     expect(verifyApiKeyToken(token, { signingSecret: SIGNING, expectedApp: "todos" }).ok).toBe(true);
   });
 });
+
+// --- unregistered / never-expires hazard warnings (todos 0cbc57a2) ---
+//
+// A key with no `api_keys` row is refused by every strict verifier AND cannot
+// be revoked (revocation writes `revoked_at` to a row that does not exist), and
+// a key with no expiry stays valid until someone notices it leaked. Both were
+// silent before; `issue-key` must now say so on every surface, and — the part
+// that makes it evidence rather than decoration — must NOT say so when the key
+// is fine.
+describe("issue-key hazard warnings", () => {
+  const baseEnv = { HASNA_TODOS_API_SIGNING_KEY: SIGNING, HASNA_TODOS_DATABASE_URL: "postgres://unused.example/unused" };
+
+  function okStore() {
+    return {
+      connectStore: async () => ({
+        store: { ensureSchema: async () => {}, insertMinted: async () => {} },
+        close: async () => {},
+      }),
+    };
+  }
+
+  test("JSON: --no-store yields revocable:false and an unregistered warning, token still returned", async () => {
+    const { reports, report } = collectReports();
+    const out = await captureStdout(async () => {
+      await runIssueKey(
+        { app: "todos", scopes: "todos:read", store: false, json: true },
+        { report, env: { HASNA_TODOS_API_SIGNING_KEY: SIGNING } },
+      );
+    });
+    expect(reports).toEqual([]);
+    const parsed = JSON.parse(out);
+    expect(parsed.stored).toBe(false);
+    expect(parsed.revocable).toBe(false);
+    expect(parsed.warnings.some((w: string) => w.startsWith("unregistered:"))).toBe(true);
+    // The secret is unrecoverable; a warning must never cost the operator the key.
+    expect(typeof parsed.token).toBe("string");
+    expect(parsed.token.length).toBeGreaterThan(0);
+  });
+
+  test("JSON: --no-expiry yields a no_expiry warning", async () => {
+    const { reports, report } = collectReports();
+    const out = await captureStdout(async () => {
+      await runIssueKey(
+        { app: "todos", scopes: "todos:read", expiry: false, json: true, ...{} },
+        { report, env: baseEnv, ...okStore() },
+      );
+    });
+    expect(reports).toEqual([]);
+    const parsed = JSON.parse(out);
+    expect(parsed.expiresAt).toBeNull();
+    expect(parsed.warnings.some((w: string) => w.startsWith("no_expiry:"))).toBe(true);
+  });
+
+  test("POSITIVE CONTROL: a stored, expiring key warns about NOTHING", async () => {
+    // Without this the assertions above pass against a generator that warns
+    // unconditionally — which would be worthless noise, not a signal.
+    const { reports, report } = collectReports();
+    const out = await captureStdout(async () => {
+      await runIssueKey(
+        { app: "todos", scopes: "todos:read", ttlDays: 90, json: true },
+        { report, env: baseEnv, ...okStore() },
+      );
+    });
+    expect(reports).toEqual([]);
+    const parsed = JSON.parse(out);
+    expect(parsed.stored).toBe(true);
+    expect(parsed.revocable).toBe(true);
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  test("JSON shape stays additive: every pre-existing key survives", async () => {
+    const { reports, report } = collectReports();
+    const out = await captureStdout(async () => {
+      await runIssueKey(
+        { app: "todos", scopes: "todos:read", ttlDays: 90, json: true },
+        { report, env: baseEnv, ...okStore() },
+      );
+    });
+    expect(reports).toEqual([]);
+    const parsed = JSON.parse(out);
+    for (const key of ["ok", "app", "kid", "agent", "tid", "scopes", "issuedAt", "expiresAt", "tokenHash", "bootstrap", "token", "stored"]) {
+      expect(Object.hasOwn(parsed, key)).toBe(true);
+    }
+  });
+
+  test("text: the persistence-failure path prints the warning AND preserves the token (no TDZ on `stored`)", async () => {
+    // This is the EARLIEST reachable printKeyBlock call — via reportStoreFailure
+    // when connectStore throws — so it is the one that would hit a temporal
+    // dead zone if `stored` were referenced before initialization.
+    const { report } = collectReports();
+    const out = await captureStdout(async () => {
+      await runIssueKey(
+        { app: "todos", scopes: "todos:read", expiry: false },
+        {
+          report,
+          env: baseEnv,
+          connectStore: async () => {
+            throw new Error("connection refused");
+          },
+        },
+      );
+    });
+    expect(out).toContain("NOT STORED");
+    expect(out).toContain("CANNOT BE REVOKED");
+    expect(out).toContain("NEVER EXPIRES");
+    expect(out).toContain("API key (shown once");
+  });
+});

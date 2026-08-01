@@ -182,6 +182,20 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
     console.log(`  record:    ${record}`);
     if (storeError) console.log(`  storeError: ${storeError}`);
     console.log(`  tokenHash: ${minted.tokenHash}`);
+    if (!stored) {
+      console.log("");
+      console.log("  WARNING: no api_keys record was stored for this key. Services that verify");
+      console.log("  key status (the default: keyStatus/statusChecker) will REFUSE it with");
+      console.log("  reason 'unknown_key', and it CANNOT BE REVOKED — revocation works by");
+      console.log(`  writing revoked_at on the '${table}' row, and there is no row. Register it`);
+      console.log("  with ApiKeyStore.insertMinted, or re-issue with the database URL set.");
+    }
+    if (expiresAt === null) {
+      console.log("");
+      console.log("  WARNING: this key NEVER EXPIRES. Fleet TTL policy is expiring keys");
+      console.log("  (default 90 days); a leaked forever-key stays valid until someone");
+      console.log("  notices. Prefer --ttl-days and rotate on schedule.");
+    }
     console.log("");
     console.log("  API key (shown once — copy it now, it cannot be recovered):");
     console.log(`  ${minted.token}`);
@@ -228,7 +242,16 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
   }
 
   if (json) {
-    console.log(JSON.stringify({ ok: true, ...keyMaterial, stored }, null, 2));
+    const warnings: string[] = [];
+    if (!stored) {
+      warnings.push(
+        "unregistered: no api_keys record stored — strict services (keyStatus/statusChecker) will refuse this key with reason 'unknown_key', and it cannot be revoked until a record exists",
+      );
+    }
+    if (expiresAt === null) {
+      warnings.push("no_expiry: this key never expires; fleet TTL policy is expiring keys (default 90 days)");
+    }
+    console.log(JSON.stringify({ ok: true, ...keyMaterial, stored, revocable: stored, warnings }, null, 2));
     return;
   }
 

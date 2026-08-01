@@ -221,6 +221,7 @@ describe("backwards compatibility with pre-tid tokens", () => {
     const verifier = verifyApiKey({
       app: "todos",
       signingSecret: SIGNING,
+      allowUnregisteredKeys: true,
       nowMs: () => LEGACY_NOW_MS,
       audit: (event) => void events.push(event),
     });
@@ -346,6 +347,7 @@ describe("tenanted API keys", () => {
       const verifier = verifyApiKey({
         app: "todos",
         signingSecret: SIGNING,
+        allowUnregisteredKeys: true,
         nowMs: () => LEGACY_NOW_MS,
         audit: (event) => void events.push(event),
       });
@@ -538,6 +540,7 @@ describe("tenant enforcement in the middleware", () => {
     const verifier = verifyApiKey({
       app: "todos",
       signingSecret: SIGNING,
+      allowUnregisteredKeys: true,
       requireTenant: true,
       audit: (event) => void events.push(event),
     });
@@ -548,7 +551,7 @@ describe("tenant enforcement in the middleware", () => {
   });
 
   test("tenant failures deny with 403, not 401 — the credential is authentic", async () => {
-    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, requireTenant: true });
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true, requireTenant: true });
     const untenanted = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
     const decision = await verifier.authenticate({ "x-api-key": untenanted.token });
     expect(decision.ok).toBe(false);
@@ -559,7 +562,7 @@ describe("tenant enforcement in the middleware", () => {
   });
 
   test("a per-call expectedTid guards an org-addressed route", async () => {
-    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING });
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true });
     const token = tenanted("acme-corp").token;
 
     const own = await verifier.authenticate({ "x-api-key": token }, { expectedTid: "acme-corp" });
@@ -579,7 +582,7 @@ describe("tenant enforcement in the middleware", () => {
     // holder of a valid token for this app — they all share the app's signing
     // secret — could defeat a service pinned to another tenant by addressing
     // their own org in the URL.
-    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, expectedTid: "acme-corp" });
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true, expectedTid: "acme-corp" });
     const evil = tenanted("evil-corp").token;
 
     const bypass = await verifier.authenticate({ "x-api-key": evil }, { expectedTid: "evil-corp" });
@@ -606,6 +609,7 @@ describe("tenant enforcement in the middleware", () => {
     const verifier = verifyApiKey({
       app: "todos",
       signingSecret: SIGNING,
+      allowUnregisteredKeys: true,
       expectedTid: "acme-corp",
       audit: (event) => void events.push(event),
     });
@@ -618,7 +622,7 @@ describe("tenant enforcement in the middleware", () => {
   });
 
   test("a malformed per-call expectedTid denies instead of throwing", async () => {
-    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING });
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true });
     const decision = await verifier.authenticate(
       { "x-api-key": tenanted("acme-corp").token },
       { expectedTid: "acme corp" },
@@ -638,7 +642,7 @@ describe("tenant enforcement in the middleware", () => {
     // wildcard, and neither is a value that failed to resolve. `""` already
     // denied; the nullish spelling must deny the same way, and so must a value
     // that is not a string at all.
-    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING });
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true });
     const rival = tenanted("rival-corp").token;
 
     for (const unusable of [null, "", "   ", "acme corp", 42, ["acme-corp", "rival-corp"], {}] as unknown[]) {
@@ -669,7 +673,7 @@ describe("tenant enforcement in the middleware", () => {
     // a pinned service that disagreement denies EVERY request on the route
     // before the token is even read. Presence must be decided by an own-property
     // read, exactly as `ownTenantId` decides it for claim sets and rows.
-    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, expectedTid: "acme-corp" });
+    const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true, expectedTid: "acme-corp" });
     const acme = tenanted("acme-corp").token;
     Object.defineProperty(Object.prototype, "expectedTid", {
       value: POLLUTED_TID,
