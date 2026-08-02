@@ -403,6 +403,70 @@ describe("service contract manifest validation", () => {
     }
   });
 
+  test("does not honour a storage waiver for a cli-with-store declaring a supported API on a non-serve bin", () => {
+    // The ineligibility gate used to key on the string `${name}-serve`, so the
+    // identical service could keep its waiver by binding its supported API to
+    // any other allowlisted bin. `-daemon`, `-worker` and `-runner` are all in
+    // ALLOWED_BIN_SUFFIXES, so this is reachable inside the manifest alone --
+    // no source-level evasion required.
+    const apiOnDaemonBin = {
+      ...baseCliWithStore,
+      bins: ["todos", "todos-daemon"],
+      serviceSurfaces: [
+        {
+          name: "api",
+          kind: "api",
+          status: "supported",
+          bin: "todos-daemon",
+          authMode: "api-key",
+          apiBasePath: "/v1",
+          health: { method: "GET", path: "/health" },
+          readiness: { method: "GET", path: "/ready" },
+          version: { method: "GET", path: "/version" }
+        }
+      ],
+      storage: {
+        backend: "sqlite",
+        engines: ["sqlite"],
+        sqlitePath: "~/.hasna/todos/todos.db"
+      },
+      metadata: {
+        conformance: {
+          waivedStorageEngines: [
+            { engine: "postgresql", reason: "Ships a supported API but wants sqlite only." }
+          ]
+        }
+      }
+    };
+    const parsed = validateServiceContractManifest(apiOnDaemonBin);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      const issue = parsed.error.issues.find((entry) => entry.path.join(".") === "storage.engines");
+      expect(issue?.message).toContain("declared waiver ignored");
+      expect(issue?.message).toContain("supported api service surface");
+      expect(issue?.message).toContain("missing: postgresql");
+    }
+
+    // NEGATIVE HALF, and it is the half that bounds the change. A `deferred`
+    // API surface is a repo documenting a loopback dev convenience, not a
+    // claim that PostgreSQL is in play, so it MUST stay eligible. Without this
+    // the fix would silently revoke real waivers (hasna/catalog is exactly
+    // this shape: `catalog serve` ships, declared `deferred`, no serve bin).
+    const deferredApi = {
+      ...apiOnDaemonBin,
+      serviceSurfaces: [
+        {
+          name: "api",
+          kind: "api",
+          status: "deferred",
+          deferReason: "Loopback-only read model; not a supported service surface.",
+          authMode: "none"
+        }
+      ]
+    };
+    expect(validateServiceContractManifest(deferredApi).success).toBe(true);
+  });
+
   test("does not honour a storage waiver for a postgres backend or a saas story", () => {
     const cases: Array<Record<string, unknown>> = [
       {
