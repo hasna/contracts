@@ -5145,6 +5145,39 @@ export const StorageEngineWaiverSchema = z
   .strict();
 export type StorageEngineWaiver = z.infer<typeof StorageEngineWaiverSchema>;
 
+/** The subset of a service surface that decides whether it is a live HTTP API. */
+export interface ApiSurfaceCapabilityInput {
+  kind?: ServiceSurfaceKind | undefined;
+  status: ServiceSurfaceStatus;
+  apiBasePath?: string | undefined;
+  openApiPath?: string | undefined;
+  health?: unknown;
+  readiness?: unknown;
+  version?: unknown;
+}
+
+/**
+ * Whether a manifest declares a SUPPORTED HTTP API surface.
+ *
+ * `supported` is the load-bearing word. A `deferred` or `unsupported` API is a
+ * repo documenting something it does not stand behind — a loopback-only dev
+ * convenience, say — and that is not a claim that PostgreSQL is in play. Only
+ * a surface the repo actually supports counts.
+ *
+ * The untyped-surface arm mirrors the API-surface filter the conformance gate
+ * already applies to `service_api_topology`, so the two layers agree on what
+ * an API surface is rather than each carrying its own idea of it.
+ */
+export function declaresSupportedApiSurface(surfaces: readonly ApiSurfaceCapabilityInput[]): boolean {
+  return surfaces.some(
+    (surface) =>
+      surface.status === "supported" &&
+      (surface.kind === "api" ||
+        (!surface.kind &&
+          Boolean(surface.apiBasePath || surface.openApiPath || surface.health || surface.readiness || surface.version)))
+  );
+}
+
 /** Manifest facts that decide whether a storage-engine waiver may apply at all. */
 export interface StorageWaiverEligibilityInput {
   class: RepoClass;
@@ -5152,6 +5185,8 @@ export interface StorageWaiverEligibilityInput {
   bins: readonly string[];
   hosting: readonly HostingMode[];
   storageBackend?: ServerDataBackend | undefined;
+  /** Declared surfaces. Omitted is treated as none declared. */
+  serviceSurfaces?: readonly ApiSurfaceCapabilityInput[] | undefined;
 }
 
 /**
@@ -5159,9 +5194,25 @@ export interface StorageWaiverEligibilityInput {
  *
  * A waiver is an admission that a repo has no PostgreSQL support, so it is
  * refused for every manifest that already claims PostgreSQL is in play: a
- * long-running service or SaaS, a `cli-with-store` that ships `<name>-serve`,
+ * long-running service or SaaS, a `cli-with-store` that is service-capable,
  * a repo whose active backend IS PostgreSQL (`storage.backend: "postgresql"`), and
  * a repo offering the `hasna-saas` product story.
+ *
+ * SERVICE-CAPABILITY IS TESTED TWICE, AND THE SECOND TEST IS THE REAL ONE.
+ * Shipping `<name>-serve` is a NAMING CONVENTION that correlates with running a
+ * server; declaring a supported `api` surface IS the repo saying it runs one.
+ * The bin test alone let the identical service keep its waiver by binding that
+ * same API to any other allowlisted bin — `-daemon`, `-worker` and `-runner`
+ * are all in `ALLOWED_BIN_SUFFIXES` — so the verdict turned on what a file was
+ * called rather than on what the repo declared it does. Both tests are kept:
+ * neither implies the other, since a repo may ship `<name>-serve` while
+ * declaring no supported API, and vice versa.
+ *
+ * What this does NOT reach, stated so nobody reads more into it: a server that
+ * is neither bound to `<name>-serve` nor declared as a supported surface — a
+ * bare subcommand — is invisible to any manifest-level predicate, and closing
+ * that needs source analysis rather than a stricter string. This narrows
+ * declared-but-misnamed evasion; it does not detect an undeclared server.
  *
  * Shared by the manifest schema and the conformance gate so the two layers
  * cannot drift apart.
@@ -5172,6 +5223,9 @@ export function storageWaiverIneligibilityReason(input: StorageWaiverEligibility
   }
   if (input.bins.includes(`${input.name}-serve`)) {
     return `storage waivers are not permitted for a service-capable cli-with-store repo shipping ${input.name}-serve`;
+  }
+  if (declaresSupportedApiSurface(input.serviceSurfaces ?? [])) {
+    return "storage waivers are not permitted for a service-capable cli-with-store repo declaring a supported api service surface";
   }
   if (input.storageBackend === "postgresql") {
     return "storage waivers are not permitted while storage.backend is postgresql, which reads and writes PostgreSQL directly";
@@ -5564,7 +5618,8 @@ export const ServiceContractManifestSchema = z
             name: value.name,
             bins: value.bins,
             hosting: value.hosting,
-            storageBackend: value.storage.backend
+            storageBackend: value.storage.backend,
+            serviceSurfaces: value.serviceSurfaces
           });
           const waivedEngines = new Set<StorageEngine>(
             ineligible ? [] : declaredWaivers.map((waiver) => waiver.engine)

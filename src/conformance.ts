@@ -385,7 +385,8 @@ function analyzeStorageWaivers(manifest: ServiceContractManifest, nowMs: number)
     name: manifest.name,
     bins: manifest.bins,
     hosting: manifest.hosting,
-    storageBackend: manifest.storage?.backend
+    storageBackend: manifest.storage?.backend,
+    serviceSurfaces: manifest.serviceSurfaces
   });
   if (ineligible) {
     failures.push(`${ineligible}: ${declaredWaivers.map((waiver) => waiver.engine).join(", ")}`);

@@ -302,7 +302,7 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
                 }
               },
               description:
-                "Explicit storage-engine exceptions, at most one per engine. Only a CLI-only cli-with-store repo (no <name>-serve bin, storage.backend sqlite, no hasna-saas story) may waive postgresql; sqlite is never waivable, expiresAt is a UTC RFC 3339 timestamp, and conformance stops honouring a waiver once it has passed."
+                "Explicit storage-engine exceptions, at most one per engine. Only a CLI-only cli-with-store repo (no <name>-serve bin, no supported api service surface, storage.backend sqlite, no hasna-saas story) may waive postgresql; sqlite is never waivable, expiresAt is a UTC RFC 3339 timestamp, and conformance stops honouring a waiver once it has passed."
             }
           }
         }
