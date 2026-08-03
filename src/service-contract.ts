@@ -247,6 +247,142 @@ export const SERVICE_CONTRACT_JSON_SCHEMA = {
         }
       }
     },
+    publishing: {
+      type: "object",
+      additionalProperties: false,
+      required: ["status"],
+      allOf: [
+        {
+          if: {
+            required: ["status"],
+            properties: { status: { const: "published" } }
+          },
+          then: {
+            required: ["targets"],
+            properties: { targets: { minItems: 1 } }
+          }
+        },
+        {
+          if: {
+            required: ["status"],
+            properties: { status: { const: "unpublished" } }
+          },
+          then: {
+            properties: { targets: { maxItems: 0 } }
+          }
+        }
+      ],
+      properties: {
+        status: {
+          enum: ["published", "unpublished"],
+          description:
+            "Whether the repo ships a published artifact. Declaring unpublished is a positive statement; omitting publishing entirely says only that the repo has not described how it ships."
+        },
+        targets: {
+          type: "array",
+          uniqueItems: true,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["package", "registry", "mechanism", "credential"],
+            allOf: [
+              {
+                if: {
+                  required: ["mechanism"],
+                  properties: { mechanism: { const: "ci" } }
+                },
+                then: { required: ["workflow"] }
+              },
+              {
+                if: {
+                  required: ["mechanism"],
+                  properties: { mechanism: { const: "manual" } }
+                },
+                then: { not: { required: ["workflow"] } }
+              },
+              {
+                if: {
+                  required: ["credential"],
+                  properties: { credential: { const: "trusted-publisher" } }
+                },
+                then: { properties: { mechanism: { const: "ci" } } }
+              }
+            ],
+            properties: {
+              package: {
+                type: "string",
+                pattern: "^(?:@[a-z0-9][a-z0-9._-]*\\/)?[a-z0-9][a-z0-9._-]*$",
+                description: "Registry package name including any scope, e.g. @hasna/todos."
+              },
+              registry: {
+                type: "string",
+                pattern: "^[a-z0-9][a-z0-9.-]*(?::[0-9]+)?(?:\\/[A-Za-z0-9._~-]+)*$",
+                description:
+                  "Registry host, optionally with port and path, and never a scheme or embedded credentials (registry.npmjs.org, npm.pkg.github.com). No registry is assumed by default."
+              },
+              access: {
+                enum: ["public", "restricted"],
+                description: "Registry visibility of the published artifact."
+              },
+              mechanism: {
+                enum: ["ci", "manual"],
+                description:
+                  "Where the publish is initiated and authorised from. Not a taxonomy of publish commands: a repo publishing through a bespoke script is still ci when a workflow drives it."
+              },
+              credential: {
+                enum: ["trusted-publisher", "token"],
+                description:
+                  "How the publish authenticates. trusted-publisher is workload identity exchanged at publish time; token is a long-lived registry credential."
+              },
+              flow: {
+                enum: ["direct", "staged"],
+                description:
+                  "Whether the artifact becomes installable in one step, or is uploaded first and promoted in a separate step."
+              },
+              provenance: {
+                enum: ["required", "best-effort", "none"],
+                description:
+                  "Intent for build provenance/attestation. required means the release gate refuses a publish without it."
+              },
+              workflow: {
+                type: "object",
+                additionalProperties: false,
+                required: ["provider", "repository", "file"],
+                properties: {
+                  provider: {
+                    enum: ["github-actions", "gitlab-ci"],
+                    description: "CI provider the registry accepts as a trusted publisher."
+                  },
+                  repository: {
+                    type: "string",
+                    pattern: "^[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+$",
+                    description: "owner/repo on the provider's forge."
+                  },
+                  file: {
+                    type: "string",
+                    pattern: "^[A-Za-z0-9._-]+\\.ya?ml$",
+                    description:
+                      "Workflow file NAME, not a path; registries key the registration on the bare filename."
+                  },
+                  environment: {
+                    type: "string",
+                    minLength: 1,
+                    description:
+                      "Deployment environment gating the publish job. Absent means no environment gate, not unknown."
+                  }
+                },
+                description:
+                  "The exact triple a registry's trusted-publisher registration consumes."
+              }
+            }
+          },
+          description:
+            "One entry per published artifact per registry. A repo shipping several packages declares one target each."
+        }
+      },
+      description:
+        "How the repo's artifacts reach consumers. Optional and additive; absence asserts nothing."
+    },
     metadata: {
       type: "object",
       additionalProperties: true,

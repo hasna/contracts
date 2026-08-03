@@ -1,0 +1,43 @@
+{
+  "schema": "hasna.service_contract.v1",
+  "name": "accounts",
+  "class": "cli-with-store",
+  "contractVersion": "v1",
+  "kitVersion": "0.9.0",
+  "description": "Invalid: claims a trusted publisher for an interactive publish, which describes a registration no registry can issue.",
+  "bins": [
+    "accounts"
+  ],
+  "hosting": [
+    "user-hosted"
+  ],
+  "serviceSurfaces": [
+    {
+      "name": "cli",
+      "kind": "cli",
+      "status": "supported",
+      "bin": "accounts",
+      "authMode": "local-only"
+    }
+  ],
+  "storage": {
+    "backend": "sqlite",
+    "engines": [
+      "sqlite",
+      "postgresql"
+    ],
+    "envPrefix": "HASNA_ACCOUNTS_",
+    "sqlitePath": "~/.hasna/accounts/accounts.db"
+  },
+  "publishing": {
+    "status": "published",
+    "targets": [
+      {
+        "package": "@hasna/accounts",
+        "registry": "registry.npmjs.org",
+        "mechanism": "manual",
+        "credential": "trusted-publisher"
+      }
+    ]
+  }
+}

@@ -5519,6 +5519,179 @@ export const SecureLocalStorePolicySchema = contractBaseSchema(SCHEMA_IDS.secure
   });
 export type SecureLocalStorePolicy = z.infer<typeof SecureLocalStorePolicySchema>;
 
+/**
+ * Whether the repo ships a published artifact at all. Declaring `unpublished`
+ * is a positive statement — it is not the same as omitting `publishing`, which
+ * says only that the repo has not described how it ships.
+ */
+export const PUBLISH_STATUSES = ["published", "unpublished"] as const;
+export const PublishStatusSchema = z.enum(PUBLISH_STATUSES);
+export type PublishStatus = z.infer<typeof PublishStatusSchema>;
+
+/**
+ * Where the publish is initiated and authorised from. This is deliberately not
+ * a taxonomy of publish COMMANDS: a repo that publishes through a bespoke
+ * script is still `ci` when a workflow drives it.
+ */
+export const PUBLISH_MECHANISMS = ["ci", "manual"] as const;
+export const PublishMechanismSchema = z.enum(PUBLISH_MECHANISMS);
+export type PublishMechanism = z.infer<typeof PublishMechanismSchema>;
+
+/**
+ * How the publish authenticates to the registry. `trusted-publisher` is
+ * workload identity (OIDC) exchanged at publish time; `token` is a
+ * long-lived registry credential.
+ */
+export const PUBLISH_CREDENTIALS = ["trusted-publisher", "token"] as const;
+export const PublishCredentialSchema = z.enum(PUBLISH_CREDENTIALS);
+export type PublishCredential = z.infer<typeof PublishCredentialSchema>;
+
+/**
+ * Whether the artifact becomes installable in one step (`direct`) or is
+ * uploaded first and promoted in a separate step (`staged`).
+ */
+export const PUBLISH_FLOWS = ["direct", "staged"] as const;
+export const PublishFlowSchema = z.enum(PUBLISH_FLOWS);
+export type PublishFlow = z.infer<typeof PublishFlowSchema>;
+
+/** Intent for build provenance/attestation on published artifacts. */
+export const PROVENANCE_MODES = ["required", "best-effort", "none"] as const;
+export const ProvenanceModeSchema = z.enum(PROVENANCE_MODES);
+export type ProvenanceMode = z.infer<typeof ProvenanceModeSchema>;
+
+/** CI providers a registry can accept as a trusted publisher. */
+export const PUBLISH_WORKFLOW_PROVIDERS = ["github-actions", "gitlab-ci"] as const;
+export const PublishWorkflowProviderSchema = z.enum(PUBLISH_WORKFLOW_PROVIDERS);
+export type PublishWorkflowProvider = z.infer<typeof PublishWorkflowProviderSchema>;
+
+/**
+ * The exact triple a registry's trusted-publisher registration consumes:
+ * the source repository, the workflow file, and the optional deployment
+ * environment that must be active for the publish to be accepted.
+ */
+export const PublishWorkflowSchema = z
+  .object({
+    provider: PublishWorkflowProviderSchema,
+    /** `owner/repo` on the provider's forge. */
+    repository: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/, "Workflow repository must be owner/repo"),
+    /**
+     * Workflow file NAME, not a path — registries key the registration on the
+     * bare filename relative to the provider's workflow directory.
+     */
+    file: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]+\.ya?ml$/, "Workflow file must be a bare .yml/.yaml filename, not a path"),
+    /**
+     * Deployment environment gating the publish job. ABSENT MEANS NO
+     * ENVIRONMENT GATE — it does not mean "unknown".
+     */
+    environment: z.string().min(1).optional()
+  })
+  .strict();
+export type PublishWorkflow = z.infer<typeof PublishWorkflowSchema>;
+
+/**
+ * One published artifact at one registry. A repo that ships several packages,
+ * or the same package to more than one registry, declares one target each.
+ */
+export const PublishTargetSchema = z
+  .object({
+    /** Registry package name including any scope, e.g. `@hasna/todos`. */
+    package: z
+      .string()
+      .regex(
+        /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/,
+        "Package must be a registry package name, optionally scoped"
+      ),
+    /**
+     * Registry host, optionally with port and path, and never a scheme or
+     * embedded credentials (`registry.npmjs.org`, `npm.pkg.github.com`).
+     * No registry is assumed by default.
+     */
+    registry: z
+      .string()
+      .regex(
+        /^[a-z0-9][a-z0-9.-]*(?::[0-9]+)?(?:\/[A-Za-z0-9._~-]+)*$/,
+        "Registry must be a bare host[:port][/path] with no scheme and no credentials"
+      ),
+    access: z.enum(["public", "restricted"]).optional(),
+    mechanism: PublishMechanismSchema,
+    credential: PublishCredentialSchema,
+    flow: PublishFlowSchema.default("direct"),
+    provenance: ProvenanceModeSchema.default("none"),
+    workflow: PublishWorkflowSchema.optional()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.mechanism === "ci" && !value.workflow) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "mechanism=ci requires workflow (the registry registration needs repository, file, and environment)",
+        path: ["workflow"]
+      });
+    }
+    if (value.mechanism === "manual" && value.workflow) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "mechanism=manual must not declare workflow; a workflow implies mechanism=ci",
+        path: ["workflow"]
+      });
+    }
+    // Workload identity is only issuable to a CI job. A manual publish claiming
+    // a trusted publisher would describe a registration that cannot exist.
+    if (value.credential === "trusted-publisher" && value.mechanism !== "ci") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "credential=trusted-publisher requires mechanism=ci; workload identity is not issuable to an interactive publish",
+        path: ["credential"]
+      });
+    }
+  });
+export type PublishTarget = z.infer<typeof PublishTargetSchema>;
+
+/**
+ * How the repo's artifacts reach their consumers. Additive and optional:
+ * omitting `publishing` asserts nothing, which is why `unpublished` exists as
+ * an explicit value rather than being expressed by absence.
+ */
+export const PublishingContractSchema = z
+  .object({
+    status: PublishStatusSchema,
+    targets: z.array(PublishTargetSchema).default([])
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.status === "published" && value.targets.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "publishing.status=published requires at least one target",
+        path: ["targets"]
+      });
+    }
+    if (value.status === "unpublished" && value.targets.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "publishing.status=unpublished must not declare targets",
+        path: ["targets"]
+      });
+    }
+    const seen = new Set<string>();
+    for (const [index, target] of value.targets.entries()) {
+      const key = `${target.package}@${target.registry}`;
+      if (seen.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate publish target for ${target.package} at ${target.registry}`,
+          path: ["targets", index, "package"]
+        });
+      }
+      seen.add(key);
+    }
+  });
+export type PublishingContract = z.infer<typeof PublishingContractSchema>;
+
 export const ServiceContractManifestSchema = z
   .object({
     /** Optional editor hint pointing at the JSON Schema; ignored at runtime. */
@@ -5534,6 +5707,7 @@ export const ServiceContractManifestSchema = z
     storage: StorageContractSchema.optional(),
     hosting: z.array(HostingModeSchema).min(1).default(["user-hosted"]),
     serviceSurfaces: z.array(ServiceSurfaceSchema).default([]),
+    publishing: PublishingContractSchema.optional(),
     metadata: ServiceContractMetadataSchema.optional()
   })
   .strict()

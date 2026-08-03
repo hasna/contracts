@@ -37,6 +37,7 @@ const expectedInvalidIssuePaths: Record<string, string[]> = {
   "scaffold-install-record.invalid.json": ["generatedFiles", "installedAt"],
   "scaffold-manifest.invalid.json": ["output", "validationChecks"],
   "service-contract.invalid.json": ["bins.1"],
+  "service-contract-publishing.invalid.json": ["publishing.targets.0.credential"],
   "validation-plan.invalid.json": ["checks.0.command"]
 };
 
