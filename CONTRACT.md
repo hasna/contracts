@@ -432,6 +432,75 @@ backend, storage capabilities, and product surfaces are separate axes:
   `exportSubpath`, and the export target must exist in the built package or
   have a corresponding source entry before build. Generated clients reference
   the API's `openApiPath` via `generatedFrom`.
+- `publishing` — optional. How the repo's artifacts reach consumers. See
+  section 9.1.
+
+### 9.1 `publishing` — the release path
+
+`serviceSurfaces` says what a repo exposes; `publishing` says how it ships. The
+property is optional and additive: omitting it asserts nothing, which is why
+`status: "unpublished"` exists as an explicit value rather than being expressed
+by absence. A repo always knows how it ships, so there is no `unknown` status —
+uncertainty belongs to whoever is surveying the fleet, not to the manifest.
+
+```json
+{
+  "publishing": {
+    "status": "published",
+    "targets": [
+      {
+        "package": "@hasna/accounts",
+        "registry": "registry.npmjs.org",
+        "access": "public",
+        "mechanism": "ci",
+        "credential": "trusted-publisher",
+        "flow": "staged",
+        "provenance": "required",
+        "workflow": {
+          "provider": "github-actions",
+          "repository": "hasna/accounts",
+          "file": "release.yml",
+          "environment": "npm-release"
+        }
+      }
+    ]
+  }
+}
+```
+
+- `status` — `published | unpublished`. `published` requires at least one
+  target; `unpublished` must declare none.
+- `targets` — one entry per published artifact per registry. A repo shipping
+  several packages, or the same package to two registries, declares one target
+  each. A duplicate `package`+`registry` pair is refused.
+- `package` — the registry package name including any scope. It is not derived
+  from `name`: the short app name and the published package name differ, and
+  the scope varies across the fleet.
+- `registry` — a bare host, optionally with port and path. A scheme is refused
+  so the field cannot carry a URL, and userinfo is therefore structurally
+  impossible — a public manifest must not be able to hold a credential. No
+  registry is assumed by default.
+- `mechanism` — `ci | manual`, meaning where the publish is initiated and
+  authorised from. This is not a taxonomy of publish commands: a repo that
+  publishes through a bespoke script is still `ci` when a workflow drives it.
+  `manual` is a real and currently common state, not a defect to be hidden.
+- `credential` — `trusted-publisher | token`. `trusted-publisher` is workload
+  identity exchanged at publish time and is refused outside `ci`, because such
+  a registration cannot exist for an interactive publish.
+- `flow` — `direct | staged`. Defaults to `direct`.
+- `provenance` — `required | best-effort | none`. Defaults to `none`.
+  `required` means the release gate refuses a publish without attestation, and
+  is what separates a compliant release from a break-glass one.
+- `workflow` — required when `mechanism` is `ci`, and refused otherwise. It
+  carries exactly the triple a registry's trusted-publisher registration
+  consumes. `file` is a bare workflow filename, not a path, because that is
+  what the registration is keyed on. **`environment` absent means no
+  environment gate — it does not mean unknown.**
+
+These four axes are separate fields rather than one enum because they vary
+independently: a staged, provenance-bearing, OIDC-authenticated CI release and
+a direct token publish from a workstation differ on all four, and collapsing
+them loses the distinctions the npm token migration turns on.
 
 Libraries may waive only API and MCP because they remain responsible for their
 SDK and CLI surfaces. Exceptional non-Node monorepos may waive any inapplicable

@@ -1,0 +1,74 @@
+{
+  "schema": "hasna.service_contract.v1",
+  "name": "accounts",
+  "class": "cli-with-store",
+  "contractVersion": "v1",
+  "kitVersion": "0.9.0",
+  "description": "CLI declaring a staged, provenance-bearing release driven by a bespoke script, plus a second registry served by the same workflow.",
+  "bins": [
+    "accounts",
+    "accounts-mcp"
+  ],
+  "hosting": [
+    "user-hosted"
+  ],
+  "serviceSurfaces": [
+    {
+      "name": "cli",
+      "kind": "cli",
+      "status": "supported",
+      "bin": "accounts",
+      "authMode": "local-only"
+    },
+    {
+      "name": "mcp",
+      "kind": "mcp",
+      "status": "supported",
+      "mcpBin": "accounts-mcp",
+      "authMode": "local-only"
+    }
+  ],
+  "storage": {
+    "backend": "sqlite",
+    "engines": [
+      "sqlite",
+      "postgresql"
+    ],
+    "envPrefix": "HASNA_ACCOUNTS_",
+    "sqlitePath": "~/.hasna/accounts/accounts.db"
+  },
+  "publishing": {
+    "status": "published",
+    "targets": [
+      {
+        "package": "@hasna/accounts",
+        "registry": "registry.npmjs.org",
+        "access": "public",
+        "mechanism": "ci",
+        "credential": "trusted-publisher",
+        "flow": "staged",
+        "provenance": "required",
+        "workflow": {
+          "provider": "github-actions",
+          "repository": "hasna/accounts",
+          "file": "release.yml",
+          "environment": "npm-release"
+        }
+      },
+      {
+        "package": "@hasna/accounts",
+        "registry": "npm.pkg.github.com",
+        "access": "restricted",
+        "mechanism": "ci",
+        "credential": "trusted-publisher",
+        "flow": "direct",
+        "provenance": "best-effort",
+        "workflow": {
+          "provider": "github-actions",
+          "repository": "hasna/accounts",
+          "file": "release.yml"
+        }
+      }
+    ]
+  }
+}

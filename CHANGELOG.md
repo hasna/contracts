@@ -2,6 +2,28 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [Unreleased]
+
+### Optional `publishing` surface on the service contract manifest
+
+`hasna.service_contract.v1` gains an optional top-level `publishing` property
+declaring how a repo's artifacts reach consumers: `status`, and one `targets`
+entry per package per registry carrying `package`, `registry`, `mechanism`
+(`ci | manual`), `credential` (`trusted-publisher | token`), `flow`
+(`direct | staged`), `provenance`, and — for CI — the `workflow` triple a
+registry's trusted-publisher registration consumes.
+
+The forcing function is npm's deprecation of 2FA-bypass granular tokens, whose
+phase 2 removes direct publishing from those tokens. The manifest modelled what
+a package exposes and nothing about how it ships.
+
+Additive and optional: `publishing` is not in `required`, and validator output
+over 129 real manifests is byte-identical before and after. Rationale, the
+options rejected, and the measurements are in
+`docs/adr/0001-publishing-surface-in-the-service-contract-manifest.md` — the
+first ADR in this repository, which also sets the `docs/adr/NNNN-<slug>.md`
+convention.
+
 ## [0.9.0] - 2026-08-01
 
 Ships the two changes that had been sitting unpublished on `main`: npm ended at
