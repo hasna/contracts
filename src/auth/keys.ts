@@ -271,14 +271,16 @@ export type ApiKeyVerifyResult =
       reason: ApiKeyVerifyFailureReason;
       message: string;
       /**
-       * Key id and tenant, populated once the SIGNATURE has verified — so a
-       * tenant denial, the most security-relevant deny there is, can name the
-       * offending key in the audit trail instead of logging `null`. Absent for
-       * failures that occur before authenticity is established, because nothing
-       * in an unverified token may be believed.
+       * Key id and tenant, when the failure path already exposes them for audit.
        */
       kid?: string;
       tid?: string | null;
+      /**
+       * Agent is populated once the SIGNATURE has verified, so every
+       * authenticated denial can name its subject. Absent before authenticity
+       * is established because nothing in an unverified token may be believed.
+       */
+      agent?: string | null;
     };
 
 export interface VerifyApiKeyTokenOptions {
@@ -338,13 +340,17 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
     return { ok: false, reason: "bad_signature", message: "Signature verification failed." };
   }
 
+  // Read only an own, string-valued claim. A missing claim is an authenticated
+  // `null`; a value inherited through a polluted prototype is not in the signed
+  // body and must never become audit attribution.
+  const agent = Object.hasOwn(claims, "agent") && typeof claims.agent === "string" ? claims.agent : null;
   const now = Math.floor((options.nowMs ?? Date.now()) / 1000);
   const leeway = options.leewaySeconds ?? 0;
   if (typeof claims.iat === "number" && now + leeway < claims.iat) {
-    return { ok: false, reason: "not_yet_valid", message: "Token is not yet valid." };
+    return { ok: false, reason: "not_yet_valid", message: "Token is not yet valid.", agent };
   }
   if (claims.exp !== null && typeof claims.exp === "number" && now - leeway >= claims.exp) {
-    return { ok: false, reason: "expired", message: "Token has expired." };
+    return { ok: false, reason: "expired", message: "Token has expired.", agent };
   }
 
   // Tenant binding is an identity check, so it runs before authorization: a
@@ -363,6 +369,7 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
       message: "Token carries no tenant id ('tid') and this service requires one.",
       kid: claims.kid,
       tid: null,
+      agent,
     };
   }
   if (options.expectedTid !== undefined && !tenantIdsEqual(tid, options.expectedTid)) {
@@ -387,6 +394,7 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
         : "Token tenant cannot be checked: the expected tenant id is not a valid tenant id.",
       kid: claims.kid,
       tid,
+      agent,
     };
   }
 
@@ -407,7 +415,7 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
       });
     for (const required of options.requiredScopes) {
       if (!satisfies(required)) {
-        return { ok: false, reason: "insufficient_scope", message: `Missing required scope '${required}'.` };
+        return { ok: false, reason: "insufficient_scope", message: `Missing required scope '${required}'.`, agent };
       }
     }
   }

@@ -374,7 +374,19 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
       // ABSENCE is therefore meaningful, so `tid` is read as an own property
       // (see `ownTenantId`) — an audit line must never name an organization the
       // request never proved.
-      await emit({ outcome: "deny", app: options.app, kid: verified.kid ?? null, tid: ownTenantId(verified) ?? null, reason: verified.reason, scopesRequired: requiredScopes, method, path, status, at });
+      await emit({
+        outcome: "deny",
+        app: options.app,
+        kid: verified.kid ?? null,
+        tid: ownTenantId(verified) ?? null,
+        ...(Object.hasOwn(verified, "agent") ? { agent: verified.agent } : {}),
+        reason: verified.reason,
+        scopesRequired: requiredScopes,
+        method,
+        path,
+        status,
+        at,
+      });
       return { ok: false, status, reason: verified.reason, message: verified.message };
     }
 
