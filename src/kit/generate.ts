@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 
 /** Ordered list of template files that make up the kit. */
 export const KIT_TEMPLATE_FILES = [
+  "own.ts",
   "backend.ts",
   "tls.ts",
   "query.ts",
