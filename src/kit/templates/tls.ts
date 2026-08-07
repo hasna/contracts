@@ -27,6 +27,7 @@
 //   https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
 
 import { readFileSync } from "node:fs";
+import { ownProp, ownString } from "./own.js";
 
 /** The `ssl` field shape accepted by `pg.Pool` / `pg.Client`. */
 export type PgSslConfig = boolean | { rejectUnauthorized: boolean; ca?: string };
@@ -73,10 +74,19 @@ export function sslModeFromConnectionString(connectionString: string): SslMode {
   return "disable";
 }
 
+// Every read below is an OWN-property read (see `own.ts`). These options and env
+// objects come from the caller, and a plain `options.ca` read walks the
+// prototype chain — on a polluted process that injected a CA the caller never
+// supplied, turning the fail-closed throw at the bottom of `resolveTlsConfig`
+// into a silent success that trusts ONLY the attacker's trust anchor.
 function loadCaBundle(options: TlsResolveOptions): string | null {
-  const env = options.env ?? process.env;
-  if (options.ca && options.ca.trim()) return options.ca;
-  const path = options.caCertPath ?? env.PGSSLROOTCERT ?? env.NODE_EXTRA_CA_CERTS;
+  const env = ownProp<Record<string, string | undefined>>(options, "env") ?? process.env;
+  const ca = ownString(options, "ca");
+  if (ca && ca.trim()) return ca;
+  const path =
+    ownString(options, "caCertPath") ??
+    ownString(env, "PGSSLROOTCERT") ??
+    ownString(env, "NODE_EXTRA_CA_CERTS");
   if (path && path.trim()) return readFileSync(path.trim(), "utf8");
   return null;
 }

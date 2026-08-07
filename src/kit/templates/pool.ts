@@ -10,6 +10,52 @@ import type { Pool, PoolConfig } from "pg";
 import { resolveServerDataBackend, resolveDatabaseUrl } from "./backend.js";
 import { resolveTlsConfig, type TlsResolveOptions } from "./tls.js";
 import { createQueryClient, type PoolQueryClient } from "./query.js";
+import { ownProp, ownString } from "./own.js";
+
+type KitEnv = Record<string, string | undefined>;
+
+/**
+ * The TLS + tuning fields this factory forwards, read as OWN properties only.
+ *
+ * Guarding `tls.ts` alone does NOT close this path: the previous
+ * `options.ca !== undefined ? { ca: options.ca } : {}` spread copied a
+ * prototype-supplied value into an OWN property, which `resolveTlsConfig` would
+ * then correctly accept as caller-supplied. The laundering has to stop here.
+ */
+interface OwnPoolOptions {
+  ca?: string;
+  caCertPath?: string;
+  env?: KitEnv;
+  max?: number;
+  idleTimeoutMillis?: number;
+  connectionTimeoutMillis?: number;
+  applicationName?: string;
+}
+
+function ownPoolOptions(options: unknown): OwnPoolOptions {
+  // NULL PROTOTYPE, deliberately. Returning a plain object literal here would
+  // re-open the hole this function closes: a guarded read stored in a literal
+  // is UNGUARDED AGAIN on read-back, because `own.ca` walks the same polluted
+  // chain. Measured while building this fix — the first version of this
+  // function guarded every read and still handed the attacker's CA to
+  // `resolveTlsConfig`.
+  const own = Object.create(null) as OwnPoolOptions;
+  const ca = ownString(options, "ca");
+  if (ca !== undefined) own.ca = ca;
+  const caCertPath = ownString(options, "caCertPath");
+  if (caCertPath !== undefined) own.caCertPath = caCertPath;
+  const env = ownProp<KitEnv>(options, "env");
+  if (env !== undefined) own.env = env;
+  const max = ownProp<number>(options, "max");
+  if (max !== undefined) own.max = max;
+  const idleTimeoutMillis = ownProp<number>(options, "idleTimeoutMillis");
+  if (idleTimeoutMillis !== undefined) own.idleTimeoutMillis = idleTimeoutMillis;
+  const connectionTimeoutMillis = ownProp<number>(options, "connectionTimeoutMillis");
+  if (connectionTimeoutMillis !== undefined) own.connectionTimeoutMillis = connectionTimeoutMillis;
+  const applicationName = ownString(options, "applicationName");
+  if (applicationName !== undefined) own.applicationName = applicationName;
+  return own;
+}
 
 export interface CreatePgPoolOptions extends TlsResolveOptions {
   connectionString: string;
@@ -25,18 +71,27 @@ export interface CreatePgPoolOptions extends TlsResolveOptions {
 
 /** Build a `pg.Pool` with fleet-standard TLS handling. */
 export function createPgPool(options: CreatePgPoolOptions): Pool {
-  const ssl = resolveTlsConfig(options.connectionString, {
-    ...(options.ca !== undefined ? { ca: options.ca } : {}),
-    ...(options.caCertPath !== undefined ? { caCertPath: options.caCertPath } : {}),
-    ...(options.env !== undefined ? { env: options.env } : {}),
+  // `connectionString` is guarded too: a prototype-supplied one would silently
+  // redirect the whole connection, so an inherited value is refused outright
+  // rather than dialed.
+  const connectionString = ownString(options, "connectionString");
+  if (!connectionString || !connectionString.trim()) {
+    throw new Error("createPgPool requires an own `connectionString` on the options object.");
+  }
+
+  const own = ownPoolOptions(options);
+  const ssl = resolveTlsConfig(connectionString, {
+    ...(own.ca !== undefined ? { ca: own.ca } : {}),
+    ...(own.caCertPath !== undefined ? { caCertPath: own.caCertPath } : {}),
+    ...(own.env !== undefined ? { env: own.env } : {}),
   });
 
-  const config: PoolConfig = { connectionString: options.connectionString };
+  const config: PoolConfig = { connectionString };
   if (ssl !== undefined) config.ssl = ssl;
-  if (options.max !== undefined) config.max = options.max;
-  if (options.idleTimeoutMillis !== undefined) config.idleTimeoutMillis = options.idleTimeoutMillis;
-  if (options.connectionTimeoutMillis !== undefined) config.connectionTimeoutMillis = options.connectionTimeoutMillis;
-  if (options.applicationName !== undefined) config.application_name = options.applicationName;
+  if (own.max !== undefined) config.max = own.max;
+  if (own.idleTimeoutMillis !== undefined) config.idleTimeoutMillis = own.idleTimeoutMillis;
+  if (own.connectionTimeoutMillis !== undefined) config.connectionTimeoutMillis = own.connectionTimeoutMillis;
+  if (own.applicationName !== undefined) config.application_name = own.applicationName;
 
   return new pg.Pool(config);
 }
@@ -64,7 +119,8 @@ export function createServerPoolFromEnv(
   appName: string,
   options: CreateServerPoolFromEnvOptions = {},
 ): ServerPoolFromEnv {
-  const env = options.env ?? process.env;
+  const own = ownPoolOptions(options);
+  const env = own.env ?? process.env;
   const resolution = resolveServerDataBackend(appName, env);
   const connectionString = resolveDatabaseUrl(appName, env);
   if (!connectionString) {
@@ -74,16 +130,9 @@ export function createServerPoolFromEnv(
     );
   }
   const pool = createPgPool({
+    ...own,
     connectionString,
-    ...(options.ca !== undefined ? { ca: options.ca } : {}),
-    ...(options.caCertPath !== undefined ? { caCertPath: options.caCertPath } : {}),
     env,
-    ...(options.max !== undefined ? { max: options.max } : {}),
-    ...(options.idleTimeoutMillis !== undefined ? { idleTimeoutMillis: options.idleTimeoutMillis } : {}),
-    ...(options.connectionTimeoutMillis !== undefined
-      ? { connectionTimeoutMillis: options.connectionTimeoutMillis }
-      : {}),
-    ...(options.applicationName !== undefined ? { applicationName: options.applicationName } : {}),
   });
   return {
     client: createQueryClient(pool),

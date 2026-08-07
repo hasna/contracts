@@ -14,6 +14,7 @@
 
 import { createHash } from "node:crypto";
 import type { TypedQueryClient } from "./query.js";
+import { ownProp, ownString } from "./own.js";
 
 /** Default ledger table name. Override per app if a legacy name exists. */
 export const DEFAULT_MIGRATION_LEDGER_TABLE = "schema_migrations";
@@ -72,7 +73,10 @@ export class MigrationLedger {
     private readonly migrations: readonly Migration[],
     options: MigrationRunnerOptions = {},
   ) {
-    this.ledgerTable = options.ledgerTable ?? DEFAULT_MIGRATION_LEDGER_TABLE;
+    // OWN-property read: `ledgerTable` is interpolated directly into DDL below,
+    // so a prototype-supplied value is SQL injection rather than mere config
+    // drift.
+    this.ledgerTable = ownString(options, "ledgerTable") ?? DEFAULT_MIGRATION_LEDGER_TABLE;
     const seen = new Set<string>();
     for (const migration of migrations) {
       if (seen.has(migration.id)) throw new Error(`Duplicate migration id: ${migration.id}`);
@@ -131,7 +135,9 @@ export class MigrationLedger {
 
   /** Apply all pending migrations. With `dryRun`, report the plan only. */
   async migrate(opts: { dryRun?: boolean } = {}): Promise<MigrationResult> {
-    const dryRun = opts.dryRun === true;
+    // OWN-property read: a prototype-supplied `dryRun` would turn every
+    // `migrate()` call into a no-op that still reports a plan.
+    const dryRun = ownProp<unknown>(opts, "dryRun") === true;
     await this.ensureLedger();
     const applied = await this.readApplied();
     const plan = this.buildPlan(applied);

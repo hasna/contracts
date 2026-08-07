@@ -5,6 +5,8 @@
 // authoritative. Old storage-mode variables are rejected with migration
 // guidance and are never interpreted.
 
+import { ownString } from "./own.js";
+
 export const SERVER_DATA_BACKENDS = ["sqlite", "postgresql"] as const;
 export type ServerDataBackend = (typeof SERVER_DATA_BACKENDS)[number];
 
@@ -36,9 +38,13 @@ function legacyModeKeys(name: string): string[] {
   ];
 }
 
+// Both loops read the env as OWN properties. `env` is caller-supplied and
+// `process.env` is itself prototype-pollutable, so an unguarded `env[key]` let a
+// polluted `HASNA_<APP>_DATABASE_URL` flip the backend to postgresql and hand
+// back a connection string the operator never configured.
 function firstEnv(env: Env, keys: readonly string[]): { key: string; value: string } | null {
   for (const key of keys) {
-    const value = env[key]?.trim();
+    const value = ownString(env, key)?.trim();
     if (value) return { key, value };
   }
   return null;
@@ -46,7 +52,7 @@ function firstEnv(env: Env, keys: readonly string[]): { key: string; value: stri
 
 function firstDefinedEnvKey(env: Env, keys: readonly string[]): string | null {
   for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(env, key) && env[key] !== undefined) return key;
+    if (Object.hasOwn(env, key) && env[key] !== undefined) return key;
   }
   return null;
 }
