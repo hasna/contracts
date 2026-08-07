@@ -303,6 +303,64 @@ describe("verifyApiKey middleware (agnostic)", () => {
     expect(events.some((e) => e.outcome === "deny" && e.reason === "missing_token")).toBe(true);
   });
 
+  test("audit event carries the agent claim, and reports it three-state", async () => {
+    // A key WITH an agent: the claim reaches the audit trail directly, so a log
+    // reader never has to run `SELECT agent FROM api_keys WHERE kid`.
+    const withAgent: AuthAuditEvent[] = [];
+    const v1 = verifyApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true, audit: (e) => void withAgent.push(e) });
+    const named = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING, agent: "station01" });
+    expect((await v1.authenticate({ "x-api-key": named.token })).ok).toBe(true);
+    const allow = withAgent.find((e) => e.outcome === "allow");
+    expect(allow?.agent).toBe("station01");
+
+    // A key WITHOUT one: established, but the claim is absent -> null, which is
+    // distinguishable from "never established" below.
+    const noAgent: AuthAuditEvent[] = [];
+    const v2 = verifyApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true, audit: (e) => void noAgent.push(e) });
+    const anon = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
+    expect((await v2.authenticate({ "x-api-key": anon.token })).ok).toBe(true);
+    expect(noAgent.find((e) => e.outcome === "allow")?.agent).toBeNull();
+
+    // Refused BEFORE the signature verified: nothing in an unverified token may
+    // be believed, so the field is absent rather than guessed.
+    const preAuth: AuthAuditEvent[] = [];
+    const v3 = verifyApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true, audit: (e) => void preAuth.push(e) });
+    expect((await v3.authenticate({})).ok).toBe(false);
+    const denied = preAuth.find((e) => e.reason === "missing_token");
+    expect(denied).toBeDefined();
+    expect(denied?.agent).toBeUndefined();
+
+    // A refusal AFTER the signature verified still carries the authenticated
+    // subject. Authorization failure is not loss of identity.
+    const underScoped: AuthAuditEvent[] = [];
+    const v4 = verifyApiKey({
+      app: "todos",
+      signingSecret: SIGNING,
+      allowUnregisteredKeys: true,
+      requiredScopes: ["todos:write"],
+      audit: (e) => void underScoped.push(e),
+    });
+    const reader = mintApiKey({
+      app: "todos",
+      scopes: ["todos:read"],
+      signingSecret: SIGNING,
+      agent: "station04",
+    });
+    expect((await v4.authenticate({ "x-api-key": reader.token })).ok).toBe(false);
+    expect(underScoped.find((e) => e.reason === "insufficient_scope")?.agent).toBe("station04");
+
+    // A revoked key still names its agent — the deny path is where attribution
+    // matters most, and it is the one a runaway investigation actually reads.
+    const revoked: AuthAuditEvent[] = [];
+    const store = new ApiKeyStore(new FakeStoreClient());
+    const doomed = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING, agent: "station07" });
+    await store.insertMinted(doomed);
+    const v5 = verifyApiKey({ app: "todos", signingSecret: SIGNING, keyStatus: store.keyStatus, audit: (e) => void revoked.push(e) });
+    await store.revoke(doomed.kid);
+    expect((await v5.authenticate({ "x-api-key": doomed.token })).ok).toBe(false);
+    expect(revoked.find((e) => e.reason === "revoked")?.agent).toBe("station07");
+  });
+
   test("scope enforcement returns 403", async () => {
     const verifier = verifyApiKey({ app: "todos", signingSecret: SIGNING, allowUnregisteredKeys: true, requiredScopes: ["todos:write"] });
     const minted = mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING });
