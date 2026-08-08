@@ -2,6 +2,30 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.10.2] - 2026-08-08
+
+Ships the two commits that merged to `main` after 0.10.1:
+
+- **The 0.10.1 release record is corrected (#90).** The published 0.10.1
+  tarball understated its scope as three auth fixes; the corrected changelog
+  records all fourteen post-0.10.0 commits and reaches consumers in this
+  release.
+- **Portable project resource-link contracts are available (#91).** Seven
+  public Zod schemas define resource authority, target kinds, locators, labels,
+  link inputs, persisted links, and the
+  `hasna.project_resource_link_collection.v1` collection envelope. The schema
+  registry, typed lookup maps, valid example fixture, and focused validation
+  coverage include the new contract.
+
+PATCH, not minor. This is additive: no existing schema, signature, contract
+shape, or vendored-kit file manifest changes. The repository's 0.10.1 release
+convention explicitly treats additive exports as patch-compatible so existing
+`^0.10.1` consumers receive them.
+
+The release moves the four coupled version strings together: `package.json`,
+`hasna.contract.json`, `CONTRACTS_PACKAGE_VERSION`, and the packed-package
+version guard. `bun.lock` has no root-package version and remains unchanged.
+
 ## [0.10.1] - 2026-08-08
 
 Ships the **fourteen** commits that merged to `main` after 0.10.0 was published
