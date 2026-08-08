@@ -2,6 +2,72 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
+## [0.10.1] - 2026-08-08
+
+Ships the three auth fixes that merged to `main` after 0.10.0 was published at
+`2026-08-08T00:22:21Z`. Every consumer installing between that publish and this
+one received a build predating all three. Each of the three lanes stopped at its
+declared stop condition, which ended at merge; nothing was wrong with them, and
+shipping was simply a step no lane owned.
+
+PATCH, not minor. 0.10.0 was a minor because it broke the kit file manifest
+twice. Nothing here changes a public signature, an export, or the kit manifest:
+all three changes narrow what the auth path ACCEPTS, and every input they now
+reject was a forgery that should never have been accepted. The `^0.10.0` caret
+should deliver these, which is the point of shipping them as a patch.
+
+### A polluted prototype made middleware authenticate as `["*"]` (#87)
+
+`src/auth/middleware.ts` read its option bag and context fields off the
+prototype chain. A polluted prototype made the construct-time `signingSecret`
+guard silently not throw, and `authenticate` then returned `ok: true` with
+scopes `["*"]`. 33 read sites now go through an own-property accessor, with
+regression coverage across the acceptance, denial, tenant, scope, clock, status
+and audit paths.
+
+### The signing-secret length floor ran before conversion, so it measured the lie (#86)
+
+In `mintApiKey` the floor ran BEFORE `toBuffer`, so a value that misreported its
+length passed the floor and was then converted to the far smaller number of
+bytes it really carried. The floor now runs after conversion, on the converted
+buffer's own length.
+
+Stated as the commit states it: this is a LENGTH floor, not an entropy measure.
+It bounds how few bytes may key an HMAC; it says nothing about their quality.
+
+### A `Buffer` that lies about its own length must not mint (#88)
+
+`toBuffer` opened with `Buffer.isBuffer(secret)` and returned the caller's
+object unconverted. The floor then read `secret.length` — an own property the
+caller controls — while `createHmac` read the internal slots, so a real 4-byte
+Buffer with `length` redefined to 4096 minted, and its signature reproduced
+under an HMAC keyed with those four real bytes. Both a data property and a
+getter carried the lie.
+
+The brand check was never the lie: the object genuinely was a `Buffer`.
+`length`, `byteLength` and `byteOffset` are all prototype accessors that an own
+property shadows, so hardening `Buffer.isBuffer` would not have closed this.
+`toBuffer` now converts unconditionally and reads a view's window from the
+intrinsic `%TypedArray%`/`DataView` slot accessors captured at module load, so
+the returned buffer's length is always a fact about this module's own
+allocation.
+
+This route was open on `main` before #86 and was not opened or closed by it —
+#86 recorded it as `todos 7f02a5d4` at merge, and #88 is what closed it.
+
+### Not closed by this release
+
+A bare `SharedArrayBuffer` is refused by `mintApiKey` and accepted by
+`verifyApiKeyToken`. That is the SAFE direction of the #85 asymmetry — mint is
+stricter than verify — and it is not a forgery route. It remains open, recorded
+by the reviewer as a P3.
+
+### Release hygiene
+
+`v0.10.1` is tagged at the MERGE commit on `main`, per the convention 0.10.0
+set: a squash merge mints a new sha, so the branch head is the wrong ref to tag
+even though the tree is identical.
+
 ## [0.10.0] - 2026-08-08
 
 Ships the four changes that had been sitting unpublished on `main` since
