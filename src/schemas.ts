@@ -724,8 +724,7 @@ export const ProjectResourceTargetKindSchema = z.enum([
 ]);
 export type ProjectResourceTargetKind = z.infer<typeof ProjectResourceTargetKindSchema>;
 
-export const ProjectResourceLinkScopeSchema = z.enum(["resource", "collection"]);
-export type ProjectResourceLinkScope = z.infer<typeof ProjectResourceLinkScopeSchema>;
+const ProjectResourceLinkScopeSchema = z.enum(["resource", "collection"]);
 
 const ProjectResourceExternalUuidValueSchema = z
   .string()
