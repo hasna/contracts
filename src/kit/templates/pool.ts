@@ -8,7 +8,12 @@
 import pg from "pg";
 import type { Pool, PoolConfig } from "pg";
 import { resolveServerDataBackend, resolveDatabaseUrl } from "./backend.js";
-import { resolveTlsConfig, type TlsResolveOptions } from "./tls.js";
+import {
+  connectionStringWithoutTlsParameters,
+  resolveTlsConfig,
+  sslNegotiationFromConnectionString,
+  type TlsResolveOptions,
+} from "./tls.js";
 import { createQueryClient, type PoolQueryClient } from "./query.js";
 import { ownProp, ownString } from "./own.js";
 
@@ -86,8 +91,19 @@ export function createPgPool(options: CreatePgPoolOptions): Pool {
     ...(own.env !== undefined ? { env: own.env } : {}),
   });
 
-  const config: PoolConfig = { connectionString };
+  // THE DSN HANDED TO pg MUST HAVE ITS TLS PARAMETERS REMOVED. pg re-parses
+  // `connectionString` after merging these options and lets the parse win
+  // (`Object.assign({}, config, parse(config.connectionString))`), so a
+  // surviving `sslmode` replaces `config.ssl` with `{}` and throws away the CA
+  // bundle `resolveTlsConfig` just loaded. Measured consequence before this
+  // strip: verify-full with a correct CA against a private-CA server (Amazon
+  // RDS is in that class) failed with UNABLE_TO_VERIFY_LEAF_SIGNATURE.
+  const config: PoolConfig & { sslnegotiation?: "postgres" | "direct" } = {
+    connectionString: connectionStringWithoutTlsParameters(connectionString),
+  };
   if (ssl !== undefined) config.ssl = ssl;
+  const sslnegotiation = sslNegotiationFromConnectionString(connectionString);
+  if (sslnegotiation !== undefined) config.sslnegotiation = sslnegotiation;
   if (own.max !== undefined) config.max = own.max;
   if (own.idleTimeoutMillis !== undefined) config.idleTimeoutMillis = own.idleTimeoutMillis;
   if (own.connectionTimeoutMillis !== undefined) config.connectionTimeoutMillis = own.connectionTimeoutMillis;

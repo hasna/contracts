@@ -140,11 +140,17 @@ describe("tls.ts loadCaBundle refuses a prototype-supplied CA", () => {
       }
     });
 
-    test(`[${route.token}] 'require' mode does not silently pin an attacker anchor`, () => {
-      pollute(route, "ca", ATTACKER_CA);
-      const ssl = resolveTlsConfig("postgres://u@h/db?sslmode=require", { env: {} });
-      expect(ssl).toEqual({ rejectUnauthorized: false });
-    });
+    // `prefer` and `require` both reach loadCaBundle now that they resolve to a
+    // verifying config, so both must refuse a prototype-supplied anchor. The
+    // assertion that matters is the ABSENCE of `ca`: a pinned attacker anchor
+    // would be the ONLY trust anchor for the connection.
+    for (const mode of ["prefer", "require"] as const) {
+      test(`[${route.token}] '${mode}' mode does not silently pin an attacker anchor`, () => {
+        pollute(route, "ca", ATTACKER_CA);
+        const ssl = resolveTlsConfig(`postgres://u@h/db?sslmode=${mode}`, { env: {} });
+        expect(ssl).toEqual({ rejectUnauthorized: true });
+      });
+    }
   }
 
   // --- the silent half: legitimate configuration must still work ---

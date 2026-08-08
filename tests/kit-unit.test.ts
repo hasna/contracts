@@ -65,21 +65,25 @@ describe("kit TLS (one correct approach)", () => {
     expect(sslModeFromConnectionString("postgres://h/db?ssl=true")).toBe("require");
   });
 
-  test("require encrypts without verification; verify-full needs a CA", () => {
+  test("require verifies; verify-full needs a CA", () => {
     // Isolate from ambient PGSSLROOTCERT / NODE_EXTRA_CA_CERTS in the shell.
     const noEnv = { env: {} } as const;
     expect(resolveTlsConfig("postgres://h/db", noEnv)).toBeUndefined();
-    expect(resolveTlsConfig("postgres://h/db?sslmode=require", noEnv)).toEqual({ rejectUnauthorized: false });
+    expect(resolveTlsConfig("postgres://h/db?sslmode=disable", noEnv)).toBeUndefined();
+    expect(resolveTlsConfig("postgres://h/db?sslmode=require", noEnv)).toEqual({ rejectUnauthorized: true });
     expect(() => resolveTlsConfig("postgres://h/db?sslmode=verify-full", noEnv)).toThrow(/requires a CA bundle/);
     expect(resolveTlsConfig("postgres://h/db?sslmode=verify-full", { ca: "PEM", env: {} })).toEqual({
       rejectUnauthorized: true,
       ca: "PEM",
     });
-    // require still pins a CA when one is available, but stays non-verifying.
+    // require pins a CA when one is available, and verifies either way.
     expect(resolveTlsConfig("postgres://h/db?sslmode=require", { ca: "PEM", env: {} })).toEqual({
-      rejectUnauthorized: false,
+      rejectUnauthorized: true,
       ca: "PEM",
     });
+    // `prefer` matches `require`: pg has always treated it as an alias for
+    // verify-full, so the resolved config says so.
+    expect(resolveTlsConfig("postgres://h/db?sslmode=prefer", noEnv)).toEqual({ rejectUnauthorized: true });
   });
 
   test("loads CA bundle from PGSSLROOTCERT / NODE_EXTRA_CA_CERTS env", () => {
