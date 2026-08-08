@@ -45,6 +45,27 @@ export function databaseUrlEnvName(app: string, override?: string): string {
   return override ?? `HASNA_${envToken(app)}_DATABASE_URL`;
 }
 
+/**
+ * Read one option as an OWN property — the sibling of `ownAgentClaim` and
+ * `ownTenantId` in `src/auth/keys.ts`, moved to the WRITE path.
+ *
+ * Commander omits a flag the operator did not type rather than defining it as
+ * `undefined`, so the parsed options object genuinely lacks those keys while
+ * still having `Object.prototype` in its chain. A bare `options.<flag>` read is
+ * therefore a real prototype lookup, and a `__proto__`/`constructor.prototype`
+ * write primitive anywhere else in the process decides what it returns.
+ *
+ * That matters more here than on the verify path. Values read in `runIssueKey`
+ * are handed to `mintApiKey` and land INSIDE the HMAC-signed body, so the key
+ * that comes out is cryptographically authentic and no verify-time guard can —
+ * or should — reject it. `ownAgentClaim`/`ownTenantId`/`ownScopesClaim` all sit
+ * downstream of the signature and cannot help. This is the only place the value
+ * can be stopped.
+ */
+function ownOption(options: Record<string, unknown>, name: string): unknown {
+  return Object.hasOwn(options, name) ? options[name] : undefined;
+}
+
 function parseScopesCsv(csv: unknown): string[] {
   if (typeof csv !== "string") return [];
   return csv
@@ -75,15 +96,34 @@ async function connectStore(connectionString: string, table: string): Promise<Is
 
 export async function runIssueKey(options: Record<string, unknown>, deps: IssueKeyDeps): Promise<void> {
   const env = deps.env ?? process.env;
-  const json = options.json === true;
-  const app = String(options.app ?? "").trim();
+
+  // EVERY option is read exactly once, here, as an own property. Reading them
+  // in one place is the point: a single bare `options.x` left anywhere below
+  // reopens the hole for that flag alone, and a bare read is invisible at a
+  // glance because it looks identical to a correct one. Past this block the
+  // function sees locals, never `options`.
+  const optJson = ownOption(options, "json");
+  const optApp = ownOption(options, "app");
+  const optBootstrap = ownOption(options, "bootstrap");
+  const optScopes = ownOption(options, "scopes");
+  const optAgent = ownOption(options, "agent");
+  const optTid = ownOption(options, "tid");
+  const optExpiry = ownOption(options, "expiry");
+  const optTtlDays = ownOption(options, "ttlDays");
+  const optSigningSecretEnv = ownOption(options, "signingSecretEnv") as string | undefined;
+  const optDatabaseUrlEnv = ownOption(options, "databaseUrlEnv") as string | undefined;
+  const optTable = ownOption(options, "table") as string | undefined;
+  const optStore = ownOption(options, "store");
+
+  const json = optJson === true;
+  const app = String(optApp ?? "").trim();
   if (!app) {
     deps.report({ json }, "Missing required option --app.", { code: "missing_app" });
     return;
   }
 
-  const bootstrap = options.bootstrap === true;
-  let scopes = parseScopesCsv(options.scopes);
+  const bootstrap = optBootstrap === true;
+  let scopes = parseScopesCsv(optScopes);
   if (scopes.length === 0) {
     if (bootstrap) {
       scopes = [`${app}:*`];
@@ -95,24 +135,19 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
     }
   }
 
-  // OWN-property read, for the same reason `ownAgentClaim` exists in `auth/keys`
-  // — and this site is the one where getting it wrong is worst. `options` is a
-  // commander-built object with `Object.prototype` in its chain, so a bare
-  // `options.agent` on an invocation that passed no `--agent` resolves to
-  // whatever a pollution gadget planted there. That value is then MINTED INTO
-  // THE SIGNED BODY, which is a strictly worse outcome than the verification-side
-  // defect this guard's siblings close: downstream `ownAgentClaim` reads it back
-  // as an OWN, string-valued claim and reports it as authentic, because by then
-  // it genuinely is. A guard on the read side cannot undo a poisoned signature.
-  // `String()` coercion and the `bootstrap` fallback are preserved exactly; only
-  // the prototype walk is removed.
-  const agentOption = Object.hasOwn(options, "agent") ? options.agent : undefined;
-  const agent = agentOption !== undefined ? String(agentOption) : bootstrap ? "bootstrap" : undefined;
+  // `optAgent` is the own-property read #80 introduced here, now taken at the
+  // top of the function with every other option. Its reasoning is unchanged and
+  // is recorded on `ownOption` above: downstream `ownAgentClaim` reads this back
+  // as an OWN, string-valued claim and reports it as authentic, because once it
+  // has been signed it genuinely is — a read-side guard cannot undo a poisoned
+  // signature. `String()` coercion and the `bootstrap` fallback are preserved
+  // exactly; only the prototype walk is gone.
+  const agent = optAgent !== undefined ? String(optAgent) : bootstrap ? "bootstrap" : undefined;
 
   let tid: string | undefined;
-  if (options.tid !== undefined) {
+  if (optTid !== undefined) {
     try {
-      tid = normalizeTenantId(String(options.tid));
+      tid = normalizeTenantId(String(optTid));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       deps.report({ json }, message, { code: "bad_tid" });
@@ -122,10 +157,10 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
 
   // TTL: --no-expiry => null; else --ttl-days (default 90).
   let ttlSeconds: number | null;
-  if (options.expiry === false) {
+  if (optExpiry === false) {
     ttlSeconds = null;
   } else {
-    const days = options.ttlDays !== undefined ? Number(options.ttlDays) : 90;
+    const days = optTtlDays !== undefined ? Number(optTtlDays) : 90;
     if (!Number.isFinite(days) || days <= 0) {
       deps.report({ json }, "--ttl-days must be a positive number.", { code: "bad_ttl" });
       return;
@@ -133,8 +168,8 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
     ttlSeconds = Math.floor(days * 24 * 60 * 60);
   }
 
-  const secretEnvName = signingSecretEnvName(app, options.signingSecretEnv as string | undefined);
-  const fallbackName = options.signingSecretEnv ? undefined : "HASNA_API_SIGNING_KEY";
+  const secretEnvName = signingSecretEnvName(app, optSigningSecretEnv);
+  const fallbackName = optSigningSecretEnv ? undefined : "HASNA_API_SIGNING_KEY";
   const signingSecret = env[secretEnvName] ?? (fallbackName ? env[fallbackName] : undefined);
   if (!signingSecret) {
     const tried = fallbackName ? `${secretEnvName} (or ${fallbackName})` : secretEnvName;
@@ -162,8 +197,8 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
     return;
   }
 
-  const table = (options.table as string | undefined) ?? "api_keys";
-  const dbEnvName = databaseUrlEnvName(app, options.databaseUrlEnv as string | undefined);
+  const table = optTable ?? "api_keys";
+  const dbEnvName = databaseUrlEnvName(app, optDatabaseUrlEnv);
   const expiresAt = minted.claims.exp === null ? null : new Date(minted.claims.exp * 1000).toISOString();
   const issuedAt = new Date(minted.claims.iat * 1000).toISOString();
 
@@ -220,7 +255,7 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
   };
 
   let stored = false;
-  if (options.store !== false) {
+  if (optStore !== false) {
     const createdBy = agent ?? "issue-key";
     const connectionString = env[dbEnvName];
     if (!connectionString) {
