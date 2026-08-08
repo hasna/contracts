@@ -9,10 +9,18 @@ Ships the four changes that had been sitting unpublished on `main` since
 every republish and #68, #69, #70 and #71 reached no consumer for six days.
 The version had to move before any of them could ship at all.
 
-MINOR RATHER THAN PATCH BECAUSE THIS RELEASE IS BREAKING TWICE. The repo's
-convention is stated in its own history — `chore(release): 0.9.0 — breaking
-auth default requires a minor bump` — so on 0.x a breaking change takes the
-minor slot. Both breaks are below and either alone would force it.
+MINOR RATHER THAN PATCH BECAUSE THIS RELEASE IS BREAKING TWICE. The precedent
+is `18c2279`, `chore(release): 0.9.0 — breaking auth default requires a minor
+bump` — cited by sha because that subject reaches main only through the squash
+`b70fcc8`, whose own subject reads differently. The mechanism it records is
+what matters: `^0.8.2` admits 0.8.6 but NOT 0.9.0, because on 0.x the caret
+stops at the minor, so the minor slot IS the semver-major slot here. A patch
+would auto-deliver both breaks below into every `^0.9.0` consumer's next
+install with no opt-in. Either break alone would force this.
+
+Stated against this convention rather than for it: `[0.8.7]` also carries a
+`### BREAKING` heading and shipped as a patch. The convention is one release
+old and was violated the release before it was set.
 
 ### BREAKING: the kit gains `own.ts`, so every vendored consumer must re-stamp (#71)
 
@@ -135,7 +143,9 @@ convention.
 
 Tags had stopped at `v0.8.1` while 0.8.2, 0.8.4, 0.8.5, 0.8.7 and 0.9.0 all
 published untagged, so there was no ref naming what any published version
-contained. `v0.10.0` is tagged at this release commit.
+contained. `v0.10.0` will be tagged at the MERGE commit on `main` and pushed in
+the same session as the publish — not at the branch head, because a squash
+merge mints a new sha: the tree is identical, the sha is not.
 
 ## [0.9.0] - 2026-08-01
 
