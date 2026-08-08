@@ -290,6 +290,29 @@ function isBoundedIdentifier(value: unknown): value is string {
   );
 }
 
+/**
+ * Read the `scope` claim as an OWN, array-valued property.
+ *
+ * The Ed25519 twin of `ownScopesClaim` in `keys.ts` — same class, same
+ * consequence, different spelling: fleet tokens name the claim `scope`
+ * (singular) where API keys name it `scopes`. A guard that fixed one and left
+ * the other would close half the surface while reading as complete.
+ *
+ * The payload here is `JSON.parse` output, so `Object.prototype` is genuinely
+ * in its chain: a token that carries no `scope` at all would otherwise have
+ * `claims.scope` resolve to whatever a `__proto__`/`constructor.prototype`
+ * write primitive elsewhere in the process planted there. That value is not in
+ * the signed payload, so it is not authentic, and it must never reach a scope
+ * check or a principal.
+ *
+ * As in `keys.ts` this is defence in depth rather than a reachable hole — the
+ * fleet issuer always emits `scope` as an own key — and the guard exists so the
+ * property stays true no matter who mints the next token.
+ */
+function ownScopeClaim(source: { scope?: unknown }): string[] | null {
+  return Object.hasOwn(source, "scope") && Array.isArray(source.scope) ? (source.scope as string[]) : null;
+}
+
 function claimsProblem(claims: Record<string, unknown>): string | null {
   if (typeof claims.iss !== "string" || claims.iss.length === 0) return "iss must be a non-empty string";
   if (!isBoundedIdentifier(claims.sub)) return `sub must be 1-${MAX_IDENTIFIER_LENGTH} printable ASCII characters`;
@@ -303,7 +326,8 @@ function claimsProblem(claims: Record<string, unknown>): string | null {
   if (!(PRINCIPAL_TYPES as readonly unknown[]).includes(claims.pt)) {
     return `pt must be one of ${PRINCIPAL_TYPES.join(", ")}`;
   }
-  if (!Array.isArray(claims.scope) || claims.scope.some((entry) => typeof entry !== "string" || !isValidScope(entry))) {
+  const scope = ownScopeClaim(claims);
+  if (scope === null || scope.some((entry) => typeof entry !== "string" || !isValidScope(entry))) {
     return "scope must be an array of valid '<app>:<action>' scopes";
   }
   if (!Number.isFinite(claims.iat as number)) return "iat must be a number";
@@ -470,9 +494,17 @@ export function verifyFleetToken(token: string, options: VerifyFleetTokenOptions
     };
   }
 
+  // One guarded read, used by both the authorization check and the principal.
+  // `claimsProblem` has already refused a payload with no own `scope`, so the
+  // `?? []` is unreachable today; it is here because this value decides
+  // authorization, and an empty grant set is the only safe answer if a future
+  // caller ever reaches these lines by another route. Reading `claims.scope`
+  // directly would instead let that caller authorize on the prototype's value
+  // and copy it into the principal.
+  const grantedScopes = ownScopeClaim(claims) ?? [];
   if (options.requiredScopes && options.requiredScopes.length > 0) {
     for (const required of options.requiredScopes) {
-      if (!claims.scope.some((granted) => scopeMatches(granted, required))) {
+      if (!grantedScopes.some((granted) => scopeMatches(granted, required))) {
         return { ok: false, reason: "insufficient_scope", message: `Missing required scope '${required}'.` };
       }
     }
@@ -484,7 +516,7 @@ export function verifyFleetToken(token: string, options: VerifyFleetTokenOptions
       sub: claims.sub,
       tid,
       principalType: claims.pt,
-      scopes: [...claims.scope],
+      scopes: [...grantedScopes],
       jti: claims.jti,
       kid: header.kid,
       issuer: claims.iss,

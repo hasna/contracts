@@ -93,6 +93,34 @@ export function ownAgentClaim(source: { agent?: unknown }): string | null {
   return Object.hasOwn(source, "agent") && typeof source.agent === "string" ? source.agent : null;
 }
 
+/**
+ * Read the `scopes` claim as an OWN, array-valued property — the sibling of
+ * {@link ownAgentClaim} and of `ownTenantId`, and the last claim in this file
+ * that was still read straight off the prototype chain.
+ *
+ * `scopes` is the authorization claim, so the consequence of an inherited read
+ * is not a mislabelled audit line but a grant: a single
+ * `Object.prototype.scopes = ["*"]` write primitive anywhere in the process
+ * hands a wildcard to every claim set that carries no own `scopes` key, and
+ * `*` satisfies every `requiredScopes` check the kit performs.
+ *
+ * This is DEFENCE IN DEPTH, not a hole this kit leaves open, and the
+ * distinction is worth stating so nobody later "simplifies" the property that
+ * closes it. `mintApiKey` is the only place in this module that builds a
+ * signed body; it refuses fewer than one scope and always writes `scopes` as
+ * an own property, and an own property shadows the prototype. So no token this
+ * kit can mint reaches the inherited read. A body that does reach it — from an
+ * older minter, a sibling implementation, a hand-rolled issuance path — is a
+ * malformed token, and `null` here makes the structural check say so.
+ *
+ * `null` for absent rather than `undefined`, matching `ownAgentClaim`: the
+ * caller must handle the missing case explicitly rather than let it flow on as
+ * a value that happens to be falsy.
+ */
+export function ownScopesClaim(source: { scopes?: unknown }): string[] | null {
+  return Object.hasOwn(source, "scopes") && Array.isArray(source.scopes) ? (source.scopes as string[]) : null;
+}
+
 export interface MintApiKeyOptions {
   app: string;
   scopes: string[];
@@ -250,7 +278,10 @@ export function parseApiKey(token: string): ParsedApiKey | null {
     claims === null ||
     typeof claims.kid !== "string" ||
     typeof claims.app !== "string" ||
-    !Array.isArray(claims.scopes)
+    // The OWN scopes claim, for the same reason `tid` is read as an own
+    // property below: validating the own property while a later consumer reads
+    // the inherited one is worse than not checking at all.
+    ownScopesClaim(claims) === null
   ) {
     return null;
   }
@@ -436,7 +467,14 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
 
   if (options.requiredScopes && options.requiredScopes.length > 0) {
     // Local import avoided to keep the crypto module leaf; inline the check.
-    const granted = claims.scopes;
+    // `parseApiKey` has already refused a body with no own `scopes`, so the
+    // `?? []` is unreachable today. It is here anyway, and it denies rather
+    // than throws, because this is the read that decides authorization: an
+    // empty grant set satisfies nothing, which is the only safe answer if a
+    // future caller ever reaches this check by another route. Reading
+    // `claims.scopes` directly would instead make that future caller inherit
+    // the prototype's value and authorize on it.
+    const granted = ownScopesClaim(claims) ?? [];
     const satisfies = (required: string): boolean =>
       granted.some((g) => {
         if (g === "*") return true;
