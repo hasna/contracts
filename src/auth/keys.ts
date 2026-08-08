@@ -238,17 +238,99 @@ function isBinarySecret(value: unknown): value is ArrayBufferView | ArrayBuffer 
   return ArrayBuffer.isView(value) || value instanceof ArrayBuffer;
 }
 
+// THE WINDOW OF A BYTE VIEW, READ FROM INTERNAL SLOTS RATHER THAN FROM
+// PROPERTIES THE CALLER CAN RESTATE.
+//
+// `buffer`, `byteOffset` and `byteLength` are accessors on `%TypedArray%.prototype`
+// (and on `DataView.prototype`), and an own property defined directly on an
+// instance SHADOWS the prototype accessor. So `view.byteLength` is a caller-
+// controlled read on any object the caller had a chance to touch, exactly as
+// `view.length` is. Invoking the intrinsic getter with the view as receiver
+// reaches the internal slot instead, and a shadowing own property cannot change
+// what it returns.
+//
+// Captured once at module load, from the pristine prototypes, so that a later
+// write to `Uint8Array.prototype` cannot swap them. This is the standard
+// hardening idiom and it is not total: an attacker who has already replaced
+// these accessors BEFORE this module is evaluated owns the process outright, and
+// no read performed here could be trusted anyway.
+const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype) as object;
+const intrinsicViewBuffer = Object.getOwnPropertyDescriptor(typedArrayPrototype, "buffer")!.get!;
+const intrinsicViewByteOffset = Object.getOwnPropertyDescriptor(typedArrayPrototype, "byteOffset")!.get!;
+const intrinsicViewByteLength = Object.getOwnPropertyDescriptor(typedArrayPrototype, "byteLength")!.get!;
+const intrinsicDataViewBuffer = Object.getOwnPropertyDescriptor(DataView.prototype, "buffer")!.get!;
+const intrinsicDataViewByteOffset = Object.getOwnPropertyDescriptor(DataView.prototype, "byteOffset")!.get!;
+const intrinsicDataViewByteLength = Object.getOwnPropertyDescriptor(DataView.prototype, "byteLength")!.get!;
+
+/**
+ * The `[buffer, byteOffset, byteLength]` a byte view really spans.
+ *
+ * The `try`/`catch` IS the brand check, and it is a real one: the
+ * `%TypedArray%` getters throw a `TypeError` when the receiver has no
+ * `[[TypedArrayName]]` internal slot, which is precisely what distinguishes a
+ * `DataView` from a `TypedArray`. Unlike `instanceof` — the forgeable test this
+ * whole change exists to stop relying on — an internal-slot read cannot be
+ * satisfied by grafting a prototype. `ArrayBuffer.isView` has already
+ * established that the value is one of the two, so the fallback is not a guess.
+ */
+function viewWindow(view: ArrayBufferView): [ArrayBufferLike, number, number] {
+  try {
+    return [
+      intrinsicViewBuffer.call(view) as ArrayBufferLike,
+      intrinsicViewByteOffset.call(view) as number,
+      intrinsicViewByteLength.call(view) as number,
+    ];
+  } catch {
+    return [
+      intrinsicDataViewBuffer.call(view) as ArrayBufferLike,
+      intrinsicDataViewByteOffset.call(view) as number,
+      intrinsicDataViewByteLength.call(view) as number,
+    ];
+  }
+}
+
+/**
+ * Convert a signing secret to the bytes that will actually key the HMAC.
+ *
+ * THE RETURNED BUFFER'S `length` IS ALWAYS A FACT ABOUT THIS FUNCTION'S OWN
+ * ALLOCATION, NEVER A NUMBER THE CALLER SUPPLIED. That is the entire contract,
+ * and every caller of the entropy floor depends on it: the floor in
+ * `mintApiKey` measures `secret.length` after this call, so if this function can
+ * be talked into returning an object whose `length` disagrees with the bytes
+ * `createHmac` will read, the floor measures the disagreement rather than the
+ * key.
+ *
+ * WHY THE `Buffer.isBuffer` FAST PATH IS GONE. It was `instanceof`-based and it
+ * returned the CALLER'S OBJECT unconverted, so a genuine four-byte `Buffer` with
+ * `length` redefined to 4096 passed the floor and was then keyed with its four
+ * real bytes — `createHmac` reads the internal slots and never consults
+ * `.length`. Measured on `b518f81a`: `MINTED keyedWith4=true` for both a data
+ * property and a getter. The fix is not a tighter brand test, because the object
+ * genuinely WAS a `Buffer`; the brand was never the lie. The lie was the length,
+ * and it is defeated by converting unconditionally.
+ *
+ * A `Buffer` is a `Uint8Array`, so it now takes the view branch like every other
+ * byte view. That branch carries `byteOffset`/`byteLength` precisely so a view
+ * over part of a larger store signs with ITS OWN WINDOW — `Buffer.from(store)`
+ * alone would sign with the whole backing store, a wrong-key bug that mints a
+ * valid-looking token nobody else can verify. Under Node's small-`Buffer`
+ * pooling the backing store is a shared 8 KiB slab, which is the case that makes
+ * the window mandatory rather than defensive.
+ */
 function toBuffer(secret: SigningSecret): Buffer {
   if (typeof secret === "string") return Buffer.from(secret, "utf8");
-  if (Buffer.isBuffer(secret)) return secret;
-  // `byteOffset`/`byteLength` are not optional detail: a view over part of a
-  // larger store must sign with ITS OWN WINDOW. `Buffer.from(view.buffer)`
-  // would silently sign with the whole backing store, which is a wrong-key bug
-  // that produces a perfectly valid-looking token nobody else can verify.
-  if (ArrayBuffer.isView(secret)) return Buffer.from(secret.buffer, secret.byteOffset, secret.byteLength);
-  // A bare `ArrayBuffer`. Anything else reaches `Buffer.from` and throws there,
-  // which is what the verify path did before and still does — see the comment
-  // on `verifyApiKeyToken`'s `signingSecret` read.
+  if (ArrayBuffer.isView(secret)) {
+    // `ArrayBuffer.isView` reads an internal slot and is NOT forgeable by
+    // prototype grafting — measured: `Object.create(Uint8Array.prototype)`
+    // returns false — so reaching this branch is itself evidence of real bytes.
+    const [store, byteOffset, byteLength] = viewWindow(secret);
+    return Buffer.from(store, byteOffset, byteLength);
+  }
+  // A bare `ArrayBuffer`. `instanceof ArrayBuffer` IS forgeable, so nothing here
+  // trusts it: a forged one reaches `Buffer.from` and throws, and an honest but
+  // short one converts to its real length and is caught by the floor. Anything
+  // else throws too, which is what the verify path did before and still does —
+  // see the comment on `verifyApiKeyToken`'s `signingSecret` read.
   return Buffer.from(secret);
 }
 
@@ -370,19 +452,27 @@ export function mintApiKey(options: MintApiKeyOptions): MintedApiKey {
   // honest short `ArrayBuffer` with one check, instead of chasing each spoofable
   // brand test in turn.
   //
-  // WHAT THIS DOES NOT CLOSE, stated because an earlier draft of this comment
-  // claimed a lying length had "nowhere left to be read" and that is FALSE.
-  // `toBuffer`'s first branch is `Buffer.isBuffer(secret)`, which is itself
-  // `instanceof`-based, and it returns the CALLER'S OBJECT unconverted — so a
-  // real 4-byte `Buffer` with `length` redefined to 4096 passes this floor and
-  // is keyed with its four real bytes. Measured on this commit AND on
-  // `39e019ca`: `MINTED keyedWith4=true` on both, so it is a pre-existing route
-  // that this change neither opens nor closes. It is tracked separately against
-  // `main`; the fix belongs in `toBuffer` and is not a one-liner, because
-  // routing `Buffer` down the `isView` branch collides with Buffer allocation
-  // pooling. Overstating a guard's reach is how the guard gets trusted past it,
-  // which is the whole reason this paragraph exists rather than the sentence it
-  // replaced.
+  // THE ROUTE THIS PARAGRAPH USED TO LEAVE OPEN IS NOW CLOSED, IN `toBuffer`,
+  // AND THE FLOOR HERE IS UNCHANGED. Until then `toBuffer`'s first branch was
+  // `Buffer.isBuffer(secret)` — itself `instanceof`-based — returning the
+  // CALLER'S OBJECT unconverted, so a real 4-byte `Buffer` with `length`
+  // redefined to 4096 passed this floor and was keyed with its four real bytes.
+  // Measured on `b518f81a`: `MINTED keyedWith4=true` for a data property and for
+  // a getter. `toBuffer` now converts unconditionally and reads a view's window
+  // from the intrinsic slot accessors, so `secret` below is always a `Buffer`
+  // this module allocated and its `length` is always a fact about that
+  // allocation. See `toBuffer` for why the brand test was never the lie.
+  //
+  // WHAT IS STILL NOT CLOSED, stated precisely because an earlier draft of this
+  // comment claimed a lying length had "nowhere left to be read" and that was
+  // FALSE. This floor is a LENGTH floor and nothing more: it counts the bytes
+  // that key the HMAC, and it cannot assess their quality. Sixteen identical
+  // bytes pass it. It is also worth knowing that HMAC zero-pads any key shorter
+  // than its 64-byte block, so `[1,2,3,4]` and those same four bytes followed by
+  // twelve zeros ARE THE SAME KEY — a fact that makes zero-extension useless as
+  // a "different key" control in any test written against this path.
+  // Overstating a guard's reach is how the guard gets trusted past it, which is
+  // the whole reason this paragraph exists rather than the sentence it replaced.
   //
   // An earlier revision of this block argued the opposite and the argument
   // inverted. It kept the check on the raw input because moving it made the
