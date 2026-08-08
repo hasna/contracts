@@ -131,14 +131,14 @@ const PG_TLS_QUERY_PARAMETERS = new Set([
  * set, and `resolveTlsConfig` decides whether an operator explicitly asked for
  * TLS to be OFF from the falsey set.
  *
- * A value in NEITHER set (a typo such as `ssl=treu`) is REJECTED — see the throw
- * in `sslModeFromConnectionString`. It used to resolve to mode `disable` without
- * being treated as an explicit off, so it fell through to pg's PGSSLMODE
- * fallback: an operator who believes they asked for TLS gets whatever the
- * environment happens to say. That is the same failure the explicit-off branch
- * of `resolveTlsConfig` exists to prevent, differing only in which parameter
- * carries the typo, and it is why `sslmode` has thrown on an unknown value all
- * along while its sibling did not.
+ * A value in NEITHER set (empty, or a typo such as `ssl=treu`) is REJECTED — see
+ * the throw in `sslModeFromConnectionString`. It used to resolve to mode
+ * `disable` without being treated as an explicit off, so it fell through to
+ * pg's PGSSLMODE fallback: an operator who believes they asked for TLS gets
+ * whatever the environment happens to say. That is the same failure the
+ * explicit-off branch of `resolveTlsConfig` exists to prevent, differing only
+ * in which parameter carries the typo, and it is why `sslmode` has thrown on an
+ * unknown value all along while its sibling did not.
  *
  * The divergence was recorded (row c317d0bf) rather than fixed at the time,
  * because rejecting it could start refusing DSNs that connect today. Row
@@ -264,11 +264,12 @@ export function sslModeFromConnectionString(connectionString: string): SslMode {
   }
 
   if (values.has("ssl")) {
-    const ssl = values.get("ssl")?.trim().toLowerCase();
-    if (ssl && EXPLICIT_SSL_ON_VALUES.has(ssl)) return "require";
+    const ssl = values.get("ssl")?.trim().toLowerCase() ?? "";
+    if (EXPLICIT_SSL_ON_VALUES.has(ssl)) return "require";
     // Neither on nor off: refuse rather than silently resolving to `disable`.
-    // A bare `?ssl=` carries no value to misread and keeps its old meaning.
-    if (ssl && !EXPLICIT_SSL_OFF_VALUES.has(ssl)) {
+    // Presence is the operator instruction; an empty value is malformed, not
+    // the same as omitting the parameter and deliberately deferring to PGSSLMODE.
+    if (!EXPLICIT_SSL_OFF_VALUES.has(ssl)) {
       throw new Error(`Unknown ssl value '${ssl}' in connection string.`);
     }
     return "disable";

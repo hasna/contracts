@@ -136,15 +136,15 @@ describe("kit TLS (one correct approach)", () => {
       expect(resolveTlsConfig("postgres://h/db?ssl=FALSE", noEnv)).toBe(false);
     });
 
-    test("a bare ssl= carries no value to misread and keeps its old meaning", () => {
-      // Empty is falsy, so it reaches neither the ON check nor the new throw —
-      // the path is untouched by this change. It resolves to mode `disable` but
-      // NOT to an explicit off (the empty string is in neither named set), so
-      // `resolveTlsConfig` returns `undefined` and pg's PGSSLMODE fallback still
-      // applies. Pinned at what it actually does, not at what reads tidier: this
-      // asserts the change is inert here rather than proposing new behaviour.
-      expect(sslModeFromConnectionString("postgres://h/db?ssl=")).toBe("disable");
-      expect(resolveTlsConfig("postgres://h/db?ssl=", noEnv)).toBeUndefined();
+    test("refuses a present-but-empty ssl value instead of treating it as absence", () => {
+      for (const empty of ["", "%20", "%20%20"]) {
+        expect(() => sslModeFromConnectionString(`?ssl=${empty}`)).toThrow(
+          /Unknown ssl value/,
+        );
+        expect(() => resolveTlsConfig(`?ssl=${empty}`, noEnv)).toThrow(
+          /Unknown ssl value/,
+        );
+      }
     });
 
     test("no ssl parameter at all is untouched — PGSSLMODE fallback is preserved", () => {
