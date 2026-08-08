@@ -407,7 +407,7 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
       try {
         status = await ownKeyStatus(verified.kid);
       } catch {
-        await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.claims.agent ?? null, reason: "status_unavailable", scopesRequired: requiredScopes, method, path, status: 503, at });
+        await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason: "status_unavailable", scopesRequired: requiredScopes, method, path, status: 503, at });
         return {
           ok: false,
           status: 503,
@@ -434,7 +434,7 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
               : status === "expired"
                 ? "API key has expired."
                 : "API key has been revoked.";
-          await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.claims.agent ?? null, reason, scopesRequired: requiredScopes, method, path, status: 401, at });
+          await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason, scopesRequired: requiredScopes, method, path, status: 401, at });
           return { ok: false, status: 401, reason, message };
         }
       }
@@ -449,7 +449,7 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
       try {
         revoked = await ownIsRevoked(verified.kid);
       } catch {
-        await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.claims.agent ?? null, reason: "status_unavailable", scopesRequired: requiredScopes, method, path, status: 503, at });
+        await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason: "status_unavailable", scopesRequired: requiredScopes, method, path, status: 503, at });
         return {
           ok: false,
           status: 503,
@@ -458,7 +458,7 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
         };
       }
       if (revoked) {
-        await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.claims.agent ?? null, reason: "revoked", scopesRequired: requiredScopes, method, path, status: 401, at });
+        await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason: "revoked", scopesRequired: requiredScopes, method, path, status: 401, at });
         return { ok: false, status: 401, reason: "revoked", message: "API key has been revoked." };
       }
     }
@@ -467,11 +467,11 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
       kid: verified.kid,
       app: verified.app,
       scopes: verified.claims.scopes,
-      agent: verified.claims.agent ?? null,
+      agent: verified.agent,
       tid: verified.tid,
       claims: verified.claims,
     };
-    await emit({ outcome: "allow", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.claims.agent ?? null, reason: null, scopesRequired: requiredScopes, method, path, status: 200, at });
+    await emit({ outcome: "allow", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason: null, scopesRequired: requiredScopes, method, path, status: 200, at });
     return { ok: true, status: 200, principal };
   }
 

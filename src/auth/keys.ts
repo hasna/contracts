@@ -73,6 +73,26 @@ export interface ApiKeyClaims {
   agent?: string;
 }
 
+/**
+ * Read the `agent` claim as an OWN, string-valued property — the single guard
+ * for this claim, and the sibling of `ownTenantId`.
+ *
+ * A claims object is either `JSON.parse` output (verification) or a locally
+ * built object literal (minting). Both have `Object.prototype` in their chain,
+ * so a bare `claims.agent` on a token that carries no agent resolves to
+ * whatever a `__proto__`/`constructor.prototype` write primitive elsewhere in
+ * the process planted there. That value is not in the signed body, so it is not
+ * authentic, and it must never reach an audit trail, a principal, or a stored
+ * key record as if it were.
+ *
+ * A missing claim is `null` — authenticated, and naming no subject. That is a
+ * different fact from "never established", which callers express by omitting
+ * the field entirely rather than by calling this.
+ */
+export function ownAgentClaim(source: { agent?: unknown }): string | null {
+  return Object.hasOwn(source, "agent") && typeof source.agent === "string" ? source.agent : null;
+}
+
 export interface MintApiKeyOptions {
   app: string;
   scopes: string[];
@@ -265,6 +285,17 @@ export type ApiKeyVerifyResult =
       app: string;
       /** Canonical tenant id, or `null` for an untenanted key. */
       tid: string | null;
+      /**
+       * The issued-to agent/subject, or `null` when the token claims none.
+       *
+       * ALWAYS present on success, which is the point: callers read this
+       * instead of reaching back into `claims`. `claims` is `JSON.parse`
+       * output, so a plain `claims.agent` read walks the prototype chain and,
+       * in a process whose `Object.prototype` has been polluted, yields a
+       * subject the signature never covered. Reading it here is an own-property
+       * read of a value that was guarded once, at the single site below.
+       */
+      agent: string | null;
     }
   | {
       ok: false;
@@ -340,10 +371,14 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
     return { ok: false, reason: "bad_signature", message: "Signature verification failed." };
   }
 
-  // Read only an own, string-valued claim. A missing claim is an authenticated
-  // `null`; a value inherited through a polluted prototype is not in the signed
-  // body and must never become audit attribution.
-  const agent = Object.hasOwn(claims, "agent") && typeof claims.agent === "string" ? claims.agent : null;
+  // Every result below — the denials AND the success — carries this value out,
+  // so no caller has cause to reach into `claims.agent` itself. That is
+  // deliberate: the guard used to be inline here while the success result
+  // omitted `agent` entirely, which left the middleware re-reading
+  // `verified.claims.agent` unguarded on the allow path and on four post-status
+  // denials. Six copies of a guard is six chances for the seventh reader to
+  // forget; one guarded value has none.
+  const agent = ownAgentClaim(claims);
   const now = Math.floor((options.nowMs ?? Date.now()) / 1000);
   const leeway = options.leewaySeconds ?? 0;
   if (typeof claims.iat === "number" && now + leeway < claims.iat) {
@@ -420,5 +455,5 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
     }
   }
 
-  return { ok: true, claims, kid: claims.kid, app, tid };
+  return { ok: true, claims, kid: claims.kid, app, tid, agent };
 }
