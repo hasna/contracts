@@ -385,14 +385,73 @@ describe("kit TLS handshake — direct negotiation implies verified TLS", () => 
 });
 
 describe("kit TLS handshake — sslmode=disable is still plaintext", () => {
+  // THESE TESTS DRIVE THE REAL `process.env.PGSSLMODE`, DELIBERATELY.
+  //
+  // `throughKit` passes `env: {}`, and that isolates `loadCaBundle` ONLY. It
+  // never reaches pg's own environment fallback: when `resolveTlsConfig`
+  // returns `undefined` the pool carries no `ssl` key at all, so pg reaches
+  // connection-parameters.js -> readSSLConfigFromEnvironment(), which reads the
+  // real `process.env.PGSSLMODE` directly. The variable is therefore the only
+  // instrument that can exercise this path, and it is restored in `finally`.
+  //
+  // Before row c317d0bf was fixed, this block passed under `env -u PGSSLMODE`
+  // and failed under `PGSSLMODE=require` — so the defect was detectable only by
+  // accident of the shell. Setting the variable in-process makes it explicit.
+  async function withPgSslMode<T>(value: string | undefined, fn: () => Promise<T>): Promise<T> {
+    const had = Object.hasOwn(process.env, "PGSSLMODE");
+    const previous = process.env.PGSSLMODE;
+    if (value === undefined) delete process.env.PGSSLMODE;
+    else process.env.PGSSLMODE = value;
+    try {
+      return await fn();
+    } finally {
+      if (had) process.env.PGSSLMODE = previous;
+      else delete process.env.PGSSLMODE;
+    }
+  }
+
   test("disable does not send an SSLRequest", async () => {
-    const outcome = await throughKit(selfSignedDsn("?sslmode=disable"));
+    const outcome = await withPgSslMode(undefined, () =>
+      throughKit(selfSignedDsn("?sslmode=disable")),
+    );
+    expect(outcome).toEqual({ kind: "PLAINTEXT_NO_TLS" });
+  });
+
+  // REGRESSION, row c317d0bf. An EXPLICIT operator `sslmode=disable` must beat
+  // an ambient PGSSLMODE. Measured failure before the fix, at 24df0fa:
+  //   { kind: "TLS_REJECTED_CERT", code: "DEPTH_ZERO_SELF_SIGNED_CERT" }
+  // i.e. TLS was attempted against a server the operator had asked to reach in
+  // plaintext, and the instruction in the DSN said nothing at all.
+  test("an explicit sslmode=disable beats an ambient PGSSLMODE=require", async () => {
+    const outcome = await withPgSslMode("require", () =>
+      throughKit(selfSignedDsn("?sslmode=disable")),
+    );
+    expect(outcome).toEqual({ kind: "PLAINTEXT_NO_TLS" });
+  });
+
+  test("an explicit ssl=false beats an ambient PGSSLMODE=require", async () => {
+    const outcome = await withPgSslMode("require", () => throughKit(selfSignedDsn("?ssl=false")));
     expect(outcome).toEqual({ kind: "PLAINTEXT_NO_TLS" });
   });
 
   test("a DSN with no ssl parameters at all is still plaintext", async () => {
-    const outcome = await throughKit(selfSignedDsn(""));
+    const outcome = await withPgSslMode(undefined, () => throughKit(selfSignedDsn("")));
     expect(outcome).toEqual({ kind: "PLAINTEXT_NO_TLS" });
+  });
+
+  // THE OTHER HALF OF THE GATE, AND IT IS WHY THE FIX IS NOT A BLANKET `false`.
+  //
+  // A DSN carrying NO ssl parameter has expressed no instruction, so pg's
+  // PGSSLMODE fallback is libpq's documented behaviour and must survive. If the
+  // `disable` branch is ever widened to return `false` unconditionally — which
+  // would make this whole block pass under any environment and look like a
+  // tidier fix — an operator who sets PGSSLMODE=require to force TLS on bare
+  // DSNs is silently downgraded to plaintext. This test fails loudly on that,
+  // so the wrong fix cannot land quietly.
+  test("a DSN with no ssl parameter still defers to PGSSLMODE (libpq behaviour)", async () => {
+    const outcome = await withPgSslMode("require", () => throughKit(selfSignedDsn("")));
+    expect(outcome.kind).toBe("TLS_REJECTED_CERT");
+    expect((outcome as { code: string }).code).toBe("DEPTH_ZERO_SELF_SIGNED_CERT");
   });
 });
 
