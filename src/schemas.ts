@@ -32,6 +32,7 @@ export const SCHEMA_IDS = {
   commsEventEnvelope: "hasna.comms_event_envelope.v1",
   commsChannelMetadata: "hasna.comms_channel_metadata.v1",
   commsMessageMetadata: "hasna.comms_message_metadata.v1",
+  projectResourceLinkCollectionV1: "hasna.project_resource_link_collection.v1",
   app: "hasna.app.v1",
   release: "hasna.release.v1",
   rolloutRecord: "hasna.rollout_record.v1",
@@ -699,6 +700,372 @@ export const IntegrationRefSchema = contractBaseSchema(SCHEMA_IDS.integrationRef
     }
   });
 export type IntegrationRef = z.infer<typeof IntegrationRefSchema>;
+
+export const ProjectResourceAuthoritySchema = z.enum([
+  "todos",
+  "conversations",
+  "knowledge",
+  "mementos",
+  "orgs",
+  "contacts"
+]);
+export type ProjectResourceAuthority = z.infer<typeof ProjectResourceAuthoritySchema>;
+
+export const ProjectResourceTargetKindSchema = z.enum([
+  "contact",
+  "org",
+  "project",
+  "task",
+  "task_list",
+  "plan",
+  "channel",
+  "collection",
+  "item"
+]);
+export type ProjectResourceTargetKind = z.infer<typeof ProjectResourceTargetKindSchema>;
+
+const ProjectResourceLinkScopeSchema = z.enum(["resource", "collection"]);
+
+const ProjectResourceExternalUuidValueSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/,
+    "Project resource external UUIDs must be complete RFC 4122 UUIDs"
+  )
+  .transform((value) => value.toLowerCase());
+
+const ProjectResourceCanonicalUriValueSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .transform((value, ctx) => {
+    if (/^urn:[a-z0-9][a-z0-9-]{0,31}:[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+$/.test(value)) {
+      return value;
+    }
+
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Project resource canonical URIs must use canonical HTTPS or URN syntax"
+      });
+      return z.NEVER;
+    }
+
+    if (url.protocol !== "https:" || url.username || url.password) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Project resource canonical HTTPS URIs must not contain credentials"
+      });
+      return z.NEVER;
+    }
+    if (url.search || url.hash) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Project resource canonical HTTPS URIs must not contain query or fragment components"
+      });
+      return z.NEVER;
+    }
+    return url.toString();
+  });
+
+export const ProjectResourceLinkLabelsSchema = z
+  .object({
+    name: NonEmptyStringSchema.optional(),
+    channel_name: NonEmptyStringSchema.optional(),
+    path: NonEmptyStringSchema.optional(),
+    tags: z
+      .array(z.string())
+      .transform((tags) => [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))].sort())
+      .optional()
+  })
+  .strict();
+export type ProjectResourceLinkLabels = z.infer<typeof ProjectResourceLinkLabelsSchema>;
+
+const ProjectResourceExternalUuidLocatorSchema = z
+  .object({
+    kind: z.literal("external_uuid"),
+    value: ProjectResourceExternalUuidValueSchema
+  })
+  .strict();
+
+const ProjectResourceCanonicalUriLocatorSchema = z
+  .object({
+    kind: z.literal("canonical_uri"),
+    value: ProjectResourceCanonicalUriValueSchema
+  })
+  .strict();
+
+const ProjectResourceConversationsChannelLocatorSchema = z
+  .object({
+    kind: z.literal("conversations_channel_id"),
+    value: z.string().regex(/^chn_[0-9a-f]{32}$/, "Conversations channel locators must match chn_<32 lowercase hex>")
+  })
+  .strict();
+
+const ProjectResourcePortableLocatorSchema = z.discriminatedUnion("kind", [
+  ProjectResourceExternalUuidLocatorSchema,
+  ProjectResourceCanonicalUriLocatorSchema
+]);
+
+export const ProjectResourceLinkLocatorSchema = z.discriminatedUnion("kind", [
+  ProjectResourceExternalUuidLocatorSchema,
+  ProjectResourceCanonicalUriLocatorSchema,
+  ProjectResourceConversationsChannelLocatorSchema
+]);
+export type ProjectResourceLinkLocator = z.infer<typeof ProjectResourceLinkLocatorSchema>;
+
+const ProjectResourceLinkCommonShape = {
+  service_instance: ProjectResourceCanonicalUriValueSchema,
+  scope: ProjectResourceLinkScopeSchema,
+  labels: ProjectResourceLinkLabelsSchema.optional()
+} as const;
+
+const ProjectResourceTodosContainerLinkInputSchema = z
+  .object({
+    authority: z.literal("todos"),
+    ...ProjectResourceLinkCommonShape,
+    source_package: z.literal("@hasna/todos"),
+    target_kind: z.enum(["project", "task_list", "plan"]),
+    locator: ProjectResourcePortableLocatorSchema
+  })
+  .strict();
+
+const ProjectResourceTodosTaskLinkInputSchema = z
+  .object({
+    authority: z.literal("todos"),
+    ...ProjectResourceLinkCommonShape,
+    source_package: z.literal("@hasna/todos"),
+    target_kind: z.literal("task"),
+    locator: ProjectResourceExternalUuidLocatorSchema
+  })
+  .strict();
+
+const ProjectResourceConversationsProjectLinkInputSchema = z
+  .object({
+    authority: z.literal("conversations"),
+    ...ProjectResourceLinkCommonShape,
+    source_package: z.literal("@hasna/conversations"),
+    target_kind: z.literal("project"),
+    locator: ProjectResourcePortableLocatorSchema
+  })
+  .strict();
+
+const ProjectResourceConversationsChannelLinkInputSchema = z
+  .object({
+    authority: z.literal("conversations"),
+    ...ProjectResourceLinkCommonShape,
+    source_package: z.literal("@hasna/conversations"),
+    target_kind: z.literal("channel"),
+    locator: z.discriminatedUnion("kind", [
+      ProjectResourceExternalUuidLocatorSchema,
+      ProjectResourceConversationsChannelLocatorSchema
+    ])
+  })
+  .strict();
+
+const ProjectResourceKnowledgeLinkInputSchema = z
+  .object({
+    authority: z.literal("knowledge"),
+    ...ProjectResourceLinkCommonShape,
+    source_package: z.literal("@hasna/knowledge"),
+    target_kind: z.enum(["collection", "item"]),
+    locator: ProjectResourcePortableLocatorSchema
+  })
+  .strict();
+
+const ProjectResourceMementosLinkInputSchema = z
+  .object({
+    authority: z.literal("mementos"),
+    ...ProjectResourceLinkCommonShape,
+    source_package: z.literal("@hasna/mementos"),
+    target_kind: z.enum(["project", "item"]),
+    locator: ProjectResourcePortableLocatorSchema
+  })
+  .strict();
+
+const ProjectResourceOrgsLinkInputSchema = z
+  .object({
+    authority: z.literal("orgs"),
+    ...ProjectResourceLinkCommonShape,
+    source_package: z.literal("@hasna/orgs"),
+    target_kind: z.enum(["org", "project"]),
+    locator: ProjectResourcePortableLocatorSchema
+  })
+  .strict();
+
+const ProjectResourceContactsLinkInputSchema = z
+  .object({
+    authority: z.literal("contacts"),
+    ...ProjectResourceLinkCommonShape,
+    source_package: z.literal("@hasna/contacts"),
+    target_kind: z.literal("contact"),
+    locator: ProjectResourceExternalUuidLocatorSchema
+  })
+  .strict();
+
+const ProjectResourceLinkInputBranches = [
+  ProjectResourceTodosContainerLinkInputSchema,
+  ProjectResourceTodosTaskLinkInputSchema,
+  ProjectResourceConversationsProjectLinkInputSchema,
+  ProjectResourceConversationsChannelLinkInputSchema,
+  ProjectResourceKnowledgeLinkInputSchema,
+  ProjectResourceMementosLinkInputSchema,
+  ProjectResourceOrgsLinkInputSchema,
+  ProjectResourceContactsLinkInputSchema
+] as const;
+
+function validateProjectResourceLinkSemantics(
+  value: {
+    authority: ProjectResourceAuthority;
+    service_instance: string;
+    target_kind: ProjectResourceTargetKind;
+    locator: ProjectResourceLinkLocator;
+    labels?: ProjectResourceLinkLabels | undefined;
+  },
+  ctx: z.RefinementCtx
+): void {
+  const expectedUrnPrefix = `urn:hasna:${value.authority}:`;
+  if (
+    typeof value.service_instance === "string"
+    && value.service_instance.startsWith("urn:")
+    && !value.service_instance.startsWith(expectedUrnPrefix)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Project resource service_instance URNs for ${value.authority} must start with ${expectedUrnPrefix}`,
+      path: ["service_instance"]
+    });
+  }
+  if (
+    value.locator.kind === "canonical_uri"
+    && typeof value.locator.value === "string"
+    && value.locator.value.startsWith("urn:")
+    && !value.locator.value.startsWith(expectedUrnPrefix)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Project resource locator URNs for ${value.authority} must start with ${expectedUrnPrefix}`,
+      path: ["locator", "value"]
+    });
+  }
+  if (
+    value.authority === "conversations"
+    && value.target_kind === "channel"
+    && !value.labels?.channel_name
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Conversations channel links require labels.channel_name",
+      path: ["labels", "channel_name"]
+    });
+  }
+}
+
+export const ProjectResourceLinkInputSchema = z
+  .union(ProjectResourceLinkInputBranches)
+  .superRefine(validateProjectResourceLinkSemantics);
+export type ProjectResourceLinkInput = z.infer<typeof ProjectResourceLinkInputSchema>;
+
+const ProjectResourceLinkPersistedShape = {
+  id: NonEmptyStringSchema,
+  project_id: NonEmptyStringSchema,
+  labels: ProjectResourceLinkLabelsSchema,
+  created_at: TimestampSchema,
+  updated_at: TimestampSchema
+} as const;
+
+export const ProjectResourceLinkSchema = z
+  .union([
+    ProjectResourceTodosContainerLinkInputSchema.extend(ProjectResourceLinkPersistedShape),
+    ProjectResourceTodosTaskLinkInputSchema.extend(ProjectResourceLinkPersistedShape),
+    ProjectResourceConversationsProjectLinkInputSchema.extend(ProjectResourceLinkPersistedShape),
+    ProjectResourceConversationsChannelLinkInputSchema.extend(ProjectResourceLinkPersistedShape),
+    ProjectResourceKnowledgeLinkInputSchema.extend(ProjectResourceLinkPersistedShape),
+    ProjectResourceMementosLinkInputSchema.extend(ProjectResourceLinkPersistedShape),
+    ProjectResourceOrgsLinkInputSchema.extend(ProjectResourceLinkPersistedShape),
+    ProjectResourceContactsLinkInputSchema.extend(ProjectResourceLinkPersistedShape)
+  ])
+  .superRefine(validateProjectResourceLinkSemantics);
+export type ProjectResourceLink = z.infer<typeof ProjectResourceLinkSchema>;
+
+export const ProjectResourceLinkCollectionV1Schema = z
+  .object({
+    schema: z.literal(SCHEMA_IDS.projectResourceLinkCollectionV1),
+    project_id: NonEmptyStringSchema,
+    current_revision: NonEmptyStringSchema,
+    links: z.array(ProjectResourceLinkSchema),
+    link_count: z.number().int().nonnegative(),
+    max_items: z.number().int().positive(),
+    collection_digest: Sha256DigestSchema,
+    complete: z.boolean(),
+    truncated: z.boolean()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.link_count !== value.links.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Project resource link_count must equal links.length",
+        path: ["link_count"]
+      });
+    }
+    if (value.link_count > value.max_items) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Project resource link_count must not exceed max_items",
+        path: ["link_count"]
+      });
+    }
+    if (value.complete && value.truncated) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A complete project resource link collection cannot be truncated",
+        path: ["truncated"]
+      });
+    }
+
+    const linkIds = new Set<string>();
+    const identities = new Set<string>();
+    for (const [index, link] of value.links.entries()) {
+      if (link.project_id !== value.project_id) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Every project resource link must belong to the collection project_id",
+          path: ["links", index, "project_id"]
+        });
+      }
+      if (linkIds.has(link.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Project resource link IDs must be unique within a collection",
+          path: ["links", index, "id"]
+        });
+      }
+      linkIds.add(link.id);
+
+      const identity = JSON.stringify([
+        link.authority,
+        link.service_instance,
+        link.source_package,
+        link.target_kind,
+        link.locator.kind,
+        link.locator.value
+      ]);
+      if (identities.has(identity)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Project resource link identities must be unique within a collection",
+          path: ["links", index]
+        });
+      }
+      identities.add(identity);
+    }
+  });
+export type ProjectResourceLinkCollectionV1 = z.infer<typeof ProjectResourceLinkCollectionV1Schema>;
 
 export const ProjectLayoutSchema = z
   .object({
@@ -6304,6 +6671,7 @@ export const ContractSchemaRegistry = {
   [SCHEMA_IDS.commsEventEnvelope]: CommsEventEnvelopeSchema,
   [SCHEMA_IDS.commsChannelMetadata]: CommsChannelMetadataSchema,
   [SCHEMA_IDS.commsMessageMetadata]: CommsMessageMetadataSchema,
+  [SCHEMA_IDS.projectResourceLinkCollectionV1]: ProjectResourceLinkCollectionV1Schema,
   [SCHEMA_IDS.app]: AppSchema,
   [SCHEMA_IDS.release]: ReleaseSchema,
   [SCHEMA_IDS.rolloutRecord]: RolloutRecordSchema,
@@ -6341,6 +6709,7 @@ export type ContractBySchemaId = {
   [SCHEMA_IDS.commsEventEnvelope]: CommsEventEnvelope;
   [SCHEMA_IDS.commsChannelMetadata]: CommsChannelMetadata;
   [SCHEMA_IDS.commsMessageMetadata]: CommsMessageMetadata;
+  [SCHEMA_IDS.projectResourceLinkCollectionV1]: ProjectResourceLinkCollectionV1;
   [SCHEMA_IDS.app]: App;
   [SCHEMA_IDS.release]: Release;
   [SCHEMA_IDS.rolloutRecord]: RolloutRecord;
@@ -6375,6 +6744,7 @@ export type ServiceContractManifestInput = z.input<typeof ServiceContractManifes
 export type CommsEventEnvelopeInput = z.input<typeof CommsEventEnvelopeSchema>;
 export type CommsChannelMetadataInput = z.input<typeof CommsChannelMetadataSchema>;
 export type CommsMessageMetadataInput = z.input<typeof CommsMessageMetadataSchema>;
+export type ProjectResourceLinkCollectionV1Input = z.input<typeof ProjectResourceLinkCollectionV1Schema>;
 export type AppInput = z.input<typeof AppSchema>;
 export type ReleaseInput = z.input<typeof ReleaseSchema>;
 export type RolloutRecordInput = z.input<typeof RolloutRecordSchema>;
@@ -6412,6 +6782,7 @@ export type ContractInputBySchemaId = {
   [SCHEMA_IDS.commsEventEnvelope]: CommsEventEnvelopeInput;
   [SCHEMA_IDS.commsChannelMetadata]: CommsChannelMetadataInput;
   [SCHEMA_IDS.commsMessageMetadata]: CommsMessageMetadataInput;
+  [SCHEMA_IDS.projectResourceLinkCollectionV1]: ProjectResourceLinkCollectionV1Input;
   [SCHEMA_IDS.app]: AppInput;
   [SCHEMA_IDS.release]: ReleaseInput;
   [SCHEMA_IDS.rolloutRecord]: RolloutRecordInput;
