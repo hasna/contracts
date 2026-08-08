@@ -31,6 +31,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { main } from "../src/cli/index";
+import type { VerifyApiKeyTokenOptions } from "../src/auth/keys";
 import { DEFAULT_API_KEY_TTL_SECONDS, mintApiKey, parseApiKey, verifyApiKeyToken } from "../src/auth/keys";
 
 const SIGNING = "test-signing-secret-not-a-real-credential-000";
@@ -118,6 +119,30 @@ function bagWithout(absent: ReadonlyArray<string>): Parameters<typeof mintApiKey
     expect(Object.hasOwn(bag, key)).toBe(false);
   }
   return bag as never;
+}
+
+/**
+ * Run a verification and report the outcome WITHOUT deciding in advance which
+ * shape a refusal takes.
+ *
+ * `verifyApiKeyToken` gives `signingSecret` no fallback on purpose — an absent
+ * secret throws rather than inventing a new denial reason in the request path,
+ * because a caller's configuration bug must not read to the client as a bad
+ * token. So the honest assertion for "this token is not accepted" has to admit
+ * both a thrown error and an `ok: false` result; a test written for only one of
+ * them would fail on a correct build for the wrong reason. `accepted` is the
+ * single fact that matters, and it is exactly what must never be `true`.
+ */
+function verifyOutcome(
+  token: string,
+  options: VerifyApiKeyTokenOptions,
+): { accepted: boolean; threw: boolean; detail: string } {
+  try {
+    const result = verifyApiKeyToken(token, options);
+    return { accepted: result.ok === true, threw: false, detail: result.ok ? "ok" : result.reason };
+  } catch (error) {
+    return { accepted: false, threw: true, detail: (error as Error).message };
+  }
 }
 
 /** The claims actually inside the HMAC-signed body of a token. */
@@ -242,16 +267,27 @@ describe("mintApiKey: no polluted option reaches the signed body", () => {
       // Broken build: `attacker-app` is a valid slug, so it passes the pattern
       // and is signed into both the token prefix and the `app` claim — a key
       // that authenticates against a service the caller never issued for.
-      expect(() => mintApiKey(bagWithout(["app"]))).toThrow("Invalid app slug");
+      //
+      // The expected MESSAGE changed with the refusal that produces it: an
+      // absent `app` is a missing value, and reporting it as `Invalid app slug
+      // ''` described the symptom rather than the cause. What the test asserts
+      // is unchanged in strength — a broken build does not throw at all here.
+      expect(() => mintApiKey(bagWithout(["app"]))).toThrow("app must be a string");
     });
   });
 
   test("a polluted `signingSecret` cannot decide which secret signs the key", async () => {
     await withPolluted(["signingSecret"], () => {
       // Broken build: the token is signed with a secret the attacker chose, so
-      // it verifies for them and not for the app. Fixed build has no secret at
-      // all and refuses on the existing entropy check.
-      expect(() => mintApiKey(bagWithout(["signingSecret"]))).toThrow("signingSecret must be at least 16 bytes");
+      // it verifies for them and not for the app.
+      //
+      // Fixed build has no secret at all — and that is a SHAPE refusal, not a
+      // LENGTH one. It previously reported "must be at least 16 bytes of
+      // entropy" for an absent value, which sends the caller to count bytes on
+      // a value that has none. The two refusals now say which they are.
+      expect(() => mintApiKey(bagWithout(["signingSecret"]))).toThrow(
+        /signingSecret must be a string, Buffer, TypedArray, DataView, or ArrayBuffer/,
+      );
     });
   });
 
@@ -372,6 +408,93 @@ describe("verifyApiKeyToken: no polluted option changes the verdict", () => {
       ttlSeconds: DAY,
     }).token;
   }
+
+  // -------------------------------------------------------------------------
+  // `signingSecret` — the one verify option whose regression is a TOTAL AUTH
+  // BYPASS, and the one this file did not test until now.
+  //
+  // The other six verify options move a verdict at the margins: an inherited
+  // clock accepts a lapsed token, an inherited expectation denies a good one.
+  // This one decides WHICH KEY THE HMAC IS COMPUTED UNDER, so an inherited
+  // value means the verifier checks the attacker's token against the attacker's
+  // own secret and finds it authentic. Every downstream guard — expiry, scopes,
+  // tenant, revocation — then runs on a token that has already passed the only
+  // check that establishes authenticity at all.
+  //
+  // The gap was invisible from the suite: reverting `keys.ts:454` alone to
+  // `options.signingSecret`, and touching nothing else, left the full suite at
+  // 1249 pass / 0 fail, rc=0, with `tsc` clean. That is the whole argument for
+  // a PER-SITE mutation control rather than a helper-presence one — a control
+  // that removes `ownOption` entirely fails loudly and proves nothing about the
+  // sites it never isolated.
+  // -------------------------------------------------------------------------
+  test("a polluted `signingSecret` cannot make an attacker-signed token verify", async () => {
+    // Nothing about this token is forged. It is a genuine HMAC over the secret
+    // the attacker planted; the only question is which key the verifier picks.
+    const attackerToken = mintApiKey({
+      app: APP,
+      scopes: ["*"],
+      signingSecret: POLLUTION.signingSecret,
+    }).token;
+
+    // CONTROL, both directions, before the assertion that matters. Without the
+    // first line the test would pass against a token that was never valid under
+    // any key; without the second it would pass against a token that this
+    // service accepts anyway.
+    expect(verifyApiKeyToken(attackerToken, { signingSecret: POLLUTION.signingSecret }).ok).toBe(true);
+    expect(verifyApiKeyToken(attackerToken, { signingSecret: SIGNING })).toMatchObject({
+      ok: false,
+      reason: "bad_signature",
+    });
+
+    // The bag OMITS `signingSecret` as an own property. That is the entire
+    // condition: a bare read then resolves to the attacker's planted value.
+    const bag = {} as VerifyApiKeyTokenOptions;
+    expect(Object.hasOwn(bag, "signingSecret")).toBe(false);
+
+    const outcome = await withPolluted(["signingSecret"], () => verifyOutcome(attackerToken, bag));
+
+    // The assertion. A broken build returns `ok: true` here and the attacker
+    // holds a credential this service believes it issued.
+    expect(outcome.accepted).toBe(false);
+    // And the refusal is the throw this module documents, not a new denial
+    // reason invented in the request path.
+    expect(outcome.threw).toBe(true);
+  });
+
+  test("an explicit `signingSecret` still binds in both directions under the same pollution", async () => {
+    // A guard that fails closed on legitimate input is a different outage. The
+    // good token must still verify, and the attacker's must still be refused,
+    // while the prototype carries the attacker's secret throughout.
+    const good = mintApiKey({ app: APP, scopes: ["todos:read"], signingSecret: SIGNING }).token;
+    const attackerToken = mintApiKey({ app: APP, scopes: ["*"], signingSecret: POLLUTION.signingSecret }).token;
+
+    const accepted = await withPolluted(["signingSecret"], () => verifyOutcome(good, { signingSecret: SIGNING }));
+    expect(accepted.accepted).toBe(true);
+
+    const refused = await withPolluted(["signingSecret"], () =>
+      verifyOutcome(attackerToken, { signingSecret: SIGNING }),
+    );
+    expect(refused.accepted).toBe(false);
+    expect(refused.threw).toBe(false);
+    expect(refused.detail).toBe("bad_signature");
+  });
+
+  test("a polluted `signingSecret` cannot rescue a token nobody signed correctly", async () => {
+    // The adjacent case, so the fix is not read as only covering the attacker's
+    // own mint: a token signed under a THIRD secret must not verify either,
+    // whatever the prototype says.
+    const thirdParty = mintApiKey({
+      app: APP,
+      scopes: ["todos:read"],
+      signingSecret: "third-party-secret-not-a-real-credential",
+    }).token;
+
+    const outcome = await withPolluted(["signingSecret"], () =>
+      verifyOutcome(thirdParty, {} as VerifyApiKeyTokenOptions),
+    );
+    expect(outcome.accepted).toBe(false);
+  });
 
   test("a polluted `nowMs` cannot make an expired token verify", async () => {
     const token = expiredToken();

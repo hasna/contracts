@@ -171,7 +171,7 @@ export interface MintApiKeyOptions {
    */
   tid?: string;
   /** HMAC signing secret (server-held). Never embedded in the token. */
-  signingSecret: string | Buffer;
+  signingSecret: SigningSecret;
   /** Seconds until expiry. Omit for the default; pass `null` for no expiry. */
   ttlSeconds?: number | null;
   /** Optional issued-to agent/subject. */
@@ -199,11 +199,60 @@ function base64urlEncode(input: Buffer | string): string {
   return Buffer.from(input).toString("base64url");
 }
 
-function toBuffer(secret: string | Buffer): Buffer {
-  return typeof secret === "string" ? Buffer.from(secret, "utf8") : secret;
+/**
+ * The shapes this module accepts for an HMAC signing key: a string, or any view
+ * over bytes. Deliberately Node's own `BinaryLike` minus `KeyObject`, because
+ * `createHmac` — which every path here ends at — takes exactly these.
+ *
+ * WHY THIS IS WIDER THAN `string | Buffer`, WHICH IS WHAT IT SAID BEFORE.
+ * `verifyApiKeyToken` never narrowed: it hands the secret straight to
+ * `createHmac`, so a `Uint8Array` secret has always verified and still does.
+ * `mintApiKey` narrowed to `Buffer.isBuffer` in #85, which left the two halves
+ * of one HMAC pair disagreeing about the same key — the issuer refusing a secret
+ * every verifier sharing it accepts. Measured on that PR's base `a407b78f`,
+ * `Uint8Array`, `ArrayBuffer` and `DataView` secrets all minted valid tokens, so
+ * the narrowing was a breaking change to real callers rather than a tidy-up of
+ * inputs that already failed. `crypto.subtle` returns an `ArrayBuffer` and
+ * `Buffer.prototype.subarray` returns a view, so these are ordinary shapes for
+ * key material to arrive in, not pathological ones.
+ */
+export type SigningSecret = string | ArrayBufferView | ArrayBuffer;
+
+/**
+ * Name the TYPE of a rejected value for an error message, never its contents.
+ *
+ * `signingSecret` is one of the callers, so this must not be able to print the
+ * value: an error string reaches logs, and a rejected secret is still a secret.
+ * Constructor name plus `typeof` is enough to tell `undefined` from `null` from
+ * `String` from `Uint8Array`, which is the whole question a caller has here.
+ */
+function describeType(value: unknown): string {
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  const name = (value as { constructor?: { name?: string } })?.constructor?.name;
+  return name ? `${typeof value} (${name})` : typeof value;
 }
 
-function hmac(signingSecret: string | Buffer, message: string): Buffer {
+/** True for any shape `toBuffer` can turn into bytes without coercion. */
+function isBinarySecret(value: unknown): value is ArrayBufferView | ArrayBuffer {
+  return ArrayBuffer.isView(value) || value instanceof ArrayBuffer;
+}
+
+function toBuffer(secret: SigningSecret): Buffer {
+  if (typeof secret === "string") return Buffer.from(secret, "utf8");
+  if (Buffer.isBuffer(secret)) return secret;
+  // `byteOffset`/`byteLength` are not optional detail: a view over part of a
+  // larger store must sign with ITS OWN WINDOW. `Buffer.from(view.buffer)`
+  // would silently sign with the whole backing store, which is a wrong-key bug
+  // that produces a perfectly valid-looking token nobody else can verify.
+  if (ArrayBuffer.isView(secret)) return Buffer.from(secret.buffer, secret.byteOffset, secret.byteLength);
+  // A bare `ArrayBuffer`. Anything else reaches `Buffer.from` and throws there,
+  // which is what the verify path did before and still does — see the comment
+  // on `verifyApiKeyToken`'s `signingSecret` read.
+  return Buffer.from(secret);
+}
+
+function hmac(signingSecret: SigningSecret, message: string): Buffer {
   return createHmac("sha256", toBuffer(signingSecret)).update(message, "utf8").digest();
 }
 
@@ -250,11 +299,31 @@ export function mintApiKey(options: MintApiKeyOptions): MintedApiKey {
   const requestedTid = ownTenantId(options);
   const agent = ownAgentClaim(options);
 
-  // A non-string app is now the same failure as a malformed one instead of a
-  // `TypeError` out of `.trim()`. Both throw; this one names the field.
-  const app = typeof requestedApp === "string" ? requestedApp.trim() : "";
+  // A NON-STRING `app` IS REFUSED, AND THAT IS A BEHAVIOUR CHANGE ON AN INPUT
+  // THAT USED TO WORK — not, as #85's body claimed, on one that already threw.
+  // Measured on `a407b78f`: `new String("todos")` minted a VALID TOKEN, because
+  // a boxed primitive has `.trim()` and it returns a primitive string.
+  //
+  // The refusal is kept anyway, and the reasons are worth stating because they
+  // are the reasons a `Uint8Array` secret is NOT kept refused three blocks
+  // below. The declared type is `string`; restoring the boxed case means
+  // calling `.trim()` on an unknown, which is exactly the `TypeError` path this
+  // guard closed; nothing in this kit accepts a boxed primitive specially; and
+  // no adjacent API disagrees with the narrowing, so there is no issuer/verifier
+  // split to open.
+  //
+  // The MESSAGE is what actually had to change. `Invalid app slug 'todos'`
+  // sends the caller to inspect a slug that is perfectly well-formed, when the
+  // object wrapping it is the entire problem. Type and shape get their own
+  // refusal; the slug message keeps the slug.
+  if (typeof requestedApp !== "string") {
+    throw new Error(
+      `app must be a string; received ${describeType(requestedApp)}. Expected a slug matching ${APP_SLUG_PATTERN}.`,
+    );
+  }
+  const app = requestedApp.trim();
   if (!APP_SLUG_PATTERN.test(app)) {
-    throw new Error(`Invalid app slug '${String(requestedApp ?? "")}'. Expected ${APP_SLUG_PATTERN}.`);
+    throw new Error(`Invalid app slug '${requestedApp}'. Expected ${APP_SLUG_PATTERN}.`);
   }
   if (!Array.isArray(requestedScopes) || requestedScopes.length === 0) {
     throw new Error("At least one scope is required to mint an API key.");
@@ -264,17 +333,41 @@ export function mintApiKey(options: MintApiKeyOptions): MintedApiKey {
       throw new Error(`Invalid scope '${scope}'. Expected '*' or '<app>:<action>'.`);
     }
   }
-  // An absent or non-secret-shaped value becomes an empty buffer so it lands on
-  // the entropy check below, which already says the right thing. Previously an
-  // absent `signingSecret` threw a `TypeError` off `undefined.length`; it still
-  // throws, now with this module's own message.
-  const secret =
-    typeof requestedSecret === "string" || Buffer.isBuffer(requestedSecret)
-      ? toBuffer(requestedSecret)
-      : Buffer.alloc(0);
-  if (secret.length < 16) {
+  // SHAPE AND LENGTH ARE TWO DIFFERENT REFUSALS AND EACH SAYS WHICH IT IS.
+  // #85 funnelled both into `Buffer.alloc(0)` and reported everything as
+  // "must be at least 16 bytes of entropy", which sends a caller who passed
+  // `undefined` — or a `Uint8Array` — to count bytes on a value whose bytes
+  // were never the problem.
+  //
+  // The accepted shapes are `SigningSecret`, restoring `Uint8Array`,
+  // `ArrayBuffer` and `DataView`. See that type for why: they minted valid
+  // tokens before #85, and `verifyApiKeyToken` accepts them to this day, so
+  // refusing them here splits an HMAC pair against itself.
+  if (typeof requestedSecret !== "string" && !isBinarySecret(requestedSecret)) {
+    throw new Error(
+      "signingSecret must be a string, Buffer, TypedArray, DataView, or ArrayBuffer; " +
+        `received ${describeType(requestedSecret)}.`,
+    );
+  }
+  // MEASURED ON THE RAW INPUT, BEFORE CONVERSION, AND `byteLength` RATHER THAN
+  // `.length`. `ArrayBuffer` has no `.length`, so `a407b78f`'s
+  // `toBuffer(secret).length < 16` was `undefined < 16` — false — and a
+  // FOUR-BYTE `ArrayBuffer` secret minted a token there. #85 closed that by
+  // accident, in refusing the shape outright; accepting the shape again has to
+  // close it on purpose.
+  //
+  // Checking the raw input rather than the converted buffer is not a style
+  // choice. Convert first and `secret` is always a `Buffer`, so `.length` and
+  // `.byteLength` agree and the spelling stops carrying any weight — a mutation
+  // that puts `.length` back would then leave the whole suite green while the
+  // hole is one `toBuffer` change away from reopening. Here the spelling is
+  // load-bearing and a mutation of it is visible.
+  const secretByteLength =
+    typeof requestedSecret === "string" ? Buffer.byteLength(requestedSecret, "utf8") : requestedSecret.byteLength;
+  if (secretByteLength < 16) {
     throw new Error("signingSecret must be at least 16 bytes of entropy.");
   }
+  const secret = toBuffer(requestedSecret);
 
   const kid = requestedKid ?? generateKid();
   if (!/^[A-Za-z0-9_-]+$/.test(kid)) {
@@ -410,7 +503,14 @@ export type ApiKeyVerifyResult =
     };
 
 export interface VerifyApiKeyTokenOptions {
-  signingSecret: string | Buffer;
+  /**
+   * HMAC signing secret. Same {@link SigningSecret} shapes as `mintApiKey`, and
+   * the type is written out here because it was previously narrower than what
+   * this function actually accepted — it has always passed the value straight to
+   * `createHmac`, so a `Uint8Array` secret verified while the declared type said
+   * it could not. That is now stated rather than tolerated.
+   */
+  signingSecret: SigningSecret;
   /** Restrict verification to a single app slug (recommended per-service). */
   expectedApp?: string;
   /** Epoch milliseconds override for deterministic checks (tests). */
@@ -475,7 +575,14 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
     return { ok: false, reason: "app_mismatch", message: `Token is for app '${app}', expected '${optExpectedApp}'.` };
   }
 
-  const expected = hmac(optSigningSecret as string | Buffer, `${apiKeyPrefix(app)}${body}`);
+  // Deliberately NOT shape-checked and NOT given a fallback, unlike the mint
+  // path. An absent or malformed secret throws here exactly as it did before —
+  // adding a new denial reason to the request path would turn a caller's
+  // configuration bug into a rejection the client reads as a bad token, and this
+  // path is documented as one that must deny rather than throw a 500. What
+  // changes is only that a byte view now reaches `createHmac` through the same
+  // `toBuffer` the mint path uses, so the two halves agree on the key.
+  const expected = hmac(optSigningSecret as SigningSecret, `${apiKeyPrefix(app)}${body}`);
   let provided: Buffer;
   try {
     provided = Buffer.from(sig, "base64url");
