@@ -20,13 +20,17 @@
 //     not a revert. At base the entropy check read `.length`, and
 //     `ArrayBuffer.prototype.length` does not exist — so `undefined < 16` is
 //     false and a FOUR-BYTE `ArrayBuffer` secret minted a token. Restoring the
-//     shapes has to keep that closed, so the check reads `byteLength`.
+//     shapes has to keep that closed, so the floor is measured on the CONVERTED
+//     buffer — the bytes that become the key — and not on any property the
+//     caller supplies. The last describe block here is why: read off the raw
+//     input, the floor is spoofable by three separate routes.
 //
 // The `app` narrowing is kept, deliberately and for a different reason, and the
 // last test here pins the message that explains it.
 
 import { describe, expect, test } from "bun:test";
-import { mintApiKey, verifyApiKeyToken } from "../src/auth/keys";
+import { createHmac } from "node:crypto";
+import { apiKeyPrefix, mintApiKey, verifyApiKeyToken } from "../src/auth/keys";
 
 const SIGNING = "test-signing-secret-not-a-real-credential-000";
 const APP = "todos";
@@ -103,11 +107,15 @@ describe("mintApiKey: every byte-shaped signing secret Node accepts", () => {
 });
 
 describe("mintApiKey: the entropy floor holds on every shape", () => {
-  test("a short ArrayBuffer is refused — the check reads byteLength, not `.length`", () => {
+  test("a short ArrayBuffer is refused — the floor is measured on the converted bytes", () => {
     // REGRESSION AGAINST BASE, not against #85. At `a407b78f` this exact input
-    // MINTED A TOKEN, because `ArrayBuffer` has no `.length` and `undefined <
-    // 16` is false. #85 closed it as a side effect of narrowing; this test is
-    // what keeps it closed now that the shape is accepted again.
+    // MINTED A TOKEN, because the floor read `toBuffer(secret).length` while
+    // the conversion was not yet reached — `ArrayBuffer` has no `.length`, so
+    // `undefined < 16` is false. #85 closed it as a side effect of narrowing;
+    // this test is what keeps it closed now that the shape is accepted again.
+    // Converting first makes the number an internal fact about the allocated
+    // buffer, which is what `a407b78f` and the raw-`byteLength` revision both
+    // lacked in their different ways.
     expect(() => mintApiKey({ app: APP, scopes: ["todos:read"], signingSecret: new ArrayBuffer(4) as never })).toThrow(
       "at least 16 bytes",
     );
@@ -140,6 +148,128 @@ describe("mintApiKey: the entropy floor holds on every shape", () => {
     expect(() =>
       mintApiKey({ app: APP, scopes: ["todos:read"], signingSecret: new Uint8Array(15).fill(7) as never }),
     ).toThrow("at least 16 bytes");
+  });
+});
+
+describe("mintApiKey: the entropy floor cannot be talked out of the way", () => {
+  // THE MUTATION THESE EXIST FOR is moving the floor back above `toBuffer`, so
+  // that it reads `requestedSecret.byteLength` off the caller's object again.
+  // Every test in this block passes on the shipped build and fails on that one.
+  //
+  // Why the floor is spoofable when it reads the raw input: `isBinarySecret`
+  // admits on `instanceof ArrayBuffer`, which consults the prototype chain, and
+  // `byteLength` is then an ordinary property read. Neither is a fact about
+  // memory; both are things the caller can simply say.
+  //
+  // Severity, stated so nobody re-derives it upward: a caller who can put an
+  // object into `signingSecret` is already choosing the key material, so this is
+  // not remote and it is not privilege escalation. It matters because the value
+  // is a SERVER-HELD secret that arrives from config, a vault client or
+  // `crypto.subtle`, and a wrapper in that path silently collapsing the key to
+  // four bytes is indistinguishable from a healthy mint at every call site.
+
+  /** The bytes every forgery below is really carrying. */
+  const FOUR = Buffer.from([1, 2, 3, 4]);
+
+  /**
+   * Recover whether a token was signed with `FOUR`, rather than trusting that a
+   * refusal happened. Asserting only `toThrow` would pass on a build that
+   * accepted the input and signed with something else short.
+   */
+  function keyedWithFourBytes(token: string): boolean {
+    const cut = token.lastIndexOf(".");
+    return (
+      createHmac("sha256", FOUR).update(token.slice(0, cut), "utf8").digest("base64url") === token.slice(cut + 1)
+    );
+  }
+
+  test("control — the honest 4-byte shapes are refused, and 32 real bytes still mint", () => {
+    // Without this the three tests below cannot distinguish "the forgery was
+    // caught" from "the floor is refusing everything".
+    expect(() =>
+      mintApiKey({ app: APP, scopes: ["todos:read"], signingSecret: new ArrayBuffer(4) as never }),
+    ).toThrow("at least 16 bytes");
+    expect(mintsAndInteroperates(SECRET_BYTES)).toBe(true);
+  });
+
+  test("an object with ArrayBuffer.prototype grafted on cannot declare its own size", () => {
+    // Not an ArrayBuffer at all — an array-like with the prototype swapped, so
+    // `instanceof ArrayBuffer` is true and `byteLength` is whatever it says.
+    const forged: Record<string, unknown> = { 0: 1, 1: 2, 2: 3, 3: 4, length: 4, byteLength: 4096 };
+    Object.setPrototypeOf(forged, ArrayBuffer.prototype);
+    expect(() => mintApiKey({ app: APP, scopes: ["todos:read"], signingSecret: forged as never })).toThrow(
+      "at least 16 bytes",
+    );
+  });
+
+  test("a Proxy whose get trap reports a false byteLength cannot mint", () => {
+    const real = new Uint8Array([1, 2, 3, 4]).buffer;
+    const lying = new Proxy(real, {
+      get(target, prop) {
+        if (prop === "byteLength") return 4096;
+        const value = Reflect.get(target, prop, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    expect(() => mintApiKey({ app: APP, scopes: ["todos:read"], signingSecret: lying as never })).toThrow(
+      "at least 16 bytes",
+    );
+  });
+
+  test("an ArrayBuffer subclass overriding byteLength with a getter cannot mint", () => {
+    // The one route of the three that is ALSO open at `a407b78f`; the other two
+    // are refused there and at `0a037408`, and would be first opened here.
+    class Overstated extends ArrayBuffer {
+      override get byteLength() {
+        return 4096;
+      }
+    }
+    const forged = new Overstated(4);
+    new Uint8Array(forged as ArrayBuffer).set([1, 2, 3, 4]);
+    expect(() => mintApiKey({ app: APP, scopes: ["todos:read"], signingSecret: forged as never })).toThrow(
+      "at least 16 bytes",
+    );
+  });
+
+  test("no forged shape reaches the HMAC — checked on the signature, not the refusal", () => {
+    // The assertion that survives a build which accepts the input instead of
+    // throwing: whatever comes back must not be keyed with the four bytes.
+    const forged: Record<string, unknown> = { 0: 1, 1: 2, 2: 3, 3: 4, length: 4, byteLength: 4096 };
+    Object.setPrototypeOf(forged, ArrayBuffer.prototype);
+    let token: string | null = null;
+    try {
+      token = mintApiKey({ app: APP, scopes: ["todos:read"], signingSecret: forged as never }).token;
+    } catch {
+      token = null;
+    }
+    expect(token === null || !keyedWithFourBytes(token)).toBe(true);
+
+    // TWO CONTROLS, because the assertion above is an absence and an absence
+    // proves nothing until the detector is shown to fire and to stay quiet.
+    //
+    // Positive: a token genuinely keyed with the four bytes must be RECOGNISED.
+    // This is the only way to know `keyedWithFourBytes` can return true at all.
+    // It is built by signing directly rather than through `mintApiKey`, which
+    // now correctly refuses a four-byte secret.
+    const fourKeyed = `${apiKeyPrefix(APP)}body`;
+    const fourSig = createHmac("sha256", FOUR).update(fourKeyed, "utf8").digest("base64url");
+    expect(keyedWithFourBytes(`${fourKeyed}.${fourSig}`)).toBe(true);
+
+    // Negative: a real, accepted 16-byte secret must NOT be recognised.
+    //
+    // The bytes matter here and the obvious choice is wrong. HMAC zero-pads any
+    // key shorter than the hash's 64-byte block, so `FOUR` and
+    // `FOUR + 12 zero bytes` are THE SAME KEY and produce identical MACs — a
+    // first draft of this control used exactly that and failed, correctly. The
+    // padding fact is also why this floor is a LENGTH floor and not an entropy
+    // measure: sixteen bytes with twelve trailing zeros buys nothing over four.
+    const sixteen = Buffer.concat([FOUR, Buffer.alloc(12, 0xab)]);
+    const honest = mintApiKey({ app: APP, scopes: ["todos:read"], signingSecret: sixteen }).token;
+    expect(keyedWithFourBytes(honest)).toBe(false);
+    const cut = honest.lastIndexOf(".");
+    expect(createHmac("sha256", sixteen).update(honest.slice(0, cut), "utf8").digest("base64url")).toBe(
+      honest.slice(cut + 1),
+    );
   });
 });
 

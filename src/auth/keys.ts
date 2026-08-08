@@ -349,25 +349,42 @@ export function mintApiKey(options: MintApiKeyOptions): MintedApiKey {
         `received ${describeType(requestedSecret)}.`,
     );
   }
-  // MEASURED ON THE RAW INPUT, BEFORE CONVERSION, AND `byteLength` RATHER THAN
-  // `.length`. `ArrayBuffer` has no `.length`, so `a407b78f`'s
-  // `toBuffer(secret).length < 16` was `undefined < 16` — false — and a
-  // FOUR-BYTE `ArrayBuffer` secret minted a token there. #85 closed that by
-  // accident, in refusing the shape outright; accepting the shape again has to
-  // close it on purpose.
+  // THE FLOOR IS MEASURED AFTER CONVERSION, ON THE BYTES THAT ACTUALLY BECOME
+  // THE KEY — never on a property read off the caller's object.
   //
-  // Checking the raw input rather than the converted buffer is not a style
-  // choice. Convert first and `secret` is always a `Buffer`, so `.length` and
-  // `.byteLength` agree and the spelling stops carrying any weight — a mutation
-  // that puts `.length` back would then leave the whole suite green while the
-  // hole is one `toBuffer` change away from reopening. Here the spelling is
-  // load-bearing and a mutation of it is visible.
-  const secretByteLength =
-    typeof requestedSecret === "string" ? Buffer.byteLength(requestedSecret, "utf8") : requestedSecret.byteLength;
-  if (secretByteLength < 16) {
+  // The hole this closes. `isBinarySecret` accepts on `instanceof ArrayBuffer`,
+  // which walks the prototype chain and is therefore forgeable, and a raw
+  // `requestedSecret.byteLength` is an ordinary property read the caller
+  // controls. Together they let three inputs pass a floor they do not meet and
+  // then get keyed with their real, short bytes: an object with
+  // `ArrayBuffer.prototype` grafted on, a `Proxy` whose `get` trap lies, and an
+  // `ArrayBuffer` subclass that overrides `byteLength` with a getter. Measured
+  // on `8bcb4db9`: all three minted tokens keyed with FOUR bytes. Two of the
+  // three are refused at `a407b78f` AND at `0a037408`, so reading the raw input
+  // is not an inherited hole — it is one this file would have opened.
+  //
+  // Why the floor moved rather than the accept test being hardened. Past
+  // `toBuffer`, `secret` is a `Buffer` this function constructed, and its length
+  // is an internal fact about allocated memory rather than anything the caller
+  // can state. A lying `byteLength` has nowhere left to be read. That closes all
+  // three forgeries and the honest short `ArrayBuffer` with one check, instead
+  // of chasing each spoofable brand test in turn.
+  //
+  // An earlier revision of this block argued the opposite and the argument
+  // inverted. It kept the check on the raw input because moving it made the
+  // `byteLength` -> `.length` mutation stop failing, and read that as the check
+  // losing its weight. The agreement is real — a `Buffer`'s `.length` and
+  // `.byteLength` are the same number — but it means the spelling bug is
+  // STRUCTURALLY IMPOSSIBLE here, not that the check is weightless. Preferring a
+  // position where a mutation is visible, over the position where the defect
+  // cannot exist, bought test sensitivity with a live forgery. The mutation that
+  // matters now is moving this floor back above `toBuffer`, and it IS visible:
+  // `mintApiKey: the entropy floor cannot be talked out of the way` in
+  // `tests/mint-key-signing-secret-shapes.test.ts` fails when it does.
+  const secret = toBuffer(requestedSecret);
+  if (secret.length < 16) {
     throw new Error("signingSecret must be at least 16 bytes of entropy.");
   }
-  const secret = toBuffer(requestedSecret);
 
   const kid = requestedKid ?? generateKid();
   if (!/^[A-Za-z0-9_-]+$/.test(kid)) {
