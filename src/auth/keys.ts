@@ -121,6 +121,45 @@ export function ownScopesClaim(source: { scopes?: unknown }): string[] | null {
   return Object.hasOwn(source, "scopes") && Array.isArray(source.scopes) ? (source.scopes as string[]) : null;
 }
 
+/**
+ * Read one field of a caller-supplied OPTIONS BAG as an OWN property — the
+ * sibling of `ownAgentClaim`, `ownScopesClaim` and `ownTenantId`, applied to the
+ * bags rather than to the claims. The same accessor already exists on the CLI's
+ * write path in `src/cli/issue-key.ts`; this is that convention reaching the
+ * layer underneath it, so the guard does not depend on which caller arrives.
+ *
+ * An options bag is an object literal, so it has `Object.prototype` in its
+ * chain, and a field the caller did not set is genuinely absent rather than
+ * defined as `undefined`. `options.x ?? fallback`, `options.x === undefined` and
+ * `Array.isArray(options.x)` therefore all perform a real prototype lookup for
+ * exactly those fields, and a `__proto__`/`constructor.prototype` write
+ * primitive anywhere else in the process decides what they return. Every one of
+ * those three forms accepts the inherited value silently — `??` because it is
+ * not nullish, `=== undefined` because it is defined, `Array.isArray` because it
+ * is an array.
+ *
+ * ON THE MINT PATH THAT IS NOT A MISREAD, IT IS A SIGNATURE. Values read in
+ * `mintApiKey` are written into the claims BEFORE the HMAC is computed, so the
+ * token that comes out is cryptographically authentic and no verify-time guard
+ * can — or should — reject it: `ownAgentClaim`, `ownScopesClaim` and
+ * `ownTenantId` all sit downstream of the signature and cannot help here. The
+ * consequence is durability rather than access. The attack still needs a
+ * pollution primitive in the issuer's own process, but a primitive that lasts
+ * one mint yields a PERMANENTLY valid credential — a wildcard `scopes`, an
+ * attacker-chosen `kid` (the value revocation keys on), or a moved `iat`/`exp`.
+ * Removing the pollution afterwards does not revoke what was signed while it was
+ * there. This is the only place those values can be stopped.
+ *
+ * On the verify path the reads are not signed and the consequence is narrower:
+ * they decide whether an authentic token is accepted here and now. It is still
+ * both directions — an inherited `nowMs`/`leewaySeconds` accepts a lapsed token,
+ * an inherited `expectedApp`/`requiredScopes`/`requireTenant`/`expectedTid`
+ * denies a good one.
+ */
+function ownOption<T extends object, K extends keyof T & string>(options: T, name: K): T[K] | undefined {
+  return Object.hasOwn(options, name) ? options[name] : undefined;
+}
+
 export interface MintApiKeyOptions {
   app: string;
   scopes: string[];
@@ -188,52 +227,76 @@ export function generateKid(bytes = 8): string {
  * sha256 hash and metadata to persist. The signing secret is NEVER embedded.
  */
 export function mintApiKey(options: MintApiKeyOptions): MintedApiKey {
-  const app = options.app.trim();
+  // EVERY option is read exactly once, here, as an own property, and past this
+  // block the function sees locals and never `options`. Reading them in one
+  // place is the point rather than a tidiness preference: a single bare
+  // `options.x` left further down reopens the hole for that field alone, and a
+  // bare read is invisible at a glance because it is spelled identically to a
+  // correct one. Six of these were bare until this change — `app`, `scopes`
+  // (three separate reads, one of them spread straight into the signed claims),
+  // `signingSecret`, `kid`, `nowMs` and `ttlSeconds` — while `tid` and `agent`
+  // beside them were already guarded, which is exactly how the gap survived
+  // review: the file looked like it applied the convention.
+  const requestedApp = ownOption(options, "app");
+  const requestedScopes = ownOption(options, "scopes");
+  const requestedSecret = ownOption(options, "signingSecret");
+  const requestedKid = ownOption(options, "kid");
+  const requestedNowMs = ownOption(options, "nowMs");
+  const requestedTtlSeconds = ownOption(options, "ttlSeconds");
+  // `undefined` means untenanted and stays out of the body entirely, so a token
+  // minted without a tenant is byte-identical to one minted before `tid`
+  // existed. Any other value must be well-formed — a silently-dropped bad
+  // tenant id would mint a key that authenticates as untenanted.
+  const requestedTid = ownTenantId(options);
+  const agent = ownAgentClaim(options);
+
+  // A non-string app is now the same failure as a malformed one instead of a
+  // `TypeError` out of `.trim()`. Both throw; this one names the field.
+  const app = typeof requestedApp === "string" ? requestedApp.trim() : "";
   if (!APP_SLUG_PATTERN.test(app)) {
-    throw new Error(`Invalid app slug '${options.app}'. Expected ${APP_SLUG_PATTERN}.`);
+    throw new Error(`Invalid app slug '${String(requestedApp ?? "")}'. Expected ${APP_SLUG_PATTERN}.`);
   }
-  if (!Array.isArray(options.scopes) || options.scopes.length === 0) {
+  if (!Array.isArray(requestedScopes) || requestedScopes.length === 0) {
     throw new Error("At least one scope is required to mint an API key.");
   }
-  for (const scope of options.scopes) {
+  for (const scope of requestedScopes) {
     if (!isValidScope(scope)) {
       throw new Error(`Invalid scope '${scope}'. Expected '*' or '<app>:<action>'.`);
     }
   }
-  const secret = toBuffer(options.signingSecret);
+  // An absent or non-secret-shaped value becomes an empty buffer so it lands on
+  // the entropy check below, which already says the right thing. Previously an
+  // absent `signingSecret` threw a `TypeError` off `undefined.length`; it still
+  // throws, now with this module's own message.
+  const secret =
+    typeof requestedSecret === "string" || Buffer.isBuffer(requestedSecret)
+      ? toBuffer(requestedSecret)
+      : Buffer.alloc(0);
   if (secret.length < 16) {
     throw new Error("signingSecret must be at least 16 bytes of entropy.");
   }
 
-  const kid = options.kid ?? generateKid();
+  const kid = requestedKid ?? generateKid();
   if (!/^[A-Za-z0-9_-]+$/.test(kid)) {
     throw new Error(`Invalid kid '${kid}'. Expected url-safe characters only.`);
   }
 
-  // `undefined` means untenanted and stays out of the body entirely, so a token
-  // minted without a tenant is byte-identical to one minted before `tid`
-  // existed. Any other value must be well-formed — a silently-dropped bad
-  // tenant id would mint a key that authenticates as untenanted. Read as an OWN
-  // property (see `ownTenantId`) so a polluted prototype cannot put a tenant
-  // into a token the caller minted without one.
-  const requestedTid = ownTenantId(options);
   const tid = requestedTid === undefined ? undefined : normalizeTenantId(requestedTid);
 
-  const nowMs = options.nowMs ?? Date.now();
+  const nowMs = requestedNowMs ?? Date.now();
   const iat = Math.floor(nowMs / 1000);
-  const ttl = options.ttlSeconds === undefined ? DEFAULT_API_KEY_TTL_SECONDS : options.ttlSeconds;
+  const ttl = requestedTtlSeconds === undefined ? DEFAULT_API_KEY_TTL_SECONDS : requestedTtlSeconds;
   if (ttl !== null && (!Number.isFinite(ttl) || ttl <= 0)) {
     throw new Error("ttlSeconds must be a positive number or null (no expiry).");
   }
   const exp = ttl === null ? null : iat + Math.floor(ttl);
-  const agent = ownAgentClaim(options);
 
   const claims: ApiKeyClaims = {
     v: API_KEY_TOKEN_VERSION,
     kid,
     app,
     ...(tid !== undefined ? { tid } : {}),
-    scopes: [...options.scopes],
+    scopes: [...requestedScopes],
     iat,
     exp,
     ...(agent !== null ? { agent } : {}),
@@ -376,6 +439,26 @@ export interface VerifyApiKeyTokenOptions {
  * top via the store/middleware. Constant-time on the signature comparison.
  */
 export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptions): ApiKeyVerifyResult {
+  // Same one-read-per-option block as `mintApiKey`, for the same reason. These
+  // reads are not signed, so the consequence is narrower than on the mint path
+  // and it runs in both directions: an inherited `nowMs` or `leewaySeconds`
+  // accepts a token whose expiry has lapsed, and an inherited `expectedApp`,
+  // `requiredScopes`, `requireTenant` or `expectedTid` denies a token the caller
+  // never asked to be checked that way. `signingSecret` is the sharp one — an
+  // inherited value would compute the expected HMAC from a secret the attacker
+  // chose, so a token they signed themselves would verify. It is deliberately
+  // NOT given a fallback: an absent secret still throws exactly as it does today
+  // when a caller passes `undefined` explicitly, because inventing a new denial
+  // reason in the request path would turn a caller's configuration bug into a
+  // silent rejection that looks like a bad token.
+  const optSigningSecret = ownOption(options, "signingSecret");
+  const optExpectedApp = ownOption(options, "expectedApp");
+  const optNowMs = ownOption(options, "nowMs");
+  const optLeewaySeconds = ownOption(options, "leewaySeconds");
+  const optRequiredScopes = ownOption(options, "requiredScopes");
+  const optRequireTenant = ownOption(options, "requireTenant");
+  const optExpectedTid = ownOption(options, "expectedTid");
+
   const parsed = parseApiKey(token);
   if (!parsed) {
     return { ok: false, reason: "malformed", message: "Token is malformed." };
@@ -388,11 +471,11 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
   if (claims.app !== app) {
     return { ok: false, reason: "app_mismatch", message: "Token prefix app does not match claims." };
   }
-  if (options.expectedApp !== undefined && app !== options.expectedApp) {
-    return { ok: false, reason: "app_mismatch", message: `Token is for app '${app}', expected '${options.expectedApp}'.` };
+  if (optExpectedApp !== undefined && app !== optExpectedApp) {
+    return { ok: false, reason: "app_mismatch", message: `Token is for app '${app}', expected '${optExpectedApp}'.` };
   }
 
-  const expected = hmac(options.signingSecret, `${apiKeyPrefix(app)}${body}`);
+  const expected = hmac(optSigningSecret as string | Buffer, `${apiKeyPrefix(app)}${body}`);
   let provided: Buffer;
   try {
     provided = Buffer.from(sig, "base64url");
@@ -411,8 +494,8 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
   // denials. Six copies of a guard is six chances for the seventh reader to
   // forget; one guarded value has none.
   const agent = ownAgentClaim(claims);
-  const now = Math.floor((options.nowMs ?? Date.now()) / 1000);
-  const leeway = options.leewaySeconds ?? 0;
+  const now = Math.floor((optNowMs ?? Date.now()) / 1000);
+  const leeway = optLeewaySeconds ?? 0;
   if (typeof claims.iat === "number" && now + leeway < claims.iat) {
     return { ok: false, reason: "not_yet_valid", message: "Token is not yet valid.", agent };
   }
@@ -428,7 +511,7 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
   // Any truthy value enables the gate. `=== true` would fail OPEN for a config
   // value that arrived as the string "true" or the number 1 — the wrong
   // direction for a security control to be strict in.
-  const tenantRequired = Boolean(options.requireTenant) || options.expectedTid !== undefined;
+  const tenantRequired = Boolean(optRequireTenant) || optExpectedTid !== undefined;
   if (tenantRequired && tid === null) {
     return {
       ok: false,
@@ -439,7 +522,7 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
       agent,
     };
   }
-  if (options.expectedTid !== undefined && !tenantIdsEqual(tid, options.expectedTid)) {
+  if (optExpectedTid !== undefined && !tenantIdsEqual(tid, optExpectedTid)) {
     // A malformed `expectedTid` lands here too, and deliberately: this runs in
     // the request path, so a misconfigured expectation must deny rather than
     // throw a 500. That includes values that are not strings at ALL — Express
@@ -452,7 +535,7 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
     // it is diagnosable. Construction-time config is validated eagerly by
     // `verifyApiKey()`.
     const expectationIsWellFormed =
-      typeof options.expectedTid === "string" && isValidTenantId(options.expectedTid.trim());
+      typeof optExpectedTid === "string" && isValidTenantId(optExpectedTid.trim());
     return {
       ok: false,
       reason: "tenant_mismatch",
@@ -465,7 +548,7 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
     };
   }
 
-  if (options.requiredScopes && options.requiredScopes.length > 0) {
+  if (optRequiredScopes && optRequiredScopes.length > 0) {
     // Local import avoided to keep the crypto module leaf; inline the check.
     // `parseApiKey` has already refused a body with no own `scopes`, so the
     // `?? []` is unreachable today. It is here anyway, and it denies rather
@@ -487,7 +570,7 @@ export function verifyApiKeyToken(token: string, options: VerifyApiKeyTokenOptio
         const rAction = required.slice(ri + 1);
         return (gApp === "*" || gApp === rApp) && (gAction === "*" || gAction === rAction);
       });
-    for (const required of options.requiredScopes) {
+    for (const required of optRequiredScopes) {
       if (!satisfies(required)) {
         return { ok: false, reason: "insufficient_scope", message: `Missing required scope '${required}'.`, agent };
       }
