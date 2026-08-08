@@ -8,7 +8,7 @@
 // PURE REMOTE (Amendment A1): every call hits the cloud Postgres directly. There
 // is no cache and no local mirror; a revocation check reads the row each time.
 
-import type { ApiKeyClaims, MintedApiKey } from "./keys.js";
+import { ownAgentClaim, type ApiKeyClaims, type MintedApiKey } from "./keys.js";
 import { normalizeTenantId, ownTenantId } from "./tenant.js";
 
 /** Minimal row shape. Compatible with `pg` QueryResultRow. */
@@ -123,10 +123,17 @@ function rowToRecord(row: Row): ApiKeyRecord {
   // migration 0003 has no `tid` key at all, and that absence must read as
   // untenanted rather than as whatever sits on the prototype.
   const tid = ownTenantId(row);
+  // `agent` needs the same treatment for the same reason, and did not have it:
+  // a row predating the agent column has no such key, so a bare `row.agent`
+  // resolves to a polluted prototype's value and `String()` then mints it into
+  // the record as an authentic subject. Not `ownAgentClaim`, because a driver
+  // may hand back a non-string (a Buffer, a number) that the existing
+  // coercion below is right to keep accepting — only the own-key gate is new.
+  const agentValue = Object.hasOwn(row, "agent") ? row.agent : null;
   return {
     kid: String(row.kid),
     app: String(row.app),
-    agent: row.agent === null || row.agent === undefined ? null : String(row.agent),
+    agent: agentValue === null || agentValue === undefined ? null : String(agentValue),
     tid: tid === null || tid === undefined ? null : String(tid),
     scopes: parseScopes(row.scopes),
     tokenHash: String(row.token_hash),
@@ -189,6 +196,7 @@ export class ApiKeyStore {
     // Own-property read (see `ownTenantId`): a polluted prototype must not put
     // a tenant on a row the caller inserted without one.
     const tid = ownTenantId(input);
+    const agent = ownAgentClaim(input);
     await this.client.execute(
       `INSERT INTO ${this.table}
          (kid, app, agent, tid, scopes, token_hash, issued_at, expires_at, created_by)
@@ -196,7 +204,7 @@ export class ApiKeyStore {
       [
         input.kid,
         input.app,
-        input.agent ?? null,
+        agent,
         tid === undefined || tid === null ? null : normalizeTenantId(tid),
         JSON.stringify(input.scopes),
         input.tokenHash,
@@ -213,7 +221,13 @@ export class ApiKeyStore {
     await this.insert({
       kid: minted.kid,
       app: claims.app,
-      agent: claims.agent ?? null,
+      // Own-property reads, both of them. The claims literal is built locally by
+      // `mintApiKey`, so it inherits `Object.prototype` just as a parsed token
+      // does — a bare `claims.agent` would persist a polluted prototype's value
+      // into the key record, where every later audit lookup would trust it.
+      // `tid` has been read this way since the tenant work; `agent` was the
+      // sibling that was missed.
+      agent: ownAgentClaim(claims),
       tid: ownTenantId(claims) ?? null,
       scopes: claims.scopes,
       tokenHash: minted.tokenHash,
