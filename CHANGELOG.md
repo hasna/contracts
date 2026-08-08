@@ -2,7 +2,122 @@
 
 All notable changes to `@hasna/contracts` are documented here.
 
-## [Unreleased]
+## [0.10.0] - 2026-08-08
+
+Ships the four changes that had been sitting unpublished on `main` since
+2026-08-01. npm ended at 0.9.0 and `main` also declared 0.9.0, so npm refused
+every republish and #68, #69, #70 and #71 reached no consumer for six days.
+The version had to move before any of them could ship at all.
+
+MINOR RATHER THAN PATCH BECAUSE THIS RELEASE IS BREAKING TWICE. The precedent
+is `18c2279`, `chore(release): 0.9.0 — breaking auth default requires a minor
+bump` — cited by sha because that subject reaches main only through the squash
+`b70fcc8`, whose own subject reads differently. The mechanism it records is
+what matters: `^0.8.2` admits 0.8.6 but NOT 0.9.0, because on 0.x the caret
+stops at the minor, so the minor slot IS the semver-major slot here. A patch
+would auto-deliver both breaks below into every `^0.9.0` consumer's next
+install with no opt-in. Either break alone would force this.
+
+Stated against this convention rather than for it: `[0.8.7]` also carries a
+`### BREAKING` heading and shipped as a patch. The convention is one release
+old and was violated the release before it was set.
+
+### BREAKING: the kit gains `own.ts`, so every vendored consumer must re-stamp (#71)
+
+`KIT_TEMPLATE_FILES` gains `own.ts`, which changes the kit file manifest.
+Every consumer running `vendor-kit --check` in CI GOES RED on its next run
+until it re-stamps against 0.10.0. Doing nothing is not a neutral option.
+Announced as `[BREAKING]` before the merge.
+
+### The vulnerability that file closes
+
+Prototype pollution converted a FAIL-CLOSED TLS ERROR INTO A SILENT SUCCESS.
+A prototype-supplied `ca`/`caCertPath` turned `sslmode=verify-full requires a
+CA bundle` into `{ rejectUnauthorized: true, ca: <attacker anchor> }` —
+`rejectUnauthorized` stays TRUE, so the connection still verifies, against a
+trust anchor the attacker supplied, and every surface that would report a TLS
+problem reports success. In `migrations.ts` a prototype-supplied `ledgerTable`
+reached interpolated DDL as SQL injection, and a prototype-supplied `dryRun`
+turned an apply into a no-op that still reported a plan.
+
+Four of seven templates carried the class: `tls.ts`, `pool.ts`, `backend.ts`,
+`migrations.ts`. `query.ts`, `health.ts` and `index.ts` are clean. A
+`tls.ts`-only fix would have been VACUOUS — `pool.ts` laundered the pollution
+by copying a prototype value into an own property before calling
+`resolveTlsConfig`, which then correctly accepted it.
+
+The guard is `Object.hasOwn` via the new shared `own.ts`, token-independent so
+there is no denylist of property names to keep current. It is NOT re-exported
+from `index.ts`, so the public surface is unchanged. It sits in `loadCaBundle`
+below the mode table, so it is correct under both the template's mode table and
+the hardened variant vendored in `hasna/loops` and `hasna/emails`.
+
+Two traps are recorded in the code: a guarded read stored in a plain object
+literal is unguarded again on read-back, so guarded values are built on
+`Object.create(null)`; and `process.env` is itself prototype-pollutable on Bun
+1.3.14.
+
+### BREAKING: a storage waiver is refused for a declared supported API (#68)
+
+`storageWaiverIneligibilityReason` gains a second service-capability test.
+Previously the only test was shipping a `<name>-serve` bin — a NAMING
+CONVENTION that correlates with running a server. Declaring a supported `api`
+service surface IS the repo saying it runs one, and the bin test alone let the
+identical service keep its waiver by binding that same API to any other
+allowlisted bin: `-daemon`, `-worker` and `-runner` are all in
+`ALLOWED_BIN_SUFFIXES`, so the verdict turned on what a file was called rather
+than on what the repo declared it does.
+
+WHAT CHANGES FOR A CONSUMER: a `cli-with-store` manifest that declares a
+supported `api` surface AND carries a non-empty
+`metadata.conformance.waivedStorageEngines` now fails both
+`ServiceContractManifestSchema` and the conformance gate, where it previously
+passed. Both tests are kept, because neither implies the other. The waiver is
+only load-bearing when `storage.engines` is declared and incomplete, so a
+manifest declaring both `sqlite` and `postgresql` never consults its waiver and
+is unaffected either way.
+
+MEASURED BLAST RADIUS: zero manifests regress on upgrade. Across 103 canonical
+`hasna.contract.json` files on station01 — filename search, `node_modules` and
+nested agent worktrees excluded, all 103 parsed with 0 parse errors — five
+files across three repos (`factory`, `automations`, `catalog`) carry a
+non-empty waiver, and all five ALREADY fail validation under published 0.9.0 on
+unrelated grounds: every one spells the engine `postgres` where
+`WAIVABLE_STORAGE_ENGINES` is `["postgresql"]`, and they still carry
+`deploymentModes` and a `storage.mode` from the removed deployment-mode axis.
+Something already red cannot go from passing to failing.
+
+Counterfactually, if those manifests were repaired, exactly one would flip:
+`iapp-factory`, which declares an `http` surface with `kind: "api"` and
+`status: "supported"` while shipping `factory` and `factory-mcp` and no
+`factory-serve`. That is precisely the misnamed-bin evasion this arm was
+written for. `catalog` declares an `api` surface at `status: "deferred"` and
+correctly does not trigger.
+
+Within `src` the change reaches nothing else: `declaresSupportedApiSurface` has
+exactly one caller, `storageWaiverIneligibilityReason`, which has two — the
+manifest schema and the conformance gate.
+
+This narrows declared-but-misnamed evasion; it does NOT detect an undeclared
+server. A server bound neither to `<name>-serve` nor declared as a supported
+surface — a bare subcommand — is invisible to any manifest-level predicate,
+and closing that needs source analysis rather than a stricter string.
+
+### `AuthAuditEvent` carries the authenticated agent claim (#70)
+
+`AuthAuditEvent` gains `agent`, so an audit trail can answer "WHO did this"
+without a `SELECT agent FROM api_keys WHERE kid` at log-read time — exactly
+when you least have database access. Three-state and the distinction is
+deliberate: `undefined` means never established because the request was refused
+BEFORE the signature verified; `null` means established with no `agent` claim;
+a string is the claim, authentic because `agent` lives inside the signed body.
+
+ADDITIVE, NOT BREAKING: `agent` is optional rather than required, because
+services construct this object themselves — `open-emails` and `open-mailery`
+each build an `AuthAuditEvent` literal inside their own API-key verifier — and
+a required field would break their type-check on upgrade. The claim is read
+with `Object.hasOwn` so a value inherited through a polluted prototype is not
+in the signed body and can never become audit attribution.
 
 ### Optional `publishing` surface on the service contract manifest
 
@@ -23,6 +138,14 @@ options rejected, and the measurements are in
 `docs/adr/0001-publishing-surface-in-the-service-contract-manifest.md` — the
 first ADR in this repository, which also sets the `docs/adr/NNNN-<slug>.md`
 convention.
+
+### Release hygiene
+
+Tags had stopped at `v0.8.1` while 0.8.2, 0.8.4, 0.8.5, 0.8.7 and 0.9.0 all
+published untagged, so there was no ref naming what any published version
+contained. `v0.10.0` will be tagged at the MERGE commit on `main` and pushed in
+the same session as the publish — not at the branch head, because a squash
+merge mints a new sha: the tree is identical, the sha is not.
 
 ## [0.9.0] - 2026-08-01
 
