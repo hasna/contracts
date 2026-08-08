@@ -63,6 +63,7 @@ describe("kit TLS (one correct approach)", () => {
     expect(sslModeFromConnectionString("postgres://h/db?sslmode=require")).toBe("require");
     expect(sslModeFromConnectionString("postgres://h/db?sslmode=verify-full")).toBe("verify-full");
     expect(sslModeFromConnectionString("postgres://h/db?ssl=true")).toBe("require");
+    expect(sslModeFromConnectionString("?sslnegotiation=direct")).toBe("require");
   });
 
   test("require verifies; verify-full needs a CA", () => {

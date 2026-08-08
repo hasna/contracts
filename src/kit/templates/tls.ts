@@ -204,8 +204,9 @@ export function sslNegotiationFromConnectionString(
 
 /**
  * Extract the effective `sslmode` from a Postgres connection string. Honors the
- * `sslmode` query param and the legacy `ssl=true` boolean. Returns `disable`
- * when TLS is not requested.
+ * `sslmode` query param, the legacy `ssl=true` boolean, and pg's rule that
+ * `sslnegotiation=direct` implies TLS when no explicit SSL setting is present.
+ * Returns `disable` when TLS is not requested.
  */
 export function sslModeFromConnectionString(connectionString: string): SslMode {
   const values = tlsQueryValues(connectionString);
@@ -226,8 +227,14 @@ export function sslModeFromConnectionString(connectionString: string): SslMode {
     }
   }
 
-  const ssl = values.get("ssl")?.trim().toLowerCase();
-  if (ssl && ["1", "true", "yes", "on", "require"].includes(ssl)) return "require";
+  if (values.has("ssl")) {
+    const ssl = values.get("ssl")?.trim().toLowerCase();
+    if (ssl && ["1", "true", "yes", "on", "require"].includes(ssl)) return "require";
+    return "disable";
+  }
+
+  const sslnegotiation = values.get("sslnegotiation")?.trim().toLowerCase();
+  if (sslnegotiation === "direct") return "require";
 
   return "disable";
 }

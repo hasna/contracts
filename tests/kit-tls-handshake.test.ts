@@ -115,6 +115,7 @@ function errorResponse(message: string): Buffer {
 
 interface FakePostgres {
   port: number;
+  directPort: number;
   close: () => Promise<void>;
 }
 
@@ -191,6 +192,7 @@ async function startFakePostgres(material: { key: string; cert: string }): Promi
 
   return {
     port,
+    directPort: tlsPort,
     close: async () => {
       for (const socket of sockets) socket.destroy();
       await new Promise<void>((resolve) => front.close(() => resolve()));
@@ -247,6 +249,8 @@ let privateCaServer: FakePostgres;
 let selfSignedServer: FakePostgres;
 let privateCaDsn: (query: string) => string;
 let selfSignedDsn: (query: string) => string;
+let privateCaDirectDsn: (query: string) => string;
+let selfSignedDirectDsn: (query: string) => string;
 
 beforeAll(async () => {
   fixtures = mintFixtures();
@@ -254,6 +258,10 @@ beforeAll(async () => {
   selfSignedServer = await startFakePostgres(fixtures.selfSignedServer);
   privateCaDsn = (query) => `postgres://u:p@localhost:${privateCaServer.port}/db${query}`;
   selfSignedDsn = (query) => `postgres://u:p@localhost:${selfSignedServer.port}/db${query}`;
+  privateCaDirectDsn = (query) =>
+    privateCaDsn(query).replace(`:${privateCaServer.port}/db`, `:${privateCaServer.directPort}/db`);
+  selfSignedDirectDsn = (query) =>
+    selfSignedDsn(query).replace(`:${selfSignedServer.port}/db`, `:${selfSignedServer.directPort}/db`);
 });
 
 afterAll(async () => {
@@ -358,6 +366,21 @@ describe("kit TLS handshake — `require` still verifies", () => {
     expect(refused.kind).toBe("TLS_REJECTED_CERT");
     const connected = await throughKit(privateCaDsn("?sslmode=prefer"), { ca: fixtures.caPem });
     expect(connected).toEqual({ kind: "TLS_ESTABLISHED" });
+  });
+});
+
+describe("kit TLS handshake — direct negotiation implies verified TLS", () => {
+  test("sslnegotiation=direct connects with the right CA without an explicit sslmode", async () => {
+    const outcome = await throughKit(privateCaDirectDsn("?sslnegotiation=direct"), {
+      ca: fixtures.caPem,
+    });
+    expect(outcome).toEqual({ kind: "TLS_ESTABLISHED" });
+  });
+
+  test("sslnegotiation=direct refuses an untrusted certificate", async () => {
+    const outcome = await throughKit(selfSignedDirectDsn("?sslnegotiation=direct"));
+    expect(outcome.kind).toBe("TLS_REJECTED_CERT");
+    expect((outcome as { code: string }).code).toBe("DEPTH_ZERO_SELF_SIGNED_CERT");
   });
 });
 
