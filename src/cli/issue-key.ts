@@ -95,7 +95,19 @@ export async function runIssueKey(options: Record<string, unknown>, deps: IssueK
     }
   }
 
-  const agent = options.agent !== undefined ? String(options.agent) : bootstrap ? "bootstrap" : undefined;
+  // OWN-property read, for the same reason `ownAgentClaim` exists in `auth/keys`
+  // — and this site is the one where getting it wrong is worst. `options` is a
+  // commander-built object with `Object.prototype` in its chain, so a bare
+  // `options.agent` on an invocation that passed no `--agent` resolves to
+  // whatever a pollution gadget planted there. That value is then MINTED INTO
+  // THE SIGNED BODY, which is a strictly worse outcome than the verification-side
+  // defect this guard's siblings close: downstream `ownAgentClaim` reads it back
+  // as an OWN, string-valued claim and reports it as authentic, because by then
+  // it genuinely is. A guard on the read side cannot undo a poisoned signature.
+  // `String()` coercion and the `bootstrap` fallback are preserved exactly; only
+  // the prototype walk is removed.
+  const agentOption = Object.hasOwn(options, "agent") ? options.agent : undefined;
+  const agent = agentOption !== undefined ? String(agentOption) : bootstrap ? "bootstrap" : undefined;
 
   let tid: string | undefined;
   if (options.tid !== undefined) {

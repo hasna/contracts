@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mintApiKey, verifyApiKeyToken } from "../src/auth/keys";
 import { verifyApiKey, type AuthAuditEvent } from "../src/auth/middleware";
 import { ApiKeyStore, type ApiKeyStatus, type AuthQueryClient, type Row } from "../src/auth/store";
+import { runIssueKey } from "../src/cli/issue-key";
 
 const SIGNING = "test-signing-secret-not-a-real-credential-000";
 
@@ -397,6 +398,54 @@ describe("agent claim under a polluted Object.prototype", () => {
     expect(record).not.toBeNull();
     expect(record?.agent).toBeNull();
     expect(record?.agent).not.toBe(POLLUTED_AGENT);
+  });
+
+  test("the MINT path never signs a prototype-supplied agent into the token body", async () => {
+    // The last unguarded read of this claim in the tree, and the one where the
+    // consequence is worst. `runIssueKey` receives a commander-built options
+    // object, so a bare `options.agent` on an invocation with no `--agent`
+    // walks the prototype. The value it finds is not merely reported — it is
+    // MINTED INTO THE SIGNED BODY. Every read-side guard then reports it as
+    // authentic, correctly, because a signature now covers it. This is the one
+    // case the verification-side guards structurally cannot save.
+    const mintWithoutAgentOption = async (): Promise<string> => {
+      const lines: string[] = [];
+      const original = console.log;
+      console.log = (...args: unknown[]) => void lines.push(args.map((a) => String(a)).join(" "));
+      try {
+        // NOTE: no `agent` key at all — the operator passed no `--agent`.
+        await runIssueKey(
+          { app: "todos", scopes: "todos:read", store: false },
+          { report: () => {}, env: { HASNA_TODOS_API_SIGNING_KEY: SIGNING } },
+        );
+      } finally {
+        console.log = original;
+      }
+      // The token is printed last, on its own line, by `printKeyBlock`.
+      return lines[lines.length - 1]!.trim();
+    };
+
+    // NEGATIVE CONTROL on a clean prototype: this must produce no claim at all,
+    // or the polluted assertion below would pass against code that never had
+    // the defect and would prove nothing.
+    const cleanToken = await mintWithoutAgentOption();
+    const cleanVerified = verifyApiKeyToken(cleanToken, { signingSecret: SIGNING, expectedApp: "todos" });
+    expect(cleanVerified.ok).toBe(true);
+    expect(Object.hasOwn(cleanVerified.ok ? cleanVerified.claims : {}, "agent")).toBe(false);
+
+    const pollutedToken = await withPollutedAgentPrototype(mintWithoutAgentOption);
+    const verified = verifyApiKeyToken(pollutedToken, { signingSecret: SIGNING, expectedApp: "todos" });
+    expect(verified.ok).toBe(true);
+    if (!verified.ok) return;
+
+    // The signed body must not carry the claim AT ALL. Asserting on the guarded
+    // read-back alone would be insufficient here in the one direction that
+    // matters: `ownAgentClaim` returns a planted-but-signed value happily,
+    // since by then it IS an own, string-valued claim.
+    expect(Object.hasOwn(verified.claims, "agent")).toBe(false);
+    expect(verified.claims.agent).not.toBe(POLLUTED_AGENT);
+    // And the guarded read-back agrees: authenticated, naming no subject.
+    expect(verified.agent).toBeNull();
   });
 
   test("the pollution helper restores the prototype", () => {
