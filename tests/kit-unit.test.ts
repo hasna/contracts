@@ -69,8 +69,19 @@ describe("kit TLS (one correct approach)", () => {
   test("require verifies; verify-full needs a CA", () => {
     // Isolate from ambient PGSSLROOTCERT / NODE_EXTRA_CA_CERTS in the shell.
     const noEnv = { env: {} } as const;
+    // No ssl parameter at all: NO explicit policy, so pg's own PGSSLMODE
+    // fallback still applies. That is libpq behaviour and is deliberate.
     expect(resolveTlsConfig("postgres://h/db", noEnv)).toBeUndefined();
-    expect(resolveTlsConfig("postgres://h/db?sslmode=disable", noEnv)).toBeUndefined();
+    // An EXPLICIT operator "off" resolves to an explicit `false` (row c317d0bf).
+    // `undefined` would set no `ssl` key, letting pg read PGSSLMODE from the
+    // environment and override the instruction in the DSN.
+    expect(resolveTlsConfig("postgres://h/db?sslmode=disable", noEnv)).toBe(false);
+    expect(resolveTlsConfig("postgres://h/db?sslmode=DISABLE", noEnv)).toBe(false);
+    expect(resolveTlsConfig("postgres://h/db?ssl=false", noEnv)).toBe(false);
+    expect(resolveTlsConfig("postgres://h/db?ssl=0", noEnv)).toBe(false);
+    expect(resolveTlsConfig("postgres://h/db?ssl=off", noEnv)).toBe(false);
+    // sslmode wins over ssl, so an explicit disable stays explicit.
+    expect(resolveTlsConfig("postgres://h/db?sslmode=disable&ssl=true", noEnv)).toBe(false);
     expect(resolveTlsConfig("postgres://h/db?sslmode=require", noEnv)).toEqual({ rejectUnauthorized: true });
     expect(() => resolveTlsConfig("postgres://h/db?sslmode=verify-full", noEnv)).toThrow(/requires a CA bundle/);
     expect(resolveTlsConfig("postgres://h/db?sslmode=verify-full", { ca: "PEM", env: {} })).toEqual({

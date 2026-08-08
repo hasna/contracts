@@ -8,7 +8,13 @@
 //
 // THE MODE TABLE — and as of this change it describes THE SOCKET, not just this
 // function's return value:
-//   - disable / (no ssl param)  -> no TLS (ssl: undefined)
+//   - disable (explicit)        -> no TLS, stated explicitly (ssl: false), so an
+//                                  ambient PGSSLMODE cannot override it.
+//   - (no ssl param)            -> no explicit TLS policy (ssl: undefined); pg's
+//                                  own PGSSLMODE fallback applies, as libpq
+//                                  specifies. These two rows used to be one, and
+//                                  collapsing them is what let PGSSLMODE
+//                                  override an explicit operator disable.
 //   - prefer / require          -> encrypt AND verify the server certificate
 //                                  (rejectUnauthorized: true), pinning a CA
 //                                  bundle when one is available.
@@ -118,6 +124,22 @@ const PG_TLS_QUERY_PARAMETERS = new Set([
   "sslnegotiation",
   "uselibpqcompat",
 ]);
+
+/**
+ * The legacy boolean `ssl=` values, named so the two places that read them
+ * cannot drift: `sslModeFromConnectionString` decides the MODE from the truthy
+ * set, and `resolveTlsConfig` decides whether an operator explicitly asked for
+ * TLS to be OFF from the falsey set.
+ *
+ * A value in NEITHER set (a typo such as `ssl=treu`) currently resolves to mode
+ * `disable` but is not treated as an explicit off, so it falls through to pg's
+ * PGSSLMODE fallback. `hasna/emails` throws on that input instead. That
+ * divergence is left standing here deliberately — changing it would start
+ * rejecting DSNs that connect today — and is recorded on the PR for row
+ * c317d0bf rather than fixed inside it.
+ */
+const EXPLICIT_SSL_ON_VALUES = new Set(["1", "true", "yes", "on", "require"]);
+const EXPLICIT_SSL_OFF_VALUES = new Set(["0", "false", "no", "off", "disable"]);
 
 /** The `ssl` field shape accepted by `pg.Pool` / `pg.Client`. */
 export type PgSslConfig =
@@ -229,7 +251,7 @@ export function sslModeFromConnectionString(connectionString: string): SslMode {
 
   if (values.has("ssl")) {
     const ssl = values.get("ssl")?.trim().toLowerCase();
-    if (ssl && ["1", "true", "yes", "on", "require"].includes(ssl)) return "require";
+    if (ssl && EXPLICIT_SSL_ON_VALUES.has(ssl)) return "require";
     return "disable";
   }
 
@@ -284,7 +306,11 @@ function loadClientCertificate(connectionString: string): {
 
 /**
  * Resolve the `pg` ssl config for a connection string. See the module header
- * for the full mode table. Returns `undefined` when TLS should be off.
+ * for the full mode table.
+ *
+ * Returns `false` when TLS was explicitly switched off, and `undefined` when the
+ * DSN expressed no TLS policy at all — those are different answers, and pg
+ * treats them differently: only `undefined` lets `PGSSLMODE` decide.
  *
  * The caller MUST hand pg `connectionStringWithoutTlsParameters(connectionString)`
  * rather than the original DSN, or pg discards everything resolved here.
@@ -295,7 +321,39 @@ export function resolveTlsConfig(
 ): PgSslConfig | undefined {
   const mode = sslModeFromConnectionString(connectionString);
 
-  if (mode === "disable") return undefined;
+  if (mode === "disable") {
+    // TWO DIFFERENT SITUATIONS REACH THIS BRANCH AND THEY MUST NOT RESOLVE THE
+    // SAME WAY: an operator who wrote an explicit "off", and a DSN that simply
+    // carries no ssl parameter. `sslModeFromConnectionString` collapses both to
+    // `disable`, so the distinction has to be recovered here.
+    //
+    // Returning `undefined` sets no `config.ssl` key at all, and pg then reaches
+    //   pg/lib/connection-parameters.js -> readSSLConfigFromEnvironment()
+    // which reads `process.env.PGSSLMODE` DIRECTLY. `options.env` does not reach
+    // that path — it isolates `loadCaBundle` in this module and nothing else.
+    //
+    // EXPLICIT OFF -> `false`. While the DSN still carried `?sslmode=disable`,
+    // pg parsed it and set `config.ssl = false` itself, so the instruction was
+    // delivered by accident of the parameter surviving. Now that
+    // `connectionStringWithoutTlsParameters` strips it — which is the whole
+    // point of that function — nothing says TLS was deliberately switched off,
+    // and an ambient PGSSLMODE silently overrides the operator. Saying `false`
+    // restores the instruction, and it is undiagnosable from the DSN otherwise.
+    //
+    // NO PARAMETER AT ALL -> `undefined`, deliberately kept. Such a DSN has
+    // expressed no instruction, and deferring to PGSSLMODE is libpq's
+    // documented behaviour. Widening this branch to a blanket `false` reads as
+    // the tidier fix and is a CONFIDENTIALITY REGRESSION in the opposite
+    // direction: an operator who sets PGSSLMODE=require to force TLS on bare
+    // DSNs would be silently downgraded to plaintext. `tests/kit-tls-handshake`
+    // pins both halves so neither can drift.
+    const values = tlsQueryValues(connectionString);
+    const sslmode = values.get("sslmode")?.trim().toLowerCase();
+    const ssl = values.get("ssl")?.trim().toLowerCase();
+    const explicitlyOff =
+      sslmode === "disable" || (ssl !== undefined && EXPLICIT_SSL_OFF_VALUES.has(ssl));
+    return explicitlyOff ? false : undefined;
+  }
 
   const ca = loadCaBundle(connectionString, options);
   const clientCertificate = loadClientCertificate(connectionString);
