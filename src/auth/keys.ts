@@ -363,12 +363,26 @@ export function mintApiKey(options: MintApiKeyOptions): MintedApiKey {
   // three are refused at `a407b78f` AND at `0a037408`, so reading the raw input
   // is not an inherited hole — it is one this file would have opened.
   //
-  // Why the floor moved rather than the accept test being hardened. Past
-  // `toBuffer`, `secret` is a `Buffer` this function constructed, and its length
-  // is an internal fact about allocated memory rather than anything the caller
-  // can state. A lying `byteLength` has nowhere left to be read. That closes all
-  // three forgeries and the honest short `ArrayBuffer` with one check, instead
-  // of chasing each spoofable brand test in turn.
+  // Why the floor moved rather than the accept test being hardened. For every
+  // shape that is genuinely CONVERTED, `secret` is a `Buffer` this function
+  // allocated, and its length is a fact about that allocation rather than
+  // anything the caller can state. That closes all three forgeries and the
+  // honest short `ArrayBuffer` with one check, instead of chasing each spoofable
+  // brand test in turn.
+  //
+  // WHAT THIS DOES NOT CLOSE, stated because an earlier draft of this comment
+  // claimed a lying length had "nowhere left to be read" and that is FALSE.
+  // `toBuffer`'s first branch is `Buffer.isBuffer(secret)`, which is itself
+  // `instanceof`-based, and it returns the CALLER'S OBJECT unconverted — so a
+  // real 4-byte `Buffer` with `length` redefined to 4096 passes this floor and
+  // is keyed with its four real bytes. Measured on this commit AND on
+  // `39e019ca`: `MINTED keyedWith4=true` on both, so it is a pre-existing route
+  // that this change neither opens nor closes. It is tracked separately against
+  // `main`; the fix belongs in `toBuffer` and is not a one-liner, because
+  // routing `Buffer` down the `isView` branch collides with Buffer allocation
+  // pooling. Overstating a guard's reach is how the guard gets trusted past it,
+  // which is the whole reason this paragraph exists rather than the sentence it
+  // replaced.
   //
   // An earlier revision of this block argued the opposite and the argument
   // inverted. It kept the check on the raw input because moving it made the
