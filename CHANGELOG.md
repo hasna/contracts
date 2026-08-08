@@ -4,11 +4,63 @@ All notable changes to `@hasna/contracts` are documented here.
 
 ## [0.10.1] - 2026-08-08
 
-Ships the three auth fixes that merged to `main` after 0.10.0 was published at
-`2026-08-08T00:22:21Z`. Every consumer installing between that publish and this
-one received a build predating all three. Each of the three lanes stopped at its
-declared stop condition, which ended at merge; nothing was wrong with them, and
-shipping was simply a step no lane owned.
+Ships the **fourteen** commits that merged to `main` after 0.10.0 was published
+at `2026-08-08T00:22:21Z` — twelve production fixes and two documentation
+corrections. Every consumer installing between that publish and this one
+received a build predating all of them.
+
+> **CORRECTED after publication.** The entry as first written described this as
+> "the three auth fixes" and documented only #87, #86 and #88. That was wrong,
+> and the wrong version is the one inside the published `0.10.1` tarball —
+> npm does not allow a republish, so this correction reaches consumers only in
+> the next release. It is recorded here rather than quietly rewritten.
+>
+> The cause is worth keeping, because it is cheap to repeat: the release was
+> *named* for the three commits that motivated it, and the scope was reasoned
+> from those three rather than measured from the last published tree.
+> `git diff --stat v0.10.0 HEAD` before writing the entry — `19 files changed,
+> 4987 insertions(+), 171 deletions(-)`, 15 commits — refutes the "three" in
+> about one second. Found by adversarial review, after merge and after publish.
+>
+> **This matters beyond bookkeeping: the TLS/DSN changes below alter connection
+> behaviour, and a reader told this release was three auth fixes would not know
+> to re-check their `sslmode` configuration.**
+
+### TLS and DSN handling in the vendored kit
+
+- **A CA bundle now actually reaches `pg` (#74).** TLS parameters are stripped
+  from the DSN, which previously prevented the bundle from being applied.
+- **An explicit `sslmode=disable` beats an ambient `PGSSLMODE` (#76).** Was P1
+  and live on `main`.
+- **An unrecognised `ssl=` value is rejected rather than silently disabling TLS
+  (#78).** Silent downgrade was the prior behaviour.
+- **An empty `sslmode=` is treated as a value, not an absence, and rejected
+  (#79).**
+
+`sslNegotiationFromConnectionString` changes its explicit-off return from
+`undefined` to `false`, and `connectionStringWithoutTlsParameters` and
+`sslNegotiationFromConnectionString` are newly exported. Both are additive
+against 0.10.0, which is why this stays a patch.
+
+Documentation corrections to the `sslmode` tables landed alongside these
+(#77, #84), replacing an earlier table that described intent rather than the
+measured handshake.
+
+### Prototype-pollution hardening across the key and CLI signing paths
+
+Every one of these reads a caller-supplied field as an OWN property so a
+polluted prototype cannot reach a signing or authorization decision:
+
+- **The `agent` claim is read once, guarded (#75)**, so no path can be handed a
+  prototype's subject.
+- **The `agent` option in the CLI is read as an own property before it is signed
+  into a key (#80).**
+- **The `scopes`/`scope` claim is read as an own property (#82).**
+- **Every issue-key CLI option is read as an own property before signing (#83).**
+- **Every option-bag field in `mintApiKey` and `verifyApiKeyToken` is read as an
+  own property (#85).**
+
+The three commits the release was named for follow.
 
 PATCH, not minor. 0.10.0 was a minor because it broke the kit file manifest
 twice. Nothing here changes a public signature, an export, or the kit manifest:
@@ -21,7 +73,10 @@ should deliver these, which is the point of shipping them as a patch.
 `src/auth/middleware.ts` read its option bag and context fields off the
 prototype chain. A polluted prototype made the construct-time `signingSecret`
 guard silently not throw, and `authenticate` then returned `ok: true` with
-scopes `["*"]`. 33 read sites now go through an own-property accessor, with
+scopes `["*"]`. The option and context reads now go through own-property
+accessors — 23 call sites by direct count in `src/auth/middleware.ts` (21
+`own*(` invocations plus 2 `Object.hasOwn`), correcting the "33" this entry
+first claimed — with
 regression coverage across the acceptance, denial, tenant, scope, clock, status
 and audit paths.
 
