@@ -6,7 +6,7 @@
 // disables certificate verification even when the caller asked for
 // `verify-full`, which defeats the point of TLS against a cloud database.
 //
-// The rule here follows libpq `sslmode` semantics exactly:
+// WHAT THIS FUNCTION RETURNS (its own contract, and all it can promise):
 //   - disable / (no ssl param)  -> no TLS (ssl: undefined)
 //   - prefer / require          -> encrypt, do NOT verify the server cert
 //                                  (rejectUnauthorized: false) — this matches
@@ -17,6 +17,73 @@
 //                                  A CA bundle is REQUIRED; we throw if none is
 //                                  available so verification can never silently
 //                                  downgrade.
+//
+// ⚠ THAT TABLE DESCRIBES THIS FUNCTION'S RETURN VALUE, NOT THE CONNECTION.
+//   `pg` DISCARDS IT whenever the DSN still carries an SSL query parameter, so
+//   the table above is NOT what happens at the socket today. Read the next
+//   block before relying on any row of it.
+//
+// ── MEASURED BEHAVIOUR AT THE SOCKET, 2026-08-08 ────────────────────────────
+//
+// `pool.ts` passes BOTH `connectionString` and this `ssl` object to `pg`. `pg`
+// re-parses the connection string and lets the parsed result WIN:
+//
+//   pg/lib/connection-parameters.js
+//     config = Object.assign({}, config, parse(config.connectionString))
+//   pg-connection-string/index.js
+//     if (config.sslcert || config.sslkey || config.sslrootcert || config.sslmode) {
+//       config.ssl = {}
+//     }
+//
+// So the moment the DSN contains `sslmode` (or `ssl`, `sslcert`, `sslkey`,
+// `sslrootcert`), THIS FUNCTION'S RETURN VALUE IS THROWN AWAY — including the
+// `ca` bundle it just loaded. `rejectUnauthorized` is then undefined, and Node's
+// TLS default (`true`) applies.
+//
+// Measured against real TLS handshakes (fake Postgres endpoint doing the real
+// SSLRequest -> 'S' -> TLS upgrade), pg 8.22.0 AND pg 8.13.1, node 22.22.3:
+//
+//   DSN ?sslmode=require, no CA, self-signed server
+//     kit returned {rejectUnauthorized:false}; pg computed {}
+//     -> DEPTH_ZERO_SELF_SIGNED_CERT  "self-signed certificate"      IT VERIFIED
+//   DSN ?sslmode=require, CA supplied, private-CA server
+//     kit returned {rejectUnauthorized:false, ca}; pg computed {}
+//     -> UNABLE_TO_VERIFY_LEAF_SIGNATURE                             CA DISCARDED
+//   DSN ?sslmode=verify-full, CA supplied, private-CA server
+//     kit returned {rejectUnauthorized:true, ca}; pg computed {}
+//     -> UNABLE_TO_VERIFY_LEAF_SIGNATURE                             CA DISCARDED
+//
+// Controls, same run: `ssl:{rejectUnauthorized:false}` with NO sslmode in the
+// DSN reached TLS; `ssl:{rejectUnauthorized:true, ca}` against the private-CA
+// server connected. So the harness could produce both outcomes, and the
+// failures above are verification, not a broken server.
+//
+// pg says so itself, on stderr, verbatim:
+//   "SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are
+//    treated as aliases for 'verify-full'."
+//
+// TWO CONSEQUENCES, in opposite directions:
+//   1. `require` is SAFER than this file has been claiming — it verifies.
+//   2. `verify-ca` / `verify-full` ARE BROKEN when the CA is supplied through
+//      `ca` / `caCertPath` / `PGSSLROOTCERT` / `NODE_EXTRA_CA_CERTS`, because
+//      that bundle never reaches pg. Against a private-CA server (Amazon RDS
+//      included, whose root is not in Node's trust store) the connection fails
+//      with UNABLE_TO_VERIFY_LEAF_SIGNATURE while this header says verification
+//      is configured. That reads as a network fault and gets debugged in the
+//      wrong place.
+//
+// This is NOT a pg regression: 8.13.1 (this kit's declared floor, `pg: ^8.13.1`)
+// and 8.22.0 compute identically. It has never matched.
+//
+// FORWARD HAZARD: pg-connection-string v3 / pg v9 will adopt libpq semantics,
+// at which point `require` really will stop verifying. The table at the top
+// becomes accidentally true and every deployment's posture silently weakens.
+//
+// THE FIX IS A BEHAVIOUR CHANGE AND IS DELIBERATELY NOT IN THIS COMMIT: strip
+// the TLS query parameters from the DSN in `pool.ts` after resolving them, so
+// pg has nothing to re-parse. `hasna/emails` already does exactly this
+// (`connectionStringWithoutTlsParameters` in its forked kit) and is measured
+// working. Tracked on todos row 3dee42b0.
 //
 // The RDS CA bundle is loaded (in priority order) from:
 //   1. an explicit `ca` string passed by the caller,
