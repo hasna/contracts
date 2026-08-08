@@ -147,16 +147,41 @@ const PG_TLS_QUERY_PARAMETERS = new Set([
  * unknown value all along while its sibling did not.
  *
  * The divergence was recorded (row c317d0bf) rather than fixed at the time,
- * because rejecting it could start refusing DSNs that connect today. Row
- * 12615073 measured that population before changing it: across the whole
- * workspace, every config file (env files, terraform, compose, CI), and the
- * machine's own dotfiles, EVERY live DSN spells this `sslmode`, and the only
- * `ssl=` occurrences anywhere are in test files. DSNs held in the secrets vault
- * could not be inspected — their values are credentials — so that population is
- * unknown rather than known-clean, and the falsey set below is what bounds the
- * risk: every legitimate spelling of "off" stays accepted, so the only DSN this
- * can newly reject is one that is silently running WITHOUT the TLS its author
- * asked for.
+ * because rejecting it can start refusing DSNs that connect today. Some of them
+ * connect WITH TLS, and that is the case worth stating plainly: an unrecognised
+ * `ssl` value used to resolve to no `config.ssl` key at all, and pg reads the
+ * environment whenever that key is undefined —
+ *   pg/lib/connection-parameters.js: `typeof config.ssl === 'undefined'
+ *     ? readSSLConfigFromEnvironment() : config.ssl`
+ * and `readSSLConfigFromEnvironment()` returns a TLS-ENABLING value for PGSSLMODE
+ * `prefer`, `require`, `verify-ca` and `verify-full` (all `true`) and also for
+ * `no-verify` (`{rejectUnauthorized: false}` — encrypted, unverified). So a DSN
+ * carrying BOTH an unrecognised `ssl` value AND an ambient PGSSLMODE in that set
+ * is encrypting today and will now throw at pool construction. The rejection is
+ * not confined to DSNs running unencrypted; it also reaches deployments that
+ * were relying on ambient TLS.
+ *
+ * It was accepted because the failure is loud, synchronous and self-describing:
+ * `createPgPool` resolves TLS before it constructs the pool (`pool.ts`), so the
+ * throw names the offending value and no connection is ever dialed. An operator
+ * reads back the exact value that was refused, which is the outcome the silent
+ * fallback denied them.
+ *
+ * Row 12615073 measured the exposed population before changing it: across the
+ * whole workspace, every config file (env files, terraform, compose, CI), and
+ * the machine's own dotfiles, EVERY live DSN spells this `sslmode`, and the only
+ * `ssl=` occurrences anywhere are in test files. Two populations were NOT
+ * inspected and remain unknown rather than known-clean: DSNs held in the secrets
+ * vault, and those held in AWS parameter stores. Neither was read, by design —
+ * their values are credentials — so nothing here bounds what they contain. The
+ * falsey set below narrows the exposure without closing it: every legitimate
+ * spelling of "off" stays accepted, so a DSN is at risk only if its `ssl` value
+ * falls outside BOTH sets below. Such a value need not be a typo. `ssl=no-verify`
+ * is a spelling pg itself supports deliberately — its own source says "support
+ * passing in ssl=no-verify via connection string" and maps it to
+ * `{rejectUnauthorized: false}` — it is in neither set here, and this kit
+ * refuses it exactly as it refuses `ssl=treu`. A deliberate value and a mistyped
+ * one are indistinguishable at the throw, so neither is excluded from the risk.
  */
 const EXPLICIT_SSL_ON_VALUES = new Set(["1", "true", "yes", "on", "require"]);
 const EXPLICIT_SSL_OFF_VALUES = new Set(["0", "false", "no", "off", "disable"]);
