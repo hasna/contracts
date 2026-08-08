@@ -86,6 +86,26 @@ async function withPollutedAgentPrototype<T>(fn: () => T | Promise<T>): Promise<
 }
 
 describe("agent claim under a polluted Object.prototype", () => {
+  test("minting under pollution never signs a prototype-supplied agent", async () => {
+    const [anon, named] = await withPollutedAgentPrototype(() => [
+      mintApiKey({ app: "todos", scopes: ["todos:read"], signingSecret: SIGNING }),
+      mintApiKey({
+        app: "todos",
+        scopes: ["todos:read"],
+        signingSecret: SIGNING,
+        agent: "station01",
+      }),
+    ]);
+
+    expect(Object.hasOwn(anon.claims, "agent")).toBe(false);
+    expect(anon.claims.agent).toBeUndefined();
+    expect(named.claims.agent).toBe("station01");
+
+    const verified = verifyApiKeyToken(anon.token, { signingSecret: SIGNING, expectedApp: "todos" });
+    expect(verified.ok).toBe(true);
+    if (verified.ok) expect(verified.agent).toBeNull();
+  });
+
   test("the allow path reports no agent for a token that claims none", async () => {
     const events: AuthAuditEvent[] = [];
     const verifier = verifyApiKey({
@@ -318,6 +338,34 @@ describe("agent claim under a polluted Object.prototype", () => {
     expect(anonRecord?.agent).not.toBe(POLLUTED_AGENT);
     // A real agent still survives the round trip.
     expect(namedRecord?.agent).toBe("station01");
+  });
+
+  test("the public insert path never persists a prototype-supplied agent", async () => {
+    const client = new FakeStoreClient();
+    const store = new ApiKeyStore(client);
+
+    await withPollutedAgentPrototype(async () => {
+      await store.insert({
+        kid: "directanonkey01",
+        app: "todos",
+        scopes: ["todos:read"],
+        tokenHash: "0".repeat(64),
+        issuedAt: new Date(1_700_000_000_000),
+        expiresAt: null,
+      });
+      await store.insert({
+        kid: "directnamedkey1",
+        app: "todos",
+        agent: "station01",
+        scopes: ["todos:read"],
+        tokenHash: "1".repeat(64),
+        issuedAt: new Date(1_700_000_000_000),
+        expiresAt: null,
+      });
+    });
+
+    expect(client.rows.get("directanonkey01")?.agent).toBeNull();
+    expect(client.rows.get("directnamedkey1")?.agent).toBe("station01");
   });
 
   test("a driver row with NO agent column reads as null, not as the prototype's value", async () => {

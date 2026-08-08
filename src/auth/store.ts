@@ -196,6 +196,7 @@ export class ApiKeyStore {
     // Own-property read (see `ownTenantId`): a polluted prototype must not put
     // a tenant on a row the caller inserted without one.
     const tid = ownTenantId(input);
+    const agent = ownAgentClaim(input);
     await this.client.execute(
       `INSERT INTO ${this.table}
          (kid, app, agent, tid, scopes, token_hash, issued_at, expires_at, created_by)
@@ -203,7 +204,7 @@ export class ApiKeyStore {
       [
         input.kid,
         input.app,
-        input.agent ?? null,
+        agent,
         tid === undefined || tid === null ? null : normalizeTenantId(tid),
         JSON.stringify(input.scopes),
         input.tokenHash,

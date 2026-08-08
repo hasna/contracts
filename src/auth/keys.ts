@@ -198,6 +198,7 @@ export function mintApiKey(options: MintApiKeyOptions): MintedApiKey {
     throw new Error("ttlSeconds must be a positive number or null (no expiry).");
   }
   const exp = ttl === null ? null : iat + Math.floor(ttl);
+  const agent = ownAgentClaim(options);
 
   const claims: ApiKeyClaims = {
     v: API_KEY_TOKEN_VERSION,
@@ -207,7 +208,7 @@ export function mintApiKey(options: MintApiKeyOptions): MintedApiKey {
     scopes: [...options.scopes],
     iat,
     exp,
-    ...(options.agent !== undefined ? { agent: options.agent } : {}),
+    ...(agent !== null ? { agent } : {}),
   };
 
   const body = base64urlEncode(JSON.stringify(claims));
