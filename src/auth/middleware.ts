@@ -445,13 +445,23 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
           : 401;
       // `kid`/`tid` are present only once the signature has verified, which is
       // exactly when a denial is worth attributing to a specific key. Their
-      // ABSENCE is therefore meaningful, so `tid` is read as an own property
-      // (see `ownTenantId`) — an audit line must never name an organization the
-      // request never proved.
+      // ABSENCE is therefore meaningful, so all three are read as own properties
+      // — an audit line must never name a key or an organization the request
+      // never proved.
+      //
+      // `kid` in particular: `verifyApiKeyToken` returns it only for
+      // `tenant_required`/`tenant_mismatch`. On `malformed`, `bad_signature`,
+      // `unsupported_version`, `app_mismatch`, `not_yet_valid`, `expired` and
+      // `insufficient_scope` it is absent, so a bare read resolved up the
+      // prototype chain and `?? null` could not catch it — the planted value is
+      // not nullish. Measured on this branch before the guard: a tampered token
+      // denied `bad_signature` audited `kid: "FORGED-KID-attacker-chosen"`,
+      // against `kid: null` on a clean prototype. Audit integrity only; it does
+      // not decide acceptance.
       await emit({
         outcome: "deny",
         app,
-        kid: verified.kid ?? null,
+        kid: ownOption(verified, "kid") ?? null,
         tid: ownTenantId(verified) ?? null,
         ...(Object.hasOwn(verified, "agent") ? { agent: verified.agent } : {}),
         reason: verified.reason,

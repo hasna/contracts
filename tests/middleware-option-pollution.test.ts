@@ -64,6 +64,9 @@ const POLLUTION = {
   // recorded for every request the service serves.
   method: "DELETE",
   path: "/v1/admin/purge",
+  // Not an option — a field of the token verifier's own RESULT, absent on most
+  // denial reasons and therefore reachable through the chain on the deny emit.
+  kid: "FORGED-KID-attacker-chosen",
 } as const;
 
 /**
@@ -595,6 +598,59 @@ describe("verifyApiKey: polluted `context.method`/`context.path` cannot forge th
     expect(Object.hasOwn(events[0]!, "path")).toBe(true);
     expect(events[0]!.method).toBeNull();
     expect(events[0]!.path).toBeNull();
+  });
+
+  test("a polluted `kid` cannot be attributed on a denial that never established one", async () => {
+    // `verifyApiKeyToken` returns `kid` as an own property only for
+    // `tenant_required`/`tenant_mismatch`. On every other denial — including
+    // `bad_signature` here — it is absent, so a bare `verified.kid ?? null`
+    // resolved up the prototype chain, and `??` cannot catch a planted string
+    // because it is not nullish.
+    //
+    // Found by the adversarial reviewer on #87, not by the mutation harness:
+    // that harness only reverts sites the fix touched, and this one was not a
+    // site until now. A per-site control cannot find a site nobody listed.
+    const good = tokenFor();
+    const tampered = `${good.slice(0, -4)}AAAA`;
+    const events: Array<Record<string, unknown>> = [];
+    const decision = await withPolluted(["kid"], async () => {
+      const verifier = verifyApiKey(
+        bagWithout([], { audit: (e: Record<string, unknown>) => void events.push(e) }),
+      );
+      return verifier.authenticate({ "x-api-key": tampered });
+    });
+
+    // The denial itself is unaffected — this is audit integrity, not acceptance.
+    expect(decision.ok).toBe(false);
+    expect(decision.ok === false && decision.reason).toBe("bad_signature");
+    expect(events).toHaveLength(1);
+    expect(Object.hasOwn(events[0]!, "kid")).toBe(true);
+    // Exact value both ways: the broken build audits the planted string, so an
+    // operator reading the trail attributes an unauthenticated request to a key
+    // the attacker named — and `kid` is the field revocation lookups key on.
+    expect(events[0]!.kid).toBeNull();
+  });
+
+  test("a real `kid` is still attributed on a denial that DID establish one", async () => {
+    // The other direction: `tenant_mismatch` is one of the two reasons that DOES
+    // carry a kid, so the guard must not blank a genuine attribution.
+    const tenanted = tokenFor({ tid: TID });
+    const events: Array<Record<string, unknown>> = [];
+    const decision = await withPolluted(["kid"], async () => {
+      const verifier = verifyApiKey(
+        bagWithout([], {
+          expectedTid: OTHER_TID,
+          audit: (e: Record<string, unknown>) => void events.push(e),
+        }),
+      );
+      return verifier.authenticate({ "x-api-key": tenanted });
+    });
+
+    expect(decision.ok).toBe(false);
+    expect(decision.ok === false && decision.reason).toBe("tenant_mismatch");
+    expect(events).toHaveLength(1);
+    expect(typeof events[0]!.kid).toBe("string");
+    expect(events[0]!.kid).toMatch(/^[0-9a-f]{16}$/);
   });
 
   test("an own method/path still reaches the audit line under the same pollution", async () => {
