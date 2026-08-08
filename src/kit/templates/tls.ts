@@ -23,6 +23,12 @@
 //                                  A CA bundle is REQUIRED; we throw if none is
 //                                  available so verification can never silently
 //                                  downgrade.
+//   - sslmode present but EMPTY -> THROWS, exactly as any other unrecognised
+//     (`?sslmode=`, `?sslmode=%20`)  value does, and exactly as libpq does. It is
+//                                  NOT the "no ssl param" row above: the
+//                                  parameter is present, so the DSN made a
+//                                  statement, and an empty statement is not a
+//                                  request for the default.
 //
 // `prefer` and `require` verify because THAT IS WHAT THEY HAVE ALWAYS DONE AT
 // THE SOCKET (see the measurements below). This file used to claim they did not
@@ -141,6 +147,30 @@ const PG_TLS_QUERY_PARAMETERS = new Set([
 const EXPLICIT_SSL_ON_VALUES = new Set(["1", "true", "yes", "on", "require"]);
 const EXPLICIT_SSL_OFF_VALUES = new Set(["0", "false", "no", "off", "disable"]);
 
+/**
+ * Every `sslmode` libpq accepts, mapped to the mode this kit resolves it to.
+ * `allow` maps to `prefer`; the rest map to themselves.
+ *
+ * THIS IS THE WHOLE RECOGNISED SET, IN ONE PLACE, AND THE THROW BELOW LISTS IT
+ * FROM THESE KEYS. It replaces a `switch` whose `default: throw` was correct but
+ * was reachable only for a value the caller had already proven truthy — so the
+ * one input class that never reached the enumeration was the empty string. A
+ * lookup cannot be short-circuited that way, and a set that prints itself cannot
+ * drift out of step with the error message that documents it.
+ *
+ * A `Map` rather than an object literal for the same reason `own.ts` exists:
+ * `SSLMODE_VALUES.get("constructor")` is a miss, where a bare object read is a
+ * hit on the prototype.
+ */
+const SSLMODE_VALUES = new Map<string, SslMode>([
+  ["disable", "disable"],
+  ["allow", "prefer"],
+  ["prefer", "prefer"],
+  ["require", "require"],
+  ["verify-ca", "verify-ca"],
+  ["verify-full", "verify-full"],
+]);
+
 /** The `ssl` field shape accepted by `pg.Pool` / `pg.Client`. */
 export type PgSslConfig =
   | boolean
@@ -211,6 +241,20 @@ export function connectionStringWithoutTlsParameters(connectionString: string): 
 }
 
 /**
+ * The DSN's `sslmode` as written, normalized for comparison.
+ *
+ * `undefined` means THE PARAMETER IS ABSENT. It never means "present but
+ * empty" — `?sslmode=` and `?sslmode=%20` both return `""`, which is a VALUE and
+ * must be validated like any other. The two situations are different
+ * instructions and this is the single place that decides so; both readers below
+ * go through it, so neither can be fixed without the other.
+ */
+function rawSslMode(values: Map<string, string>): string | undefined {
+  const raw = values.get("sslmode");
+  return raw === undefined ? undefined : raw.trim().toLowerCase();
+}
+
+/**
  * Preserve pg's transport negotiation choice outside the stripped URL, so
  * `sslnegotiation=direct` survives as an explicit pool option instead of being
  * silently dropped.
@@ -233,20 +277,36 @@ export function sslNegotiationFromConnectionString(
 export function sslModeFromConnectionString(connectionString: string): SslMode {
   const values = tlsQueryValues(connectionString);
 
-  const sslmode = values.get("sslmode")?.trim().toLowerCase();
-  if (sslmode) {
-    switch (sslmode) {
-      case "disable":
-      case "prefer":
-      case "require":
-      case "verify-ca":
-      case "verify-full":
-        return sslmode;
-      case "allow":
-        return "prefer";
-      default:
-        throw new Error(`Unknown sslmode '${sslmode}' in connection string.`);
-    }
+  // PRESENT-BUT-EMPTY IS A VALUE, NOT AN ABSENCE. This test used to be
+  // `if (sslmode)`, and `"".trim()` is falsy, so `?sslmode=` and `?sslmode=%20`
+  // skipped the enumeration entirely and fell through to the `disable` return —
+  // byte-identical to a DSN carrying no ssl parameter at all, which then defers
+  // to an ambient PGSSLMODE. Reachable through `?sslmode=${PGSSLMODE}` with the
+  // variable unset, which is the commonest way a DSN is assembled: an operator
+  // who meant `require` and whose interpolation came back empty got plaintext,
+  // silently, with the DSN still reading as though it had said something.
+  //
+  // That is the shape row c317d0bf fixed one row over — an operator instruction
+  // replaced by ambient state — and the answer is the same: the code was wrong.
+  //
+  // libpq agrees, and it is the reference this module names. Measured on psql
+  // (PostgreSQL) 16.13, with an absent-parameter control that reaches the socket
+  // and so proves these are parameter rejections rather than a generic failure:
+  //   ?sslmode=       -> invalid sslmode value: ""
+  //   ?sslmode=%20    -> invalid sslmode value: " "
+  //   ?sslmode=bogus  -> invalid sslmode value: "bogus"
+  //   (absent)        -> connection to server ... Connection refused
+  // libpq rejects empty on exactly the same line, with exactly the same message,
+  // as any other unrecognised value. Empty is not how libpq spells "unset".
+  const sslmode = rawSslMode(values);
+  if (sslmode !== undefined) {
+    const resolved = SSLMODE_VALUES.get(sslmode);
+    if (resolved) return resolved;
+    throw new Error(
+      `Unknown sslmode '${sslmode}' in connection string; expected one of ` +
+        `${[...SSLMODE_VALUES.keys()].join(", ")}. Remove the parameter entirely to defer to ` +
+        `PGSSLMODE — an empty value is not how that is spelled.`,
+    );
   }
 
   if (values.has("ssl")) {
@@ -347,8 +407,15 @@ export function resolveTlsConfig(
     // direction: an operator who sets PGSSLMODE=require to force TLS on bare
     // DSNs would be silently downgraded to plaintext. `tests/kit-tls-handshake`
     // pins both halves so neither can drift.
+    // THE SECOND READER OF `sslmode`, AND IT GOES THROUGH THE SAME HELPER.
+    // Behaviour here is unchanged: `sslModeFromConnectionString` above now
+    // throws on a present-but-empty value, so this line can only ever see
+    // `undefined` or a recognised mode. What changes is that it no longer keeps
+    // its own copy of the normalization — the two readers used to carry
+    // identical `?.trim().toLowerCase()` expressions, so a fix applied to one
+    // was a half-fix, and nothing in the file said the other existed.
     const values = tlsQueryValues(connectionString);
-    const sslmode = values.get("sslmode")?.trim().toLowerCase();
+    const sslmode = rawSslMode(values);
     const ssl = values.get("ssl")?.trim().toLowerCase();
     const explicitlyOff =
       sslmode === "disable" || (ssl !== undefined && EXPLICIT_SSL_OFF_VALUES.has(ssl));

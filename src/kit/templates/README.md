@@ -43,7 +43,17 @@ resolved here — CA bundle included. The full history is in the `tls.ts` header
 | no `ssl` parameter at all | `undefined` | No `ssl` key is set, so `pg` falls back to `PGSSLMODE`. This is libpq's documented behaviour and is deliberate. |
 | `?sslmode=prefer` / `require` / `allow`, `?ssl=` with `1` / `true` / `yes` / `on` / `require`, or `?sslnegotiation=direct` | `{rejectUnauthorized: true, ca?}` | Encrypt **and** verify. A CA bundle is pinned when one is available; without one, Node's trust store applies. |
 | `?sslmode=verify-ca` / `verify-full` | `{rejectUnauthorized: true, ca}` | Encrypt **and** verify against the bundle. A bundle is **mandatory** — `resolveTlsConfig` throws when none is found, so verification cannot silently downgrade. |
-| `?sslmode=` with any other value | — | Throws `Unknown sslmode '<value>'`. |
+| `?sslmode=` with any other value, **including an empty or whitespace-only one** | — | Throws `Unknown sslmode '<value>'`, naming the accepted set. |
+
+**An empty `?sslmode=` is a value, not an absence, and it does not fall on the
+"no `ssl` parameter" row.** The parameter is present, so the DSN made a
+statement; an empty statement is not a request for the default. This is libpq's
+own reading — `psql "…?sslmode="` fails with `invalid sslmode value: ""`, the
+same error and the same line as `invalid sslmode value: "bogus"`, while a DSN
+with the parameter absent gets through to the socket. Until row `feb638fa` the
+kit resolved empty exactly like absent, so `?sslmode=${PGSSLMODE}` with the
+variable unset silently handed the decision to the environment; to defer to
+`PGSSLMODE`, leave the parameter out entirely.
 
 `allow` maps to `prefer`. `sslnegotiation` is carried forward as an explicit pool
 option instead of being dropped with the other stripped parameters, and

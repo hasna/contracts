@@ -9,6 +9,8 @@ import pg from "pg";
 import { createPgPool } from "../src/kit/templates/pool";
 import {
   connectionStringWithoutTlsParameters,
+  resolveTlsConfig,
+  sslModeFromConnectionString,
   sslNegotiationFromConnectionString,
 } from "../src/kit/templates/tls";
 
@@ -452,6 +454,133 @@ describe("kit TLS handshake — sslmode=disable is still plaintext", () => {
     const outcome = await withPgSslMode("require", () => throughKit(selfSignedDsn("")));
     expect(outcome.kind).toBe("TLS_REJECTED_CERT");
     expect((outcome as { code: string }).code).toBe("DEPTH_ZERO_SELF_SIGNED_CERT");
+  });
+
+  // REGRESSION, row feb638fa. A PRESENT-BUT-EMPTY `sslmode` IS A VALUE, NOT AN
+  // ABSENCE, so it must not land on the row directly above.
+  //
+  // Measured on main at 010b0bb, before this fix:
+  //   ?sslmode=     mode=disable  resolve=undefined
+  //   ?sslmode=%20  mode=disable  resolve=undefined
+  //   (absent)      mode=disable  resolve=undefined      <- byte-identical
+  // so the DSN's statement was discarded and the environment decided instead.
+  //
+  // The two ambient states below are the point of the pair: whatever PGSSLMODE
+  // says, the DSN parameter is what fails the build. A one-sided version of this
+  // test would pass against the old code in whichever environment the author
+  // happened to run it in — which is exactly how row c317d0bf stayed hidden.
+  test("an empty sslmode is rejected, not silently deferred to an unset PGSSLMODE", async () => {
+    // Before the fix this returned { kind: "PLAINTEXT_NO_TLS" }: an operator who
+    // wrote `?sslmode=${PGSSLMODE}` with the variable unset got plaintext to a
+    // cloud database, and nothing anywhere said so.
+    await withPgSslMode(undefined, async () => {
+      expect(() => createPgPool({ connectionString: selfSignedDsn("?sslmode="), env: {} })).toThrow(
+        /Unknown sslmode ''/,
+      );
+    });
+  });
+
+  test("an empty sslmode is rejected, not silently deferred to an ambient PGSSLMODE=require", async () => {
+    // Before the fix this attempted TLS — the right answer for the wrong reason.
+    // The environment was deciding; the DSN was not consulted.
+    await withPgSslMode("require", async () => {
+      expect(() => createPgPool({ connectionString: selfSignedDsn("?sslmode="), env: {} })).toThrow(
+        /Unknown sslmode ''/,
+      );
+    });
+  });
+
+  test("a whitespace-only sslmode is rejected the same way", async () => {
+    await withPgSslMode(undefined, async () => {
+      expect(() =>
+        createPgPool({ connectionString: selfSignedDsn("?sslmode=%20"), env: {} }),
+      ).toThrow(/Unknown sslmode ''/);
+    });
+  });
+
+  // THE OTHER HALF, AND IT IS WHY THE FIX IS NOT "MAKE EVERYTHING THROW".
+  // A blanket rejection of anything falsy would take the row above with it and
+  // break every bare DSN on the fleet. This test fails loudly on that.
+  test("an absent sslmode still connects and still defers — the fix did not widen", async () => {
+    const deferred = await withPgSslMode("require", () => throughKit(selfSignedDsn("")));
+    expect(deferred.kind).toBe("TLS_REJECTED_CERT");
+
+    const plaintext = await withPgSslMode(undefined, () => throughKit(selfSignedDsn("")));
+    expect(plaintext).toEqual({ kind: "PLAINTEXT_NO_TLS" });
+  });
+
+  test("recognised sslmode values are untouched by the fix", async () => {
+    const disabled = await withPgSslMode("require", () =>
+      throughKit(selfSignedDsn("?sslmode=disable")),
+    );
+    expect(disabled).toEqual({ kind: "PLAINTEXT_NO_TLS" });
+
+    const verified = await withPgSslMode(undefined, () =>
+      throughKit(privateCaDsn("?sslmode=require"), { ca: fixtures.caPem }),
+    );
+    expect(verified.kind).toBe("TLS_ESTABLISHED");
+  });
+});
+
+describe("sslModeFromConnectionString — the recognised set is enumerated", () => {
+  // The `ssl` parameter names its accepted values in two exported Sets; the
+  // `sslmode` parameter did not, and the reviewer's sentence for row feb638fa is
+  // the finding: "the enumerate-the-set discipline was applied to `ssl` and not
+  // to `sslmode`". The enumeration existed as a `switch`, but sat behind a
+  // truthiness test that one input class could never satisfy.
+  const dsn = (query: string) => `postgres://u:p@h:5432/db${query}`;
+
+  test("every value libpq accepts still maps as before", () => {
+    expect(sslModeFromConnectionString(dsn("?sslmode=disable"))).toBe("disable");
+    expect(sslModeFromConnectionString(dsn("?sslmode=allow"))).toBe("prefer");
+    expect(sslModeFromConnectionString(dsn("?sslmode=prefer"))).toBe("prefer");
+    expect(sslModeFromConnectionString(dsn("?sslmode=require"))).toBe("require");
+    expect(sslModeFromConnectionString(dsn("?sslmode=verify-ca"))).toBe("verify-ca");
+    expect(sslModeFromConnectionString(dsn("?sslmode=verify-full"))).toBe("verify-full");
+  });
+
+  test("case and surrounding whitespace are still normalized away", () => {
+    expect(sslModeFromConnectionString(dsn("?sslmode=%20VERIFY-FULL%20"))).toBe("verify-full");
+    expect(sslModeFromConnectionString(dsn("?SSLMode=Require"))).toBe("require");
+  });
+
+  test("an unrecognised value still throws, and now names the accepted set", () => {
+    expect(() => sslModeFromConnectionString(dsn("?sslmode=bogus"))).toThrow(
+      /Unknown sslmode 'bogus'/,
+    );
+    expect(() => sslModeFromConnectionString(dsn("?sslmode=bogus"))).toThrow(
+      /disable, allow, prefer, require, verify-ca, verify-full/,
+    );
+  });
+
+  test("an empty or whitespace-only value throws — it is a value, not an absence", () => {
+    expect(() => sslModeFromConnectionString(dsn("?sslmode="))).toThrow(/Unknown sslmode ''/);
+    expect(() => sslModeFromConnectionString(dsn("?sslmode=%20"))).toThrow(/Unknown sslmode ''/);
+    expect(() => resolveTlsConfig(dsn("?sslmode="), { env: {} })).toThrow(/Unknown sslmode ''/);
+  });
+
+  test("the message points at the remedy the empty value was reaching for", () => {
+    expect(() => sslModeFromConnectionString(dsn("?sslmode="))).toThrow(
+      /Remove the parameter entirely to defer to PGSSLMODE/,
+    );
+  });
+
+  test("an absent sslmode is undefined-not-empty and resolves to disable", () => {
+    expect(sslModeFromConnectionString(dsn(""))).toBe("disable");
+    expect(resolveTlsConfig(dsn(""), { env: {} })).toBeUndefined();
+    // and the explicit off is still distinguishable from it — row c317d0bf.
+    expect(resolveTlsConfig(dsn("?sslmode=disable"), { env: {} })).toBe(false);
+  });
+
+  test("a prototype key is a miss, not a hit on Object.prototype", () => {
+    // `SSLMODE_VALUES` is a Map for the same reason `own.ts` exists. As an object
+    // literal, `?sslmode=constructor` would resolve to a function and pass.
+    expect(() => sslModeFromConnectionString(dsn("?sslmode=constructor"))).toThrow(
+      /Unknown sslmode 'constructor'/,
+    );
+    expect(() => sslModeFromConnectionString(dsn("?sslmode=__proto__"))).toThrow(
+      /Unknown sslmode '__proto__'/,
+    );
   });
 });
 
