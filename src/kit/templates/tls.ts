@@ -137,12 +137,26 @@ const PG_TLS_QUERY_PARAMETERS = new Set([
  * set, and `resolveTlsConfig` decides whether an operator explicitly asked for
  * TLS to be OFF from the falsey set.
  *
- * A value in NEITHER set (a typo such as `ssl=treu`) currently resolves to mode
- * `disable` but is not treated as an explicit off, so it falls through to pg's
- * PGSSLMODE fallback. `hasna/emails` throws on that input instead. That
- * divergence is left standing here deliberately — changing it would start
- * rejecting DSNs that connect today — and is recorded on the PR for row
- * c317d0bf rather than fixed inside it.
+ * A value in NEITHER set (empty, or a typo such as `ssl=treu`) is REJECTED — see
+ * the throw in `sslModeFromConnectionString`. It used to resolve to mode
+ * `disable` without being treated as an explicit off, so it fell through to
+ * pg's PGSSLMODE fallback: an operator who believes they asked for TLS gets
+ * whatever the environment happens to say. That is the same failure the
+ * explicit-off branch of `resolveTlsConfig` exists to prevent, differing only
+ * in which parameter carries the typo, and it is why `sslmode` has thrown on an
+ * unknown value all along while its sibling did not.
+ *
+ * The divergence was recorded (row c317d0bf) rather than fixed at the time,
+ * because rejecting it could start refusing DSNs that connect today. Row
+ * 12615073 measured that population before changing it: across the whole
+ * workspace, every config file (env files, terraform, compose, CI), and the
+ * machine's own dotfiles, EVERY live DSN spells this `sslmode`, and the only
+ * `ssl=` occurrences anywhere are in test files. DSNs held in the secrets vault
+ * could not be inspected — their values are credentials — so that population is
+ * unknown rather than known-clean, and the falsey set below is what bounds the
+ * risk: every legitimate spelling of "off" stays accepted, so the only DSN this
+ * can newly reject is one that is silently running WITHOUT the TLS its author
+ * asked for.
  */
 const EXPLICIT_SSL_ON_VALUES = new Set(["1", "true", "yes", "on", "require"]);
 const EXPLICIT_SSL_OFF_VALUES = new Set(["0", "false", "no", "off", "disable"]);
@@ -310,8 +324,14 @@ export function sslModeFromConnectionString(connectionString: string): SslMode {
   }
 
   if (values.has("ssl")) {
-    const ssl = values.get("ssl")?.trim().toLowerCase();
-    if (ssl && EXPLICIT_SSL_ON_VALUES.has(ssl)) return "require";
+    const ssl = values.get("ssl")?.trim().toLowerCase() ?? "";
+    if (EXPLICIT_SSL_ON_VALUES.has(ssl)) return "require";
+    // Neither on nor off: refuse rather than silently resolving to `disable`.
+    // Presence is the operator instruction; an empty value is malformed, not
+    // the same as omitting the parameter and deliberately deferring to PGSSLMODE.
+    if (!EXPLICIT_SSL_OFF_VALUES.has(ssl)) {
+      throw new Error(`Unknown ssl value '${ssl}' in connection string.`);
+    }
     return "disable";
   }
 
