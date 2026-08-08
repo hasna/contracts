@@ -98,6 +98,75 @@ describe("kit TLS (one correct approach)", () => {
     expect(resolveTlsConfig("postgres://h/db?sslmode=prefer", noEnv)).toEqual({ rejectUnauthorized: true });
   });
 
+  // Row 12615073. `sslmode` has always thrown on an unknown value; its sibling
+  // `ssl` silently resolved to `disable`, so `?ssl=treu` handed the decision to
+  // an ambient PGSSLMODE while the operator believed they had asked for TLS.
+  // Both directions are pinned: the unknown value must be REFUSED, and every
+  // recognised spelling must behave EXACTLY as it did before — a fix that
+  // rejects valid input would be worse than the defect it closes.
+  describe("an unrecognised ssl= value is refused, and recognised ones are untouched", () => {
+    const noEnv = { env: {} } as const;
+
+    test("refuses a value that is neither on nor off", () => {
+      for (const bad of ["treu", "banana", "no-verify", "trueish", "trues", "enable", "verify-full"]) {
+        expect(() => sslModeFromConnectionString(`postgres://h/db?ssl=${bad}`)).toThrow(
+          `Unknown ssl value '${bad}' in connection string.`,
+        );
+        expect(() => resolveTlsConfig(`postgres://h/db?ssl=${bad}`, noEnv)).toThrow(/Unknown ssl value/);
+      }
+    });
+
+    test("every recognised ON value still resolves to require", () => {
+      for (const on of ["1", "true", "yes", "on", "require"]) {
+        expect(sslModeFromConnectionString(`postgres://h/db?ssl=${on}`)).toBe("require");
+        expect(resolveTlsConfig(`postgres://h/db?ssl=${on}`, noEnv)).toEqual({ rejectUnauthorized: true });
+      }
+      // Case and surrounding whitespace are normalised before the check, so the
+      // new throw cannot fire on a value that used to be accepted.
+      expect(sslModeFromConnectionString("postgres://h/db?ssl=TRUE")).toBe("require");
+      expect(sslModeFromConnectionString("postgres://h/db?ssl=%20true%20")).toBe("require");
+    });
+
+    test("every recognised OFF value still resolves to an explicit false", () => {
+      for (const off of ["0", "false", "no", "off", "disable"]) {
+        expect(sslModeFromConnectionString(`postgres://h/db?ssl=${off}`)).toBe("disable");
+        expect(resolveTlsConfig(`postgres://h/db?ssl=${off}`, noEnv)).toBe(false);
+      }
+      expect(sslModeFromConnectionString("postgres://h/db?ssl=FALSE")).toBe("disable");
+      expect(resolveTlsConfig("postgres://h/db?ssl=FALSE", noEnv)).toBe(false);
+    });
+
+    test("a bare ssl= carries no value to misread and keeps its old meaning", () => {
+      // Empty is falsy, so it reaches neither the ON check nor the new throw —
+      // the path is untouched by this change. It resolves to mode `disable` but
+      // NOT to an explicit off (the empty string is in neither named set), so
+      // `resolveTlsConfig` returns `undefined` and pg's PGSSLMODE fallback still
+      // applies. Pinned at what it actually does, not at what reads tidier: this
+      // asserts the change is inert here rather than proposing new behaviour.
+      expect(sslModeFromConnectionString("postgres://h/db?ssl=")).toBe("disable");
+      expect(resolveTlsConfig("postgres://h/db?ssl=", noEnv)).toBeUndefined();
+    });
+
+    test("no ssl parameter at all is untouched — PGSSLMODE fallback is preserved", () => {
+      expect(sslModeFromConnectionString("postgres://h/db")).toBe("disable");
+      expect(resolveTlsConfig("postgres://h/db", noEnv)).toBeUndefined();
+    });
+
+    test("sslmode still wins, so it decides before ssl is ever validated", () => {
+      // Parity with hasna/emails: an explicit sslmode short-circuits, and the
+      // ssl value beside it is never reached. Pinned so the precedence cannot
+      // drift into throwing on a DSN that resolves fine today.
+      expect(sslModeFromConnectionString("postgres://h/db?sslmode=require&ssl=treu")).toBe("require");
+      expect(resolveTlsConfig("postgres://h/db?sslmode=disable&ssl=treu", noEnv)).toBe(false);
+      // The unknown-sslmode throw is unchanged.
+      expect(() => sslModeFromConnectionString("postgres://h/db?sslmode=bogus")).toThrow(/Unknown sslmode/);
+    });
+
+    test("sslnegotiation=direct still implies TLS when no ssl parameter is present", () => {
+      expect(sslModeFromConnectionString("postgres://h/db?sslnegotiation=direct")).toBe("require");
+    });
+  });
+
   test("loads CA bundle from PGSSLROOTCERT / NODE_EXTRA_CA_CERTS env", () => {
     const config = resolveTlsConfig("postgres://h/db?sslmode=verify-full", {
       env: { NODE_EXTRA_CA_CERTS: "PATH_UNUSED" },
