@@ -27,53 +27,71 @@ mode there is no Postgres pool at all; SQLite is authoritative.
 
 ## TLS
 
-`resolveTlsConfig` in `tls.ts` **returns** a config shaped by libpq `sslmode`
-semantics:
+`resolveTlsConfig` in `tls.ts` turns the DSN's TLS parameters into an explicit
+`ssl` option, and `pool.ts` hands `pg` the DSN with those parameters **stripped**
+(`connectionStringWithoutTlsParameters`). The strip is what makes the resolved
+object real: `pg` re-parses `connectionString` after merging pool options and lets
+the parse win, so a surviving `sslmode`, `ssl`, `sslcert`, `sslkey`, `sslrootcert`,
+`sslpassword`, `sslnegotiation` or `uselibpqcompat` would replace everything
+resolved here — CA bundle included. The full history is in the `tls.ts` header.
 
-- `require` — encrypt, do not verify (RDS default without a bundle)
-- `verify-ca` / `verify-full` — encrypt **and** verify against a CA bundle
-  (mandatory; throws if none is available)
+### The mode table — what reaches the socket
 
-### ⚠ That is what the function returns, not what reaches the socket
+| DSN | `resolveTlsConfig` returns | At the socket |
+| --- | --- | --- |
+| `?sslmode=disable`, or `?ssl=` with `0` / `false` / `no` / `off` / `disable` | `false` | Plaintext, stated explicitly. An ambient `PGSSLMODE` **cannot** override it. |
+| no `ssl` parameter at all | `undefined` | No `ssl` key is set, so `pg` falls back to `PGSSLMODE`. This is libpq's documented behaviour and is deliberate. |
+| `?sslmode=prefer` / `require` / `allow`, `?ssl=` with `1` / `true` / `yes` / `on` / `require`, or `?sslnegotiation=direct` | `{rejectUnauthorized: true, ca?}` | Encrypt **and** verify. A CA bundle is pinned when one is available; without one, Node's trust store applies. |
+| `?sslmode=verify-ca` / `verify-full` | `{rejectUnauthorized: true, ca}` | Encrypt **and** verify against the bundle. A bundle is **mandatory** — `resolveTlsConfig` throws when none is found, so verification cannot silently downgrade. |
+| `?sslmode=` with any other value | — | Throws `Unknown sslmode '<value>'`. |
 
-`pool.ts` hands `pg` both the `connectionString` and that `ssl` object, and `pg`
-re-parses the connection string with the parsed result winning. Any SSL query
-parameter in the DSN (`sslmode`, `ssl`, `sslcert`, `sslkey`, `sslrootcert`)
-makes `pg` reset `ssl` to `{}` — **discarding the object above, CA bundle
-included**. `rejectUnauthorized` is then undefined and Node's default (`true`)
-applies.
+`allow` maps to `prefer`. `sslnegotiation` is carried forward as an explicit pool
+option instead of being dropped with the other stripped parameters, and
+`sslcert` / `sslkey` / `sslpassword` are read out of the DSN into the resolved
+object, since `pg` no longer sees any of them.
 
-Measured against real TLS handshakes on pg 8.22.0 **and** pg 8.13.1 (the
-declared floor), node 22.22.3:
+`prefer` and `require` verify because that is what the socket has always done —
+`pg` says so on stderr: *"SECURITY WARNING: The SSL modes 'prefer', 'require', and
+'verify-ca' are treated as aliases for 'verify-full'."* Nothing that connected
+before stops connecting; connections that were failing against a private CA start
+working.
 
-| DSN | kit returned | pg computed | outcome at the socket |
-| --- | --- | --- | --- |
-| `?sslmode=require`, no CA, self-signed server | `{rejectUnauthorized:false}` | `{}` | `DEPTH_ZERO_SELF_SIGNED_CERT` — **it verified** |
-| `?sslmode=require`, CA supplied, private-CA server | `{rejectUnauthorized:false, ca}` | `{}` | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` — **CA discarded** |
-| `?sslmode=verify-full`, CA supplied, private-CA server | `{rejectUnauthorized:true, ca}` | `{}` | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` — **CA discarded** |
+### `false` and `undefined` are different answers
 
-`pg` states it on stderr itself: *"SECURITY WARNING: The SSL modes 'prefer',
-'require', and 'verify-ca' are treated as aliases for 'verify-full'."*
+`pool.ts` sets `config.ssl` only when the resolved value is not `undefined`, and
+`pg` reads `process.env.PGSSLMODE` only when no `ssl` key is present. So an
+explicit operator "off" resolves to `false` and wins, while a DSN that expressed no
+policy at all resolves to `undefined` and defers.
 
-So `require` is **stricter** than documented, and `verify-ca` / `verify-full`
-are **broken** when the CA arrives via `ca` / `caCertPath` / `PGSSLROOTCERT` /
-`NODE_EXTRA_CA_CERTS` — that bundle never reaches `pg`, so a private-CA server
-(Amazon RDS included) fails to connect while the docs say verification is
-configured.
+Collapsing the two is a regression in whichever direction it is done. Returning
+`undefined` for an explicit off lets an ambient `PGSSLMODE` open TLS to a host the
+operator asked to reach in plaintext. Returning `false` for a bare DSN reads as the
+tidier fix and silently downgrades an operator who set `PGSSLMODE=require` to force
+TLS on. `tests/kit-tls-handshake.test.ts` pins both halves against real handshakes,
+so neither can drift.
 
-Until that is fixed, the working way to verify against a private CA is to put
-the path in the DSN itself, where `pg` reads it:
-`?sslmode=verify-full&sslrootcert=/path/to/global-bundle.pem` — measured
-connecting against a private-CA server, and correctly refusing a self-signed
-one.
+### CA bundles
 
-Point `PGSSLROOTCERT` at the Amazon RDS global bundle:
-<https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem> — but note
-it is currently discarded whenever the DSN carries an SSL parameter.
+Discovered in priority order:
 
-The fix is a behaviour change and is tracked separately (todos `3dee42b0`):
-strip the TLS query parameters from the DSN in `pool.ts` after resolving them.
-`hasna/emails` already does this in its forked kit and is measured working.
+1. an explicit `ca` string passed by the caller,
+2. an explicit `caCertPath` passed by the caller,
+3. `sslrootcert` in the connection string,
+4. `PGSSLROOTCERT`,
+5. `NODE_EXTRA_CA_CERTS`.
+
+The Amazon RDS global bundle is at
+<https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem>. RDS needs it:
+its root is not in Node's trust store.
+
+**A supplied bundle REPLACES the default trust store rather than adding to it.**
+That is Node's `ca` option, not a kit choice. Under `prefer` and `require` this
+means a `PGSSLROOTCERT` or `NODE_EXTRA_CA_CERTS` set for some unrelated purpose
+becomes the connection's only trust anchor. It is tighter than having no bundle,
+not looser, and the one case where a working connection can stop is a **public-CA**
+managed Postgres reached from a host carrying an ambient extra CA — the server's
+real root is then no longer trusted. Add that root to the bundle, or point
+`sslrootcert` at the right file for that connection.
 
 ## Peer dependency
 

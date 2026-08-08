@@ -289,7 +289,7 @@ It ships:
 | File            | Purpose                                                              |
 | --------------- | ------------------------------------------------------------------- |
 | `backend.ts`    | Server backend + `DATABASE_URL` resolution (`sqlite` \| `postgresql`) |
-| `tls.ts`        | TLS resolution (libpq `sslmode` names + RDS CA). ⚠ `pg` discards its result whenever the DSN carries an SSL parameter — see `src/kit/templates/README.md` |
+| `tls.ts`        | TLS resolution (libpq `sslmode` names + RDS CA). `pool.ts` strips the TLS parameters from the DSN so the resolved config, CA bundle included, actually reaches `pg` — mode table in `src/kit/templates/README.md` |
 | `pool.ts`       | `pg.Pool` factory (`createPgPool`, `createServerPoolFromEnv`)        |
 | `query.ts`      | Typed query wrapper: `query` / `many` / `get` / `one` / `execute`    |
 | `migrations.ts` | `schema_migrations` ledger with sha256 checksums + drift guards      |
