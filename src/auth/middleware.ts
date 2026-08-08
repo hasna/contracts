@@ -221,17 +221,82 @@ export interface ApiKeyVerifier {
 }
 
 /**
+ * Read `name` from a CALLER-SUPPLIED bag only when the caller actually set it.
+ *
+ * Every options object this module receives is built by a caller and therefore
+ * has `Object.prototype` in its chain, so `bag.x`, `bag.x ?? d`, `!bag.x` and
+ * `bag.x !== undefined` all resolve happily to a value some other code in this
+ * process planted via a `__proto__`/`constructor.prototype` write. Absence is
+ * the whole signal these options carry — "the caller did not pin a tenant",
+ * "the caller set no clock" — and a prototype lookup converts absence into an
+ * attacker-chosen answer.
+ *
+ * This is the same accessor `verifyApiKeyToken` and `mintApiKey` apply to their
+ * own bags in `./keys.js`; it is duplicated rather than imported only because
+ * that copy is module-private there. Folding the two into one shared helper is
+ * a follow-up, deliberately not done here while a PR is open against that file.
+ */
+function ownOption<T extends object, K extends keyof T & string>(bag: T, name: K): T[K] | undefined {
+  return Object.hasOwn(bag, name) ? bag[name] : undefined;
+}
+
+/**
  * Build the framework-agnostic verifier. This is the primary entry point the
  * serve services call; `expressApiKey`/`honoApiKey` are thin wrappers over it.
  */
 export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
-  if (!options.app) throw new Error("verifyApiKey requires an 'app' slug.");
-  if (!options.signingSecret) {
+  // --- EVERY option read ONCE, HERE, as an OWN property ---
+  //
+  // Read the whole bag up front so nothing below this block ever touches
+  // `options` again; past this point the closures see locals only. That shape
+  // is what makes the guarantee checkable by reading the file rather than by
+  // trusting each site: a bare `options.` anywhere under here is now a visible
+  // defect, where previously it was indistinguishable from the twenty-nine
+  // beside it.
+  //
+  // `signingSecret` is the site that made this urgent, and it is read twice by
+  // the original code — once as the construction guard below and once as the
+  // value handed to `verifyApiKeyToken`, which decides WHICH KEY THE HMAC IS
+  // COMPUTED UNDER. So a single `Object.prototype.signingSecret` write did two
+  // things at once: it silenced the boot-time throw that exists to catch a
+  // missing secret, and it made every signature check run under the attacker's
+  // key. A token minted by the attacker then authenticated, with whatever
+  // scopes they chose to put in it. That needs a pollution primitive already
+  // present in this process — it is not reachable from a request — but unlike
+  // its siblings it sits on the READ path and decides ACCEPTANCE rather than
+  // mislabelling an audit field.
+  //
+  // `app` is the same shape one step down: it is the construction guard, the
+  // `expectedApp` the token is checked against, and the app named on every
+  // audit line.
+  const optionApp = ownOption(options, "app");
+  const optionSigningSecret = ownOption(options, "signingSecret");
+  const optionExpectedTid = ownOption(options, "expectedTid");
+  const optionRequiredScopes = ownOption(options, "requiredScopes");
+  const optionRequireTenant = ownOption(options, "requireTenant");
+  const optionLeewaySeconds = ownOption(options, "leewaySeconds");
+  const audit = ownOption(options, "audit");
+  const headerName = ownOption(options, "headerName") ?? "x-api-key";
+  const scheme = ownOption(options, "scheme") ?? "Bearer";
+  const clock = ownOption(options, "nowMs") ?? (() => Date.now());
+
+  // Throw order is preserved exactly: app, then signingSecret, then expectedTid.
+  // The reads above are pure, so hoisting them past these guards changes which
+  // error a misconfigured service sees not at all.
+  if (!optionApp) throw new Error("verifyApiKey requires an 'app' slug.");
+  if (!optionSigningSecret) {
     throw new Error("verifyApiKey requires a 'signingSecret'. Set it from HASNA_<APP>_API_SIGNING_KEY.");
   }
-  if (options.expectedTid !== undefined && !isValidTenantId(options.expectedTid)) {
-    throw new Error(`verifyApiKey received an invalid 'expectedTid': '${options.expectedTid}'.`);
+  if (optionExpectedTid !== undefined && !isValidTenantId(optionExpectedTid)) {
+    throw new Error(`verifyApiKey received an invalid 'expectedTid': '${optionExpectedTid}'.`);
   }
+
+  // Re-bound past the guards so `authenticate` closes over plain values. A
+  // closure does not inherit the narrowing the guards above establish, and the
+  // alternative — a non-null assertion at each of the eight use sites — would
+  // put the claim "this was checked" in eight places instead of one.
+  const app: string = optionApp;
+  const signingSecret: string | Buffer = optionSigningSecret;
 
   // --- fail closed on the KEY-STATUS wiring, at construction, not per request ---
   //
@@ -244,20 +309,17 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
   // than silently admitting traffic in production. A missing answer is not an
   // answer of "yes".
   //
-  // Read as OWN properties, for the same reason `ownTenantId` and the
-  // `expectedTid` read in `authenticate` exist. These three options decide
-  // fail-open versus fail-closed, so resolving them through the prototype chain
-  // would let ONE `Object.prototype.allowUnregisteredKeys = true` write do two
-  // things at once: flip every correctly-wired strict verifier back to
-  // accepting unknown kids, AND silence the construction-time throw that exists
-  // to catch exactly that. Both defenses would fall to a single write. A
-  // polluted `keyStatus`/`isRevoked` is worse still — it injects an
-  // attacker-chosen verdict. This file already applies the defense to
-  // `expectedTid`; an authentication on/off switch has a stronger claim to it.
-  const ownKeyStatus = Object.hasOwn(options, "keyStatus") ? options.keyStatus : undefined;
-  const ownIsRevoked = Object.hasOwn(options, "isRevoked") ? options.isRevoked : undefined;
-  const allowUnregistered =
-    Object.hasOwn(options, "allowUnregisteredKeys") && options.allowUnregisteredKeys === true;
+  // These three options decide fail-open versus fail-closed, so resolving them
+  // through the prototype chain would let ONE
+  // `Object.prototype.allowUnregisteredKeys = true` write do two things at
+  // once: flip every correctly-wired strict verifier back to accepting unknown
+  // kids, AND silence the construction-time throw that exists to catch exactly
+  // that. Both defenses would fall to a single write. A polluted
+  // `keyStatus`/`isRevoked` is worse still — it injects an attacker-chosen
+  // verdict.
+  const ownKeyStatus = ownOption(options, "keyStatus");
+  const ownIsRevoked = ownOption(options, "isRevoked");
+  const allowUnregistered = ownOption(options, "allowUnregisteredKeys") === true;
   if (ownKeyStatus && ownIsRevoked) {
     throw new Error(
       "verifyApiKey received both 'keyStatus' and 'isRevoked'. Supply exactly one — " +
@@ -279,23 +341,35 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
           "this service intentionally cannot revoke keys.",
     );
   }
-  const headerName = options.headerName ?? "x-api-key";
-  const scheme = options.scheme ?? "Bearer";
-  const clock = options.nowMs ?? (() => Date.now());
-
   async function emit(event: AuthAuditEvent): Promise<void> {
-    if (!options.audit) return;
+    // `audit` is an attacker-supplied FUNCTION when it comes off the prototype,
+    // awaited here on every allow and every deny and handed the kid, tid, agent,
+    // method and path of every request the service serves. The own-property read
+    // happens once at construction, so a hook planted afterwards is never
+    // reached either.
+    if (!audit) return;
     try {
-      await options.audit(event);
+      await audit(event);
     } catch {
       // Auditing must never break the request path.
     }
   }
 
   async function authenticate(headers: HeaderSource, context: ApiKeyAuthContext = {}): Promise<AuthDecision> {
-    const method = context.method ?? null;
-    const path = context.path ?? null;
-    const requiredScopes = [...(options.requiredScopes ?? []), ...(context.requiredScopes ?? [])];
+    // `context` is a SECOND caller-supplied bag with the same exposure as
+    // `options`, and it is typically an object literal a route handler builds
+    // per request. `context.requiredScopes` is the one that matters: it is
+    // concatenated into the set the token must satisfy, so an inherited
+    // `["<app>:admin"]` imposes a scope no caller ever required and refuses
+    // every request the service was built to serve. `method` and `path` are
+    // lesser and not nothing — they are written straight onto the audit line,
+    // so a planted pair mislabels the route recorded for every request.
+    const method = ownOption(context, "method") ?? null;
+    const path = ownOption(context, "path") ?? null;
+    const requiredScopes = [
+      ...(optionRequiredScopes ?? []),
+      ...(ownOption(context, "requiredScopes") ?? []),
+    ];
     const at = new Date(clock()).toISOString();
 
     // A per-call tenant NARROWS the middleware-wide one; it must never replace
@@ -320,14 +394,14 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
     // read on a caller-built options bag resolves through the prototype chain,
     // so one `Object.prototype.expectedTid` write would pin every un-pinned
     // route to a tenant nothing validated.
-    const perCallTid = Object.hasOwn(context, "expectedTid") ? context.expectedTid : undefined;
-    const expectedTid = perCallTid !== undefined ? perCallTid : options.expectedTid;
+    const perCallTid = ownOption(context, "expectedTid");
+    const expectedTid = perCallTid !== undefined ? perCallTid : optionExpectedTid;
     if (
       perCallTid !== undefined &&
-      options.expectedTid !== undefined &&
-      !tenantIdsEqual(perCallTid, options.expectedTid)
+      optionExpectedTid !== undefined &&
+      !tenantIdsEqual(perCallTid, optionExpectedTid)
     ) {
-      await emit({ outcome: "deny", app: options.app, kid: null, tid: null, reason: "tenant_mismatch", scopesRequired: requiredScopes, method, path, status: 403, at });
+      await emit({ outcome: "deny", app, kid: null, tid: null, reason: "tenant_mismatch", scopesRequired: requiredScopes, method, path, status: 403, at });
       return {
         ok: false,
         status: 403,
@@ -344,16 +418,16 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
         reason: "missing_token",
         message: `Missing API key. Send it as '${headerName}: <key>' or 'Authorization: ${scheme} <key>'.`,
       };
-      await emit({ outcome: "deny", app: options.app, kid: null, tid: null, reason: "missing_token", scopesRequired: requiredScopes, method, path, status: 401, at });
+      await emit({ outcome: "deny", app, kid: null, tid: null, reason: "missing_token", scopesRequired: requiredScopes, method, path, status: 401, at });
       return decision;
     }
 
     const verified = verifyApiKeyToken(token, {
-      signingSecret: options.signingSecret,
-      expectedApp: options.app,
+      signingSecret,
+      expectedApp: app,
       nowMs: clock(),
-      ...(options.leewaySeconds !== undefined ? { leewaySeconds: options.leewaySeconds } : {}),
-      ...(options.requireTenant !== undefined ? { requireTenant: options.requireTenant } : {}),
+      ...(optionLeewaySeconds !== undefined ? { leewaySeconds: optionLeewaySeconds } : {}),
+      ...(optionRequireTenant !== undefined ? { requireTenant: optionRequireTenant } : {}),
       ...(expectedTid !== undefined ? { expectedTid } : {}),
       requiredScopes,
     });
@@ -376,7 +450,7 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
       // request never proved.
       await emit({
         outcome: "deny",
-        app: options.app,
+        app,
         kid: verified.kid ?? null,
         tid: ownTenantId(verified) ?? null,
         ...(Object.hasOwn(verified, "agent") ? { agent: verified.agent } : {}),
@@ -407,7 +481,7 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
       try {
         status = await ownKeyStatus(verified.kid);
       } catch {
-        await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason: "status_unavailable", scopesRequired: requiredScopes, method, path, status: 503, at });
+        await emit({ outcome: "deny", app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason: "status_unavailable", scopesRequired: requiredScopes, method, path, status: 503, at });
         return {
           ok: false,
           status: 503,
@@ -434,7 +508,7 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
               : status === "expired"
                 ? "API key has expired."
                 : "API key has been revoked.";
-          await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason, scopesRequired: requiredScopes, method, path, status: 401, at });
+          await emit({ outcome: "deny", app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason, scopesRequired: requiredScopes, method, path, status: 401, at });
           return { ok: false, status: 401, reason, message };
         }
       }
@@ -449,7 +523,7 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
       try {
         revoked = await ownIsRevoked(verified.kid);
       } catch {
-        await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason: "status_unavailable", scopesRequired: requiredScopes, method, path, status: 503, at });
+        await emit({ outcome: "deny", app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason: "status_unavailable", scopesRequired: requiredScopes, method, path, status: 503, at });
         return {
           ok: false,
           status: 503,
@@ -458,7 +532,7 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
         };
       }
       if (revoked) {
-        await emit({ outcome: "deny", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason: "revoked", scopesRequired: requiredScopes, method, path, status: 401, at });
+        await emit({ outcome: "deny", app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason: "revoked", scopesRequired: requiredScopes, method, path, status: 401, at });
         return { ok: false, status: 401, reason: "revoked", message: "API key has been revoked." };
       }
     }
@@ -471,11 +545,11 @@ export function verifyApiKey(options: VerifyApiKeyOptions): ApiKeyVerifier {
       tid: verified.tid,
       claims: verified.claims,
     };
-    await emit({ outcome: "allow", app: options.app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason: null, scopesRequired: requiredScopes, method, path, status: 200, at });
+    await emit({ outcome: "allow", app, kid: verified.kid, tid: verified.tid, agent: verified.agent, reason: null, scopesRequired: requiredScopes, method, path, status: 200, at });
     return { ok: true, status: 200, principal };
   }
 
-  return { authenticate, app: options.app };
+  return { authenticate, app, };
 }
 
 // --- Framework adapters (typed loosely to avoid runtime framework deps) ---
